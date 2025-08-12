@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2025-08-12
+
+### Added
+- **Pairwise evaluation system** with comprehensive autoscaling strategies
+- New `PairwiseDesign` class for pairwise comparison experiments
+- Multiple autoscaling algorithms: `uniform`, `proportional`, `sqrt`, `log`, `inverse`
+- Choice modeling functionality with propensity score estimation
+- Comprehensive test suite for pairwise evaluation features
+- Example notebook demonstrating pairwise evaluation usage
+
+### Fixed
+- Resolved all mypy type annotation errors across codebase
+- Fixed type incompatibilities between pandas and numpy types
+- Improved type safety with proper conversions and annotations
+
+### Infrastructure
+- Enhanced pre-commit hooks configuration and installation
+- Updated development workflow documentation
+- Improved GitHub templates and CI workflows
+
 ## [0.1.2] - 2025-08-12
 
 ### Added
