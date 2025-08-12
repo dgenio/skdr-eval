@@ -189,7 +189,7 @@ def build_candidate_pairs(
                 elig_value = elig_ops.iloc[0] if len(elig_ops) > 0 else []
             else:
                 elig_value = elig_ops
-            
+
             if isinstance(elig_value, (list, tuple)):
                 eligible_ops_df = day_ops[
                     day_ops[design.operator_id_col].isin(elig_value)
