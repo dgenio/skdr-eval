@@ -6,14 +6,16 @@ This script performs comprehensive checks before submitting PRs to ensure
 compliance with the development guidelines and prevent CI failures.
 """
 
+import ast
 import json
 import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
 
-# Coverage threshold constant
+# Configuration constants
 COVERAGE_THRESHOLD = 80
+CODE_DIRS = ["src/", "tests/", "examples/"]
 
 
 class ContributionValidator:
@@ -87,9 +89,7 @@ class ContributionValidator:
         print("Checking code linting...")
         self.total_checks += 1
 
-        code, stdout, stderr = self.run_command(
-            ["ruff", "check", "src/", "tests/", "examples/"]
-        )
+        code, stdout, stderr = self.run_command(["ruff", "check", *CODE_DIRS])
 
         if code != 0:
             self.errors.append(f"Linting errors found:\n{stdout}\n{stderr}")
@@ -105,12 +105,12 @@ class ContributionValidator:
         self.total_checks += 1
 
         code, stdout, stderr = self.run_command(
-            ["ruff", "format", "--check", "src/", "tests/", "examples/"]
+            ["ruff", "format", "--check", *CODE_DIRS]
         )
 
         if code != 0:
             self.errors.append(f"Formatting issues found:\n{stdout}\n{stderr}")
-            print("💡 Run 'make format' or 'ruff format src/ tests/ examples/' to fix")
+            print(f"Run 'make format' or 'ruff format {' '.join(CODE_DIRS)}' to fix")
             return False
 
         self.success_count += 1
@@ -181,7 +181,7 @@ class ContributionValidator:
         print("Checking documentation...")
         self.total_checks += 1
 
-        # Check for docstrings in new/modified Python files
+        # Check for docstrings in new/modified Python files using AST
         code, stdout, _ = self.run_command(
             ["git", "diff", "--name-only", "develop...HEAD"]
         )
@@ -195,17 +195,50 @@ class ContributionValidator:
             for file_path in python_files:
                 full_path = self.repo_root / file_path
                 if full_path.exists():
-                    with full_path.open(encoding="utf-8") as f:
-                        content = f.read()
+                    try:
+                        with full_path.open(encoding="utf-8") as f:
+                            content = f.read()
 
-                    # Simple check for docstrings (could be more sophisticated)
-                    if (
-                        "def " in content
-                        and '"""' not in content
-                        and "'''" not in content
-                    ):
+                        # Use AST to check for missing docstrings
+                        try:
+                            tree = ast.parse(content, filename=str(full_path))
+                        except SyntaxError:
+                            self.warnings.append(
+                                f"File {file_path} could not be parsed for docstring check (syntax error)"
+                            )
+                            continue
+
+                        missing_docstrings = []
+
+                        # Check module-level docstring
+                        if ast.get_docstring(tree) is None:
+                            missing_docstrings.append("module")
+
+                        # Check functions and classes
+                        for node in ast.walk(tree):
+                            if (
+                                isinstance(
+                                    node,
+                                    (
+                                        ast.FunctionDef,
+                                        ast.AsyncFunctionDef,
+                                        ast.ClassDef,
+                                    ),
+                                )
+                                and ast.get_docstring(node) is None
+                                and not node.name.startswith("_")
+                            ):
+                                missing_docstrings.append(
+                                    f"{type(node).__name__.lower()} '{node.name}'"
+                                )
+
+                        if missing_docstrings:
+                            self.warnings.append(
+                                f"File {file_path} is missing docstrings for: {', '.join(missing_docstrings)}"
+                            )
+                    except Exception as e:
                         self.warnings.append(
-                            f"File {file_path} may be missing docstrings"
+                            f"Error checking docstrings in {file_path}: {e}"
                         )
 
         self.success_count += 1
@@ -293,9 +326,13 @@ class ContributionValidator:
                 print(f"   • {error}")
             print("\nFix these errors before submitting your PR!")
         else:
+            # Get current branch name for better UX
+            code, stdout, _ = self.run_command(["git", "branch", "--show-current"])
+            current_branch = stdout.strip() if code == 0 else "<branch-name>"
+
             print("\nAll checks passed! Your contribution is ready for PR submission.")
             print("\nNext steps:")
-            print("   1. Push your branch: git push origin <branch-name>")
+            print(f"   1. Push your branch: git push origin {current_branch}")
             print("   2. Create PR targeting 'develop' branch")
             print("   3. Fill out the PR template completely")
             print("   4. Wait for CI checks and code review")
