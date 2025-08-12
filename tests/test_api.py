@@ -170,9 +170,19 @@ def test_evaluate_sklearn_models_signature():
 
     # Check report structure
     expected_cols = [
-        "model", "estimator", "V_hat", "SE_if", "clip", "ESS",
-        "tail_mass", "MSE_est", "match_rate", "min_pscore",
-        "pscore_q10", "pscore_q05", "pscore_q01"
+        "model",
+        "estimator",
+        "V_hat",
+        "SE_if",
+        "clip",
+        "ESS",
+        "tail_mass",
+        "MSE_est",
+        "match_rate",
+        "min_pscore",
+        "pscore_q10",
+        "pscore_q05",
+        "pscore_q01",
     ]
     for col in expected_cols:
         assert col in report.columns

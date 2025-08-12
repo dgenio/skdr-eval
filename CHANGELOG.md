@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Professional development workflow with `develop` branch
+- Comprehensive contributing guidelines (`CONTRIBUTING.md`)
+- Pull request and issue templates
+- Development Makefile with common tasks
+- Updated pre-commit configuration with latest tool versions
+
+### Changed
+- CI workflow now runs on both `main` and `develop` branches
+- CI workflow accepts PRs to both `main` and `develop` branches
+
+## [0.1.1] - 2025-08-12
+
+### Fixed
+- Fixed ruff configuration error in `.ruff.toml` (moved `line-length` to top-level)
+- Resolved 257+ linting issues across the codebase
+- Updated GitHub Actions workflows to use latest action versions
+- Fixed deprecated `actions/upload-artifact@v3` to `v4`
+- Fixed deprecated `actions/setup-python@v4` to `v5`
+
+### Changed
+- Updated type annotations to modern syntax (`dict`/`tuple` instead of `Dict`/`Tuple`)
+- Applied comprehensive code style improvements
+- All ruff quality checks now pass
+
+### Added
+- Comprehensive v0.1.1 release notes
+- Manual PyPI upload process documentation
+
 ## [0.1.0] - 2025-01-12
 
 ### Added

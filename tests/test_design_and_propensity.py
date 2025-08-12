@@ -17,7 +17,9 @@ def test_design_ops_all_includes_both_elig_and_actions():
 
     # Check that all observed actions are in ops_all
     observed_actions = set(logs["action"])
-    assert observed_actions.issubset(set(design.ops_all)), "Observed actions not in ops_all"
+    assert observed_actions.issubset(set(design.ops_all)), (
+        "Observed actions not in ops_all"
+    )
 
     # Check that all eligible operators are in ops_all
     elig_cols = [col for col in logs.columns if col.endswith("_elig")]
@@ -27,7 +29,9 @@ def test_design_ops_all_includes_both_elig_and_actions():
         if logs[col].any():  # If any sample has this operator eligible
             eligible_ops.add(op_name)
 
-    assert eligible_ops.issubset(set(design.ops_all)), "Eligible operators not in ops_all"
+    assert eligible_ops.issubset(set(design.ops_all)), (
+        "Eligible operators not in ops_all"
+    )
 
 
 def test_x_obs_shape_correct():
@@ -41,14 +45,15 @@ def test_x_obs_shape_correct():
 
     # X_obs should be X_base + action one-hot
     expected_x_obs_shape = (n_samples, n_base_features + n_ops)
-    assert design.X_obs.shape == expected_x_obs_shape, \
+    assert design.X_obs.shape == expected_x_obs_shape, (
         f"X_obs shape {design.X_obs.shape} != expected {expected_x_obs_shape}"
+    )
 
     # Check that X_obs contains X_base as first columns
     np.testing.assert_array_equal(
         design.X_obs[:, :n_base_features],
         design.X_base,
-        "X_obs should start with X_base features"
+        "X_obs should start with X_base features",
     )
 
     # Check that action one-hot is correctly encoded
@@ -57,7 +62,9 @@ def test_x_obs_shape_correct():
 
     # Each row should have exactly one 1 (one-hot encoding)
     row_sums = action_onehot.sum(axis=1)
-    assert np.allclose(row_sums, 1.0), "Action one-hot should have exactly one 1 per row"
+    assert np.allclose(row_sums, 1.0), (
+        "Action one-hot should have exactly one 1 per row"
+    )
 
     # Check that the 1s are in the correct positions
     for i in range(n_samples):
@@ -67,7 +74,7 @@ def test_x_obs_shape_correct():
         np.testing.assert_array_equal(
             action_onehot[i],
             expected_onehot,
-            f"Incorrect one-hot encoding for sample {i}"
+            f"Incorrect one-hot encoding for sample {i}",
         )
 
 
@@ -92,8 +99,7 @@ def test_propensities_row_normalized_over_eligibility():
     # Check that rows sum to 1 (normalized probabilities)
     row_sums = propensities.sum(axis=1)
     np.testing.assert_allclose(
-        row_sums, 1.0, rtol=1e-10, atol=1e-10,
-        err_msg="Propensity rows should sum to 1"
+        row_sums, 1.0, rtol=1e-10, atol=1e-10, err_msg="Propensity rows should sum to 1"
     )
 
     # Check that propensities respect eligibility constraints
@@ -110,8 +116,9 @@ def test_propensities_row_normalized_over_eligibility():
 
             # At least the maximum eligible probability should be >= maximum ineligible
             # (This is a very weak constraint to avoid test flakiness)
-            assert eligible_probs.max() >= ineligible_probs.max() * 0.1, \
+            assert eligible_probs.max() >= ineligible_probs.max() * 0.1, (
                 f"Eligible ops should have reasonable propensity mass for sample {i}"
+            )
 
 
 def test_propensities_positive_when_matched():
@@ -134,13 +141,15 @@ def test_propensities_positive_when_matched():
     eligible_samples = elig_obs
     if eligible_samples.any():
         pi_eligible = pi_obs[eligible_samples]
-        assert np.all(pi_eligible > 0), \
+        assert np.all(pi_eligible > 0), (
             "Propensities should be positive for eligible observed actions"
+        )
 
         # Check minimum propensity is reasonable (not too close to 0)
         min_pi_eligible = pi_eligible.min()
-        assert min_pi_eligible > 1e-6, \
+        assert min_pi_eligible > 1e-6, (
             f"Minimum propensity too small: {min_pi_eligible}"
+        )
 
 
 def test_design_feature_construction():
@@ -153,12 +162,14 @@ def test_design_feature_construction():
     st_cols = [col for col in logs.columns if col.startswith("st_")]
     expected_base_cols = cli_cols + st_cols
 
-    assert design.X_base.shape[1] == len(expected_base_cols), \
+    assert design.X_base.shape[1] == len(expected_base_cols), (
         f"X_base should have {len(expected_base_cols)} features"
+    )
 
     # Check that X_phi includes base features + standardized time
-    assert design.X_phi.shape[1] == design.X_base.shape[1] + 1, \
+    assert design.X_phi.shape[1] == design.X_base.shape[1] + 1, (
         "X_phi should have base features + 1 time feature"
+    )
 
     # Check that time feature is standardized (mean ≈ 0, std ≈ 1)
     time_feature = design.X_phi[:, -1]  # Last column should be standardized time
@@ -208,7 +219,9 @@ def test_propensity_time_aware_splits():
         # Check fold indices
         unique_folds = np.unique(fold_indices)
         assert len(unique_folds) == n_splits, f"Should have {n_splits} unique folds"
-        assert set(unique_folds) == set(range(n_splits)), "Fold indices should be 0, 1, ..., n_splits-1"
+        assert set(unique_folds) == set(range(n_splits)), (
+            "Fold indices should be 0, 1, ..., n_splits-1"
+        )
 
         # Check that TimeSeriesSplit is being used correctly
         # TimeSeriesSplit creates expanding windows, so later folds should generally
@@ -237,8 +250,9 @@ def test_propensity_time_aware_splits():
                     start == fold_time_ranges[0][0] and end == fold_time_ranges[0][1]
                     for start, end in fold_time_ranges
                 )
-                assert not all_same_range, \
+                assert not all_same_range, (
                     "Folds should have different time ranges due to time-series splitting"
+                )
 
 
 if __name__ == "__main__":

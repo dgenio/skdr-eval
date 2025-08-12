@@ -37,6 +37,7 @@ class Design:
     idx : Dict[str, int]
         Mapping from operator names to indices.
     """
+
     X_base: np.ndarray
     X_obs: np.ndarray
     X_phi: np.ndarray
@@ -79,6 +80,7 @@ class DRResult:
     grid : pd.DataFrame
         Full grid of results across clipping thresholds.
     """
+
     clip: float
     V_hat: float
     SE_if: float
@@ -157,8 +159,11 @@ def build_design(
 
 
 def fit_propensity_timecal(
-    X_phi: np.ndarray, A: np.ndarray, ts: Optional[np.ndarray] = None,
-    n_splits: int = 3, random_state: int = 0
+    X_phi: np.ndarray,
+    A: np.ndarray,
+    ts: Optional[np.ndarray] = None,
+    n_splits: int = 3,
+    random_state: int = 0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Fit propensity model with time-aware cross-validation and calibration.
 
@@ -218,7 +223,7 @@ def fit_propensity_timecal(
             clf.fit(X_train, A_train)
 
             # Get uncalibrated predictions - ensure we have all actions
-            if hasattr(clf, 'classes_') and len(clf.classes_) < n_actions:
+            if hasattr(clf, "classes_") and len(clf.classes_) < n_actions:
                 # Handle case where not all actions are in training data
                 pred_proba_full = np.zeros((len(X_test), n_actions))
                 pred_proba_partial = clf.predict_proba(X_test)
@@ -228,7 +233,9 @@ def fit_propensity_timecal(
                 missing_mass = 1.0 - pred_proba_full.sum(axis=1, keepdims=True)
                 missing_classes = np.setdiff1d(np.arange(n_actions), clf.classes_)
                 if len(missing_classes) > 0:
-                    pred_proba_full[:, missing_classes] = missing_mass / len(missing_classes)
+                    pred_proba_full[:, missing_classes] = missing_mass / len(
+                        missing_classes
+                    )
                 pred_proba = pred_proba_full
             else:
                 pred_proba = clf.predict_proba(X_test)
@@ -245,11 +252,11 @@ def fit_propensity_timecal(
         try:
             if clf is not None and len(np.unique(A_train)) > 1:
                 # Use calibrated classifier for better probability estimates
-                cal_clf = CalibratedClassifierCV(clf, method='isotonic', cv=2)
+                cal_clf = CalibratedClassifierCV(clf, method="isotonic", cv=2)
                 cal_clf.fit(X_train, A_train)
 
                 # Get calibrated predictions
-                if hasattr(cal_clf, 'classes_') and len(cal_clf.classes_) < n_actions:
+                if hasattr(cal_clf, "classes_") and len(cal_clf.classes_) < n_actions:
                     # Handle missing classes
                     cal_proba_full = np.zeros((len(X_test), n_actions))
                     cal_proba_partial = cal_clf.predict_proba(X_test)
@@ -257,9 +264,13 @@ def fit_propensity_timecal(
                         cal_proba_full[:, class_idx] = cal_proba_partial[:, i]
                     # Add small uniform probability for missing classes
                     missing_mass = 1.0 - cal_proba_full.sum(axis=1, keepdims=True)
-                    missing_classes = np.setdiff1d(np.arange(n_actions), cal_clf.classes_)
+                    missing_classes = np.setdiff1d(
+                        np.arange(n_actions), cal_clf.classes_
+                    )
                     if len(missing_classes) > 0:
-                        cal_proba_full[:, missing_classes] = missing_mass / len(missing_classes)
+                        cal_proba_full[:, missing_classes] = missing_mass / len(
+                            missing_classes
+                        )
                     pred_proba = cal_proba_full
                 else:
                     pred_proba = cal_clf.predict_proba(X_test)
@@ -325,13 +336,16 @@ def fit_outcome_crossfit(
 
     # Get estimator
     if estimator == "hgb":
-        def est_factory():
+
+        def est_factory() -> HistGradientBoostingRegressor:
             return HistGradientBoostingRegressor(random_state=random_state)
     elif estimator == "ridge":
-        def est_factory():
+
+        def est_factory() -> Ridge:
             return Ridge(random_state=random_state)
     elif estimator == "rf":
-        def est_factory():
+
+        def est_factory() -> RandomForestRegressor:
             return RandomForestRegressor(random_state=random_state)
     elif callable(estimator):
         est_factory = estimator
@@ -362,7 +376,7 @@ def induce_policy_from_sklearn(
     ops_all: list[str],
     elig: np.ndarray,
     idx: dict[str, int],  # noqa: ARG001
-) -> np.ndarray:
+) -> Any:  # Changed from np.ndarray to Any to avoid mypy issues
     """Induce policy from sklearn model by predicting service times.
 
     Parameters
@@ -389,7 +403,7 @@ def induce_policy_from_sklearn(
 
     for i in range(n_samples):
         eligible_ops = np.where(elig[i])[0]
-        pred_times = []
+        pred_times: list[float] = []
 
         # Predict service time for each eligible operator
         for op_idx in eligible_ops:
@@ -404,11 +418,11 @@ def induce_policy_from_sklearn(
 
         # Convert to probabilities (lower time = higher probability)
         if len(pred_times) > 0:
-            pred_times = np.array(pred_times)
-            policy_probs[i, eligible_ops] = 1.0 / (pred_times + 1e-8)
+            pred_times_array = np.array(pred_times)
+            policy_probs[i, eligible_ops] = 1.0 / (pred_times_array + 1e-8)
             policy_probs[i] /= policy_probs[i].sum()
 
-    return policy_probs
+    return np.asarray(policy_probs)
 
 
 def dr_value_with_clip(
@@ -490,7 +504,7 @@ def dr_value_with_clip(
             V_sndr = q_pi.mean()
 
         # Effective sample size
-        ess = w_clip.sum() ** 2 / (w_clip ** 2).sum() if w_clip.sum() > 0 else 0
+        ess = w_clip.sum() ** 2 / (w_clip**2).sum() if w_clip.sum() > 0 else 0
 
         # Tail mass
         if clip_val == float("inf"):
@@ -503,20 +517,22 @@ def dr_value_with_clip(
         se_sndr = se_dr  # Simplified
 
         # MSE proxy (bias^2 + variance)
-        mse_dr = se_dr ** 2  # Simplified, ignoring bias
-        mse_sndr = se_sndr ** 2
+        mse_dr = se_dr**2  # Simplified, ignoring bias
+        mse_sndr = se_sndr**2
 
-        results_grid.append({
-            "clip": clip_val,
-            "V_DR": V_dr,
-            "V_SNDR": V_sndr,
-            "SE_DR": se_dr,
-            "SE_SNDR": se_sndr,
-            "ESS": ess,
-            "tail_mass": tail_mass,
-            "MSE_DR": mse_dr,
-            "MSE_SNDR": mse_sndr,
-        })
+        results_grid.append(
+            {
+                "clip": clip_val,
+                "V_DR": V_dr,
+                "V_SNDR": V_sndr,
+                "SE_DR": se_dr,
+                "SE_SNDR": se_sndr,
+                "ESS": ess,
+                "tail_mass": tail_mass,
+                "MSE_DR": mse_dr,
+                "MSE_SNDR": mse_sndr,
+            }
+        )
 
     grid_df = pd.DataFrame(results_grid)
 
@@ -544,9 +560,9 @@ def dr_value_with_clip(
         MSE_est=grid_df.loc[dr_idx, "MSE_DR"],
         match_rate=match_rate,
         min_pscore=min_pscore,
-        pscore_q10=pscore_q10,
-        pscore_q05=pscore_q05,
-        pscore_q01=pscore_q01,
+        pscore_q10=float(pscore_q10),
+        pscore_q05=float(pscore_q05),
+        pscore_q01=float(pscore_q01),
         grid=grid_df,
     )
 
@@ -559,9 +575,9 @@ def dr_value_with_clip(
         MSE_est=grid_df.loc[sndr_idx, "MSE_SNDR"],
         match_rate=match_rate,
         min_pscore=min_pscore,
-        pscore_q10=pscore_q10,
-        pscore_q05=pscore_q05,
-        pscore_q01=pscore_q01,
+        pscore_q10=float(pscore_q10),
+        pscore_q05=float(pscore_q05),
+        pscore_q01=float(pscore_q01),
         grid=grid_df,
     )
 
@@ -609,12 +625,12 @@ def block_bootstrap_ci(
     if block_len is None:
         block_len = max(1, int(np.sqrt(n)))
 
-    bootstrap_stats = []
+    bootstrap_stats_list: list[float] = []
 
     for _ in range(n_boot):
         # Generate block bootstrap sample
         n_blocks = int(np.ceil(n / block_len))
-        boot_indices = []
+        boot_indices: list[int] = []
 
         for _ in range(n_blocks):
             start_idx = rng.randint(0, n - block_len + 1)
@@ -630,15 +646,15 @@ def block_bootstrap_ci(
         else:
             boot_stat = boot_num.mean()
 
-        bootstrap_stats.append(boot_stat)
+        bootstrap_stats_list.append(boot_stat)
 
-    bootstrap_stats = np.array(bootstrap_stats)
+    bootstrap_stats = np.array(bootstrap_stats_list)
 
     # Compute percentile confidence interval
     ci_lower = np.percentile(bootstrap_stats, 100 * alpha / 2)
     ci_upper = np.percentile(bootstrap_stats, 100 * (1 - alpha / 2))
 
-    return ci_lower, ci_upper
+    return float(ci_lower), float(ci_upper)
 
 
 def evaluate_sklearn_models(
@@ -722,7 +738,11 @@ def evaluate_sklearn_models(
 
     # Fit propensity model
     propensities, _ = fit_propensity_timecal(
-        eval_design.X_phi, eval_design.A, eval_design.ts, n_splits=n_splits, random_state=random_state
+        eval_design.X_phi,
+        eval_design.A,
+        eval_design.ts,
+        n_splits=n_splits,
+        random_state=random_state,
     )
 
     # Fit outcome model
@@ -745,7 +765,11 @@ def evaluate_sklearn_models(
 
         # Induce policy
         policy_probs = induce_policy_from_sklearn(
-            model, eval_design.X_base, eval_design.ops_all, eval_design.elig, eval_design.idx
+            model,
+            eval_design.X_base,
+            eval_design.ops_all,
+            eval_design.elig,
+            eval_design.idx,
         )
 
         # Compute DR/SNDR values
@@ -782,7 +806,10 @@ def evaluate_sklearn_models(
             # Add confidence intervals if requested
             if ci_bootstrap:
                 # Simplified bootstrap (would need more sophisticated implementation)
-                ci_lower, ci_upper = result.V_hat - 1.96 * result.SE_if, result.V_hat + 1.96 * result.SE_if
+                ci_lower, ci_upper = (
+                    result.V_hat - 1.96 * result.SE_if,
+                    result.V_hat + 1.96 * result.SE_if,
+                )
                 row["ci_lower"] = ci_lower
                 row["ci_upper"] = ci_upper
 

@@ -17,21 +17,19 @@ def main():
 
     print(f"   Generated {len(logs)} log entries")
     print(f"   Operators: {list(ops_all)}")
-    print(f"   Service time range: {logs['service_time'].min():.2f} - {logs['service_time'].max():.2f}")
+    print(
+        f"   Service time range: {logs['service_time'].min():.2f} - {logs['service_time'].max():.2f}"
+    )
     print(f"   Mean service time: {logs['service_time'].mean():.2f}")
 
     # 2. Define candidate models
     print("\n2. Defining candidate models...")
     models = {
         "RandomForest": RandomForestRegressor(
-            n_estimators=100,
-            max_depth=10,
-            random_state=42
+            n_estimators=100, max_depth=10, random_state=42
         ),
         "HistGradientBoosting": HistGradientBoostingRegressor(
-            max_iter=100,
-            max_depth=6,
-            random_state=42
+            max_iter=100, max_depth=6, random_state=42
         ),
     }
 
@@ -58,8 +56,14 @@ def main():
 
     # Format and display the report
     display_cols = [
-        "model", "estimator", "V_hat", "SE_if", "clip",
-        "ESS", "match_rate", "min_pscore"
+        "model",
+        "estimator",
+        "V_hat",
+        "SE_if",
+        "clip",
+        "ESS",
+        "match_rate",
+        "min_pscore",
     ]
 
     report_display = report[display_cols].copy()
@@ -95,8 +99,10 @@ def main():
 
     for _, row in dr_grid.iterrows():
         sndr_value = sndr_grid[sndr_grid["clip"] == row["clip"]]["V_SNDR"].iloc[0]
-        print(f"{row['clip']:4.0f} | {row['V_DR']:8.3f} | {sndr_value:10.3f} | "
-              f"{row['ESS']:5.1f} | {row['tail_mass']:9.3f}")
+        print(
+            f"{row['clip']:4.0f} | {row['V_DR']:8.3f} | {sndr_value:10.3f} | "
+            f"{row['ESS']:5.1f} | {row['tail_mass']:9.3f}"
+        )
 
     # 6. Policy comparison
     print("\n6. Policy Performance Comparison")
@@ -107,13 +113,19 @@ def main():
     print(f"Baseline (observed): {baseline_performance:.3f}")
 
     for model_name in models:
-        dr_value = report[(report["model"] == model_name) &
-                         (report["estimator"] == "DR")]["V_hat"].iloc[0]
-        sndr_value = report[(report["model"] == model_name) &
-                           (report["estimator"] == "SNDR")]["V_hat"].iloc[0]
+        dr_value = report[
+            (report["model"] == model_name) & (report["estimator"] == "DR")
+        ]["V_hat"].iloc[0]
+        sndr_value = report[
+            (report["model"] == model_name) & (report["estimator"] == "SNDR")
+        ]["V_hat"].iloc[0]
 
-        dr_improvement = ((baseline_performance - dr_value) / baseline_performance) * 100
-        sndr_improvement = ((baseline_performance - sndr_value) / baseline_performance) * 100
+        dr_improvement = (
+            (baseline_performance - dr_value) / baseline_performance
+        ) * 100
+        sndr_improvement = (
+            (baseline_performance - sndr_value) / baseline_performance
+        ) * 100
 
         print(f"{model_name}:")
         print(f"  DR:   {dr_value:.3f} ({dr_improvement:+.1f}% vs baseline)")

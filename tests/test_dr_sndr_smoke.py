@@ -35,9 +35,19 @@ def test_dr_sndr_smoke():
 
     # Check required columns exist
     required_cols = [
-        "model", "estimator", "V_hat", "SE_if", "clip", "ESS",
-        "tail_mass", "MSE_est", "match_rate", "min_pscore",
-        "pscore_q10", "pscore_q05", "pscore_q01"
+        "model",
+        "estimator",
+        "V_hat",
+        "SE_if",
+        "clip",
+        "ESS",
+        "tail_mass",
+        "MSE_est",
+        "match_rate",
+        "min_pscore",
+        "pscore_q10",
+        "pscore_q05",
+        "pscore_q01",
     ]
     for col in required_cols:
         assert col in report.columns, f"Missing column: {col}"
@@ -115,8 +125,12 @@ def test_dr_sndr_values_reasonable():
         # Should be positive (service times are positive)
         assert v_hat > 0, f"V_hat should be positive, got {v_hat}"
         # Should be in reasonable range (not too far from observed range)
-        assert v_hat >= min_service * 0.5, f"V_hat too small: {v_hat} vs min {min_service}"
-        assert v_hat <= max_service * 2.0, f"V_hat too large: {v_hat} vs max {max_service}"
+        assert v_hat >= min_service * 0.5, (
+            f"V_hat too small: {v_hat} vs min {min_service}"
+        )
+        assert v_hat <= max_service * 2.0, (
+            f"V_hat too large: {v_hat} vs max {max_service}"
+        )
 
 
 def test_clip_selection():
@@ -147,7 +161,9 @@ def test_clip_selection():
         # Check that selected clips are from the grid
         for _, row in report.iterrows():
             selected_clip = row["clip"]
-            assert selected_clip in clip_grid, f"Selected clip {selected_clip} not in grid {clip_grid}"
+            assert selected_clip in clip_grid, (
+                f"Selected clip {selected_clip} not in grid {clip_grid}"
+            )
 
         # Check that ESS decreases with higher clipping (generally)
         dr_result = detailed_results["test_model"]["DR"]

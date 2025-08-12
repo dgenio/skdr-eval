@@ -1,6 +1,5 @@
 """Synthetic data generator for offline policy evaluation."""
 
-
 import numpy as np
 import pandas as pd
 
@@ -110,16 +109,20 @@ def make_synth_logs(
         action_probs[i, eligible_mask] = probs
 
     # Sample actions
-    actions = np.array([
-        rng.choice(n_ops, p=action_probs[i]) if action_probs[i].sum() > 0 else 0
-        for i in range(n)
-    ])
+    actions = np.array(
+        [
+            rng.choice(n_ops, p=action_probs[i]) if action_probs[i].sum() > 0 else 0
+            for i in range(n)
+        ]
+    )
 
     # Generate observed service times with noise
-    observed_service_times = np.array([
-        true_q[i, actions[i]] + rng.normal(0, 1.0) for i in range(n)
-    ])
-    observed_service_times = np.maximum(observed_service_times, 0.1)  # minimum service time
+    observed_service_times = np.array(
+        [true_q[i, actions[i]] + rng.normal(0, 1.0) for i in range(n)]
+    )
+    observed_service_times = np.maximum(
+        observed_service_times, 0.1
+    )  # minimum service time
 
     # Create DataFrame
     data = {
