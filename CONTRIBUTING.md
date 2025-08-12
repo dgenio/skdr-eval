@@ -2,6 +2,15 @@
 
 Thank you for your interest in contributing to skdr-eval! This document outlines our development workflow and contribution guidelines.
 
+> **🤖 For AI Agents**: See [DEVELOPMENT.md](./DEVELOPMENT.md) for detailed AI-optimized guidelines with step-by-step instructions, common patterns, and troubleshooting tips.
+
+## 📖 Documentation Overview
+
+- **[CONTRIBUTING.md](./CONTRIBUTING.md)** (this file): High-level workflow and guidelines
+- **[DEVELOPMENT.md](./DEVELOPMENT.md)**: Detailed AI agent-friendly development guide
+- **[README.md](./README.md)**: Project overview and usage examples
+- **[CHANGELOG.md](./CHANGELOG.md)**: Version history and changes
+
 ## 🌟 Development Workflow
 
 We follow a **Git Flow** inspired workflow with modern best practices:
@@ -56,6 +65,38 @@ We follow a **Git Flow** inspired workflow with modern best practices:
    - PR merged into `develop` by maintainer
    - Feature branch deleted
    - Regular releases from `develop` → `main`
+
+## 🔒 Branch Protection & CI Requirements
+
+### Mandatory PR Process
+**ALL code movement between branches MUST go through Pull Requests with:**
+
+- ✅ **CI Pipeline Success**: All automated checks must pass
+  - Linting (ruff check)
+  - Formatting (ruff format --check)
+  - Type checking (mypy)
+  - Tests (pytest with ≥80% coverage)
+  - Multi-Python version compatibility (3.9-3.12)
+
+- ✅ **Required Approvals**:
+  - `develop` branch: **1 maintainer approval** required
+  - `main` branch: **2 maintainer approvals** required
+  - No self-approvals allowed
+
+- ✅ **Branch Status**:
+  - Branch must be up-to-date with target branch
+  - No merge conflicts
+  - All conversations resolved
+
+### Protected Branches
+- **`main`**: Production branch - requires 2 approvals + CI pass
+- **`develop`**: Integration branch - requires 1 approval + CI pass
+- **Direct pushes are DISABLED** for protected branches
+
+### CI Failure Policy
+- **Zero tolerance**: PRs with failing CI cannot be merged
+- **Auto-block**: GitHub automatically prevents merge until CI passes
+- **Coverage enforcement**: PRs that reduce coverage below 80% are rejected
 
 ## 📋 Code Quality Standards
 
