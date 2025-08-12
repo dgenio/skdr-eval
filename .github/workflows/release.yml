@@ -27,9 +27,48 @@ jobs:
         python -m pip install --upgrade pip
         pip install build twine
 
+    - name: Verify git state for clean versioning
+      run: |
+        echo "Current git status:"
+        git status --porcelain
+        echo "Current git describe:"
+        git describe --tags --long --dirty
+        echo "Expected setuptools-scm version:"
+        python -c "import setuptools_scm; print(setuptools_scm.get_version())"
+
+    - name: Clean working directory for setuptools-scm
+      run: |
+        # Reset any modified files to ensure clean state
+        git reset --hard HEAD
+        # Verify clean state
+        git status --porcelain
+        echo "Clean git describe:"
+        git describe --tags --long --dirty
+
     - name: Build package
       run: |
         python -m build
+
+    - name: Verify built version matches tag
+      run: |
+        # Extract version from built package
+        BUILT_VERSION=$(python -c "import setuptools_scm; print(setuptools_scm.get_version())")
+        # Extract tag version (remove 'v' prefix if present)
+        TAG_VERSION=${GITHUB_REF#refs/tags/}
+        TAG_VERSION=${TAG_VERSION#v}
+        
+        echo "Built version: $BUILT_VERSION"
+        echo "Tag version: $TAG_VERSION"
+        
+        # Check if versions match
+        if [ "$BUILT_VERSION" != "$TAG_VERSION" ]; then
+          echo "❌ ERROR: Built version ($BUILT_VERSION) does not match tag version ($TAG_VERSION)"
+          echo "This indicates a setuptools-scm configuration issue."
+          ls -la dist/
+          exit 1
+        else
+          echo "✅ Version verification passed: $BUILT_VERSION"
+        fi
 
     - name: Check package
       run: |

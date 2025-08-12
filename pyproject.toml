@@ -62,6 +62,8 @@ where = ["src"]
 
 [tool.setuptools_scm]
 write_to = "src/skdr_eval/_version.py"
+tag_regex = "^v(?P<version>[^\\+]+)(?:\\+.*)?$"
+fallback_version = "0.0.0"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
