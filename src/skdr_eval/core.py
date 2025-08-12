@@ -1,15 +1,29 @@
 """Core implementation of DR and Stabilized DR for offline policy evaluation."""
 
+import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
+from sklearn.ensemble import (
+    HistGradientBoostingClassifier,
+    HistGradientBoostingRegressor,
+    RandomForestRegressor,
+)
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
+
+from .choice import (
+    SCIPY_AVAILABLE,
+    fit_conditional_logit_with_sampling,
+    predict_proba_condlogit,
+)
+from .pairwise import PairwiseDesign, induce_policy
+
+logger = logging.getLogger("skdr_eval")
 
 
 @dataclass
@@ -142,8 +156,8 @@ def build_design(
     X_phi = np.column_stack([X_base, ts_norm])
 
     # Outcomes and timestamps
-    Y = logs["service_time"].values
-    ts = logs["arrival_ts"].values
+    Y: np.ndarray = logs["service_time"].values.astype(np.float64)
+    ts: np.ndarray = logs["arrival_ts"].values.astype(np.float64)
 
     return Design(
         X_base=X_base,
@@ -471,7 +485,10 @@ def dr_value_with_clip(
     pi_obs = propensities[np.arange(n_samples), A]
 
     # Compute importance weights and matched set
-    matched = (pi_obs > 0) & elig[np.arange(n_samples), A]
+    # Ensure A is integer type for indexing and elig is boolean for bitwise ops
+    A_int: np.ndarray = A.astype(int)
+    elig_bool: np.ndarray = elig.astype(bool)
+    matched = (pi_obs > 0) & elig_bool[np.arange(n_samples), A_int]
 
     if matched.sum() == 0:
         raise ValueError("No matched samples found")
@@ -543,7 +560,7 @@ def dr_value_with_clip(
         # Fallback to highest ESS
         dr_idx = grid_df["ESS"].idxmax()
     else:
-        dr_idx = grid_df.loc[valid_dr, "MSE_DR"].idxmin()
+        dr_idx = int(grid_df.loc[valid_dr, "MSE_DR"].idxmin())
 
     # Select SNDR clip: minimize |SNDR - DR| + MSE
     dr_value = grid_df.loc[dr_idx, "V_DR"]
@@ -551,13 +568,18 @@ def dr_value_with_clip(
     sndr_idx = sndr_criterion.idxmin()
 
     # Create results
+    def _extract_scalar(value: object) -> float:
+        if hasattr(value, 'iloc'):
+            return float(value.iloc[0])
+        return float(value)  # type: ignore[arg-type]
+
     dr_result = DRResult(
-        clip=grid_df.loc[dr_idx, "clip"],
-        V_hat=grid_df.loc[dr_idx, "V_DR"],
-        SE_if=grid_df.loc[dr_idx, "SE_DR"],
-        ESS=grid_df.loc[dr_idx, "ESS"],
-        tail_mass=grid_df.loc[dr_idx, "tail_mass"],
-        MSE_est=grid_df.loc[dr_idx, "MSE_DR"],
+        clip=_extract_scalar(grid_df.loc[dr_idx, "clip"]),
+        V_hat=_extract_scalar(grid_df.loc[dr_idx, "V_DR"]),
+        SE_if=_extract_scalar(grid_df.loc[dr_idx, "SE_DR"]),
+        ESS=_extract_scalar(grid_df.loc[dr_idx, "ESS"]),
+        tail_mass=_extract_scalar(grid_df.loc[dr_idx, "tail_mass"]),
+        MSE_est=_extract_scalar(grid_df.loc[dr_idx, "MSE_DR"]),
         match_rate=match_rate,
         min_pscore=min_pscore,
         pscore_q10=float(pscore_q10),
@@ -816,5 +838,565 @@ def evaluate_sklearn_models(
             report_rows.append(row)
 
     report = pd.DataFrame(report_rows)
+
+    return report, detailed_results
+
+
+def _get_outcome_estimator(
+    estimator: Union[str, Callable[[], Any]], task_type: str
+) -> Any:
+    """Get outcome estimator based on task type."""
+    if callable(estimator):
+        return estimator()
+
+    if task_type == "regression":
+        if estimator == "hgb":
+            return HistGradientBoostingRegressor(random_state=0)
+        elif estimator == "ridge":
+            return Ridge(random_state=0)
+        elif estimator == "rf":
+            return RandomForestRegressor(random_state=0)
+        else:
+            raise ValueError(f"Unknown regression estimator: {estimator}")
+    elif task_type == "binary":
+        if estimator == "hgb":
+            return HistGradientBoostingClassifier(random_state=0)
+        elif estimator == "logistic":
+            return LogisticRegression(random_state=0, max_iter=1000)
+        else:
+            raise ValueError(f"Unknown binary estimator: {estimator}")
+    else:
+        raise ValueError(f"Unknown task_type: {task_type}")
+
+
+def estimate_propensity_pairwise(
+    design: Any,
+    strategy: Literal["condlogit", "multinomial"] = "multinomial",
+    method: Literal["condlogit", "multinomial"] = "condlogit",
+    neg_per_pos: int = 5,
+    n_splits: int = 3,
+    random_state: int = 0,
+) -> np.ndarray:
+    """Estimate propensity scores for pairwise evaluation.
+
+    Parameters
+    ----------
+    design : PairwiseDesign
+        Pairwise design object
+    strategy : Literal["auto", "condlogit", "multinomial"]
+        Strategy for propensity estimation
+    method : Literal["condlogit", "multinomial"]
+        Method to use (condlogit requires scipy)
+    neg_per_pos : int
+        Negative samples per positive for conditional logit
+    n_splits : int
+        Number of time series splits
+    random_state : int
+        Random seed
+
+    Returns
+    -------
+    propensities : np.ndarray
+        Propensity scores (n_decisions, n_max_operators)
+    """
+
+    # Validate parameters
+    if strategy not in ["auto", "condlogit", "multinomial"]:
+        raise ValueError(
+            f"Unknown strategy: {strategy}. Must be 'auto', 'condlogit', or 'multinomial'"
+        )
+
+    n_decisions = len(design.logs_df)
+    max_ops = max(len(ops) for ops in design.ops_all_by_day.values())
+    propensities: np.ndarray = np.zeros((n_decisions, max_ops), dtype=np.float64)
+
+    # Use the provided method directly since strategy is now constrained
+
+    if method == "condlogit" and not SCIPY_AVAILABLE:
+        logger.warning("SciPy not available, falling back to multinomial")
+        method = "multinomial"
+
+    if method == "condlogit":
+        # Build pairwise training data with time-forward splits
+        tscv = TimeSeriesSplit(n_splits=n_splits)
+        days_sorted = sorted(design.ops_all_by_day.keys())
+
+        # Create day-to-index mapping for time splits
+        day_indices = {}
+        for _i, day in enumerate(days_sorted):
+            day_mask = design.logs_df[design.day_col] == day
+            day_indices[day] = design.logs_df[day_mask].index.tolist()
+
+        all_indices_list = []
+        for day in days_sorted:
+            all_indices_list.extend(day_indices[day])
+        all_indices = np.array(all_indices_list)
+
+        # Fit conditional logit with cross-validation
+        for fold, (train_idx, test_idx) in enumerate(tscv.split(all_indices)):
+            train_decisions = all_indices[train_idx]
+            test_decisions = all_indices[test_idx]
+
+            # Build training pairs
+            train_pairs = []
+            train_choice_ids = []
+            train_y = []
+
+            for decision_idx in train_decisions:
+                decision_row = design.logs_df.loc[decision_idx]
+                day = decision_row[design.day_col]
+                chosen_op = decision_row[design.operator_id_col]
+
+                if day not in design.day_to_op_df:
+                    continue
+
+                # Get eligible operators
+                if design.elig_col and design.elig_col in decision_row:
+                    elig_ops = decision_row[design.elig_col]
+                    if isinstance(elig_ops, (list, tuple)):
+                        day_ops = design.day_to_op_df[day]
+                        eligible_ops_df = day_ops[
+                            day_ops[design.operator_id_col].isin(elig_ops)
+                        ]
+                    else:
+                        eligible_ops_df = design.day_to_op_df[day]
+                else:
+                    eligible_ops_df = design.day_to_op_df[day]
+
+                # Create pairs
+                for _, op_row in eligible_ops_df.iterrows():
+                    pair_features = []
+                    for feat in design.cli_features:
+                        pair_features.append(decision_row[feat])
+                    for feat in design.op_features:
+                        pair_features.append(op_row[feat])
+
+                    train_pairs.append(pair_features)
+                    train_choice_ids.append(decision_idx)
+                    train_y.append(
+                        1 if op_row[design.operator_id_col] == chosen_op else 0
+                    )
+
+            if not train_pairs:
+                continue
+
+            X_train = np.array(train_pairs, dtype=np.float32)
+            choice_ids_train = np.array(train_choice_ids)
+            y_train = np.array(train_y)
+
+            # Fit conditional logit
+            try:
+                coef, intercept, temp = fit_conditional_logit_with_sampling(
+                    X_train,
+                    choice_ids_train,
+                    y_train,
+                    neg_per_pos,
+                    random_state=random_state,
+                )
+
+                # Build test pairs and predict
+                test_pairs = []
+                test_choice_ids = []
+                test_decision_to_ops = {}
+
+                for decision_idx in test_decisions:
+                    decision_row = design.logs_df.loc[decision_idx]
+                    day = decision_row[design.day_col]
+
+                    if day not in design.day_to_op_df:
+                        continue
+
+                    # Get eligible operators
+                    if design.elig_col and design.elig_col in decision_row:
+                        elig_ops = decision_row[design.elig_col]
+                        if isinstance(elig_ops, (list, tuple)):
+                            day_ops = design.day_to_op_df[day]
+                            eligible_ops_df = day_ops[
+                                day_ops[design.operator_id_col].isin(elig_ops)
+                            ]
+                        else:
+                            eligible_ops_df = design.day_to_op_df[day]
+                    else:
+                        eligible_ops_df = design.day_to_op_df[day]
+
+                    ops_list = []
+                    for _, op_row in eligible_ops_df.iterrows():
+                        pair_features = []
+                        for feat in design.cli_features:
+                            pair_features.append(decision_row[feat])
+                        for feat in design.op_features:
+                            pair_features.append(op_row[feat])
+
+                        test_pairs.append(pair_features)
+                        test_choice_ids.append(decision_idx)
+                        ops_list.append(op_row[design.operator_id_col])
+
+                    test_decision_to_ops[decision_idx] = ops_list
+
+                if test_pairs:
+                    X_test = np.array(test_pairs, dtype=np.float32)
+                    choice_ids_test = np.array(test_choice_ids)
+
+                    # Predict probabilities
+                    probs = predict_proba_condlogit(
+                        X_test, choice_ids_test, coef, intercept, temp
+                    )
+
+                    # Assign to propensities matrix
+                    pair_idx = 0
+                    for decision_idx in test_decisions:
+                        if decision_idx in test_decision_to_ops:
+                            ops_list = test_decision_to_ops[decision_idx]
+                            for _i, op in enumerate(ops_list):
+                                # Find operator index in global operator list
+                                day = design.logs_df.loc[decision_idx, design.day_col]
+                                if day in design.ops_all_by_day:
+                                    try:
+                                        op_idx = design.ops_all_by_day[day].index(op)
+                                        propensities[decision_idx, op_idx] = probs[
+                                            pair_idx
+                                        ]
+                                    except ValueError:
+                                        pass
+                                pair_idx += 1
+
+            except Exception as e:
+                logger.error(f"Error fitting conditional logit for fold {fold}: {e}")
+
+    else:  # multinomial method
+        logger.info("Using multinomial propensity estimation")
+
+        # Build client + time features
+        client_features = []
+        actions = []
+
+        for _, row in design.logs_df.iterrows():
+            features = []
+            for feat in design.cli_features:
+                features.append(row[feat])
+            # Add time features (day as numeric)
+            try:
+                day_numeric = pd.to_datetime(row[design.day_col]).dayofyear
+                features.append(day_numeric)
+            except (ValueError, TypeError):
+                features.append(0)
+
+            client_features.append(features)
+            actions.append(row[design.operator_id_col])
+
+        X_client = np.array(client_features, dtype=np.float32)
+
+        # Fit multinomial logistic regression with time-forward CV
+        tscv = TimeSeriesSplit(n_splits=n_splits)
+
+        for train_idx, test_idx in tscv.split(X_client):
+            X_train, X_test = X_client[train_idx], X_client[test_idx]
+            y_train = np.array([actions[i] for i in train_idx])
+
+            # Fit multinomial model
+            model = LogisticRegression(
+                multi_class="multinomial", random_state=random_state, max_iter=1000
+            )
+            try:
+                model.fit(X_train, y_train)
+
+                # Predict probabilities
+                probs = model.predict_proba(X_test)
+                classes = model.classes_
+
+                # Assign to propensities matrix
+                for i, test_decision_idx in enumerate(test_idx):
+                    for j, op in enumerate(classes):
+                        day = design.logs_df.iloc[test_decision_idx][design.day_col]
+                        if (
+                            day in design.ops_all_by_day
+                            and op in design.ops_all_by_day[day]
+                        ):
+                            op_idx = design.ops_all_by_day[day].index(op)
+                            propensities[test_decision_idx, op_idx] = probs[i, j]
+
+            except Exception as e:
+                logger.error(f"Error fitting multinomial model: {e}")
+
+    # Normalize propensities and handle eligibility
+    for i, row in design.logs_df.iterrows():
+        day = row[design.day_col]
+        if day not in design.ops_all_by_day:
+            continue
+
+        # Get eligible operators
+        if design.elig_col and design.elig_col in row:
+            elig_ops = row[design.elig_col]
+            if isinstance(elig_ops, (list, tuple)):
+                elig_mask = np.array(
+                    [op in elig_ops for op in design.ops_all_by_day[day]]
+                )
+            else:
+                elig_mask = np.ones(len(design.ops_all_by_day[day]), dtype=bool)
+        else:
+            elig_mask = np.ones(len(design.ops_all_by_day[day]), dtype=bool)
+
+        # Zero out ineligible operators
+        day_probs = propensities[i, : len(design.ops_all_by_day[day])]
+        day_probs[~elig_mask] = 0
+
+        # Renormalize
+        if np.sum(day_probs) > 0:
+            day_probs = day_probs / np.sum(day_probs)
+        else:
+            # Uniform over eligible
+            day_probs[elig_mask] = 1.0 / np.sum(elig_mask)
+
+        propensities[i, : len(design.ops_all_by_day[day])] = day_probs
+
+    return propensities
+
+
+def evaluate_pairwise_models(
+    logs_df: pd.DataFrame,
+    op_daily_df: pd.DataFrame,
+    models: dict[str, Any],
+    metric_col: str,
+    task_type: Literal["regression", "binary"],
+    direction: Literal["min", "max"],
+    n_splits: int = 3,
+    strategy: Literal["auto", "direct", "stream", "stream_topk"] = "auto",
+    propensity: Literal["condlogit", "multinomial"] = "condlogit",
+    topk: int = 20,
+    neg_per_pos: int = 5,
+    chunk_pairs: int = 2_000_000,
+    min_ess_frac: float = 0.02,
+    clip_grid: tuple[float, ...] = (2, 5, 10, 20, 50, float("inf")),
+    ci_bootstrap: bool = False,
+    alpha: float = 0.05,  # noqa: ARG001
+    day_col: str = "arrival_day",
+    client_id_col: str = "client_id",
+    operator_id_col: str = "operator_id",
+    elig_col: Optional[str] = "elig_mask",
+    random_state: int = 0,
+    outcome_estimator: Union[str, Callable[[], Any]] = "hgb",
+) -> tuple[pd.DataFrame, dict[str, dict[str, DRResult]]]:
+    """Evaluate pairwise models using autoscale strategy.
+
+    Parameters
+    ----------
+    logs_df : pd.DataFrame
+        Observed decisions with required columns
+    op_daily_df : pd.DataFrame
+        Daily operator snapshots
+    models : Dict[str, Any]
+        Dictionary of model_name -> fitted model
+    metric_col : str
+        Target metric column name
+    task_type : Literal["regression", "binary"]
+        Type of prediction task
+    direction : Literal["min", "max"]
+        Whether to minimize or maximize metric
+    n_splits : int
+        Number of cross-validation splits
+    strategy : Literal["auto", "direct", "stream", "stream_topk"]
+        Policy induction strategy
+    propensity : Literal["auto", "condlogit", "multinomial"]
+        Propensity estimation method
+    topk : int
+        Top-K for stream_topk strategy
+    neg_per_pos : int
+        Negative samples per positive for conditional logit
+    chunk_pairs : int
+        Chunk size for streaming
+    min_ess_frac : float
+        Minimum ESS fraction for clipping
+    clip_grid : Tuple[float, ...]
+        Clipping thresholds
+    ci_bootstrap : bool
+        Whether to compute bootstrap CIs
+    alpha : float
+        Significance level for CIs
+    day_col : str
+        Day column name
+    client_id_col : str
+        Client ID column name
+    operator_id_col : str
+        Operator ID column name
+    elig_col : Optional[str]
+        Eligibility column name
+    random_state : int
+        Random seed
+    outcome_estimator : Union[str, Callable[[], Any]]
+        Outcome model estimator
+
+    Returns
+    -------
+    report : pd.DataFrame
+        Summary report
+    detailed_results : Dict[str, Dict[str, DRResult]]
+        Detailed results per model and estimator
+    """
+
+    logger.info("Starting pairwise evaluation")
+
+    # Validate parameters
+    if task_type not in ["regression", "binary"]:
+        raise ValueError(
+            f"Unknown task_type: {task_type}. Must be 'regression' or 'binary'"
+        )
+    if direction not in ["min", "max"]:
+        raise ValueError(f"Unknown direction: {direction}. Must be 'min' or 'max'")
+
+    # Create pairwise design
+    design = PairwiseDesign.from_dataframes(
+        logs_df, op_daily_df, day_col, client_id_col, operator_id_col, elig_col
+    )
+
+    # Log statistics
+    stats = design.get_stats()
+    logger.info(
+        f"Dataset stats: {stats['n_rows']:,} decisions, "
+        f"{stats['candidate_pairs']:,} candidate pairs, "
+        f"{stats['memory_gb']:.2f} GB estimated memory"
+    )
+
+    # Induce policies
+    policies = induce_policy(models, design, strategy, direction, topk, chunk_pairs)
+
+    # Estimate propensity scores
+    propensities = estimate_propensity_pairwise(
+        design, propensity, propensity, neg_per_pos, n_splits, random_state
+    )
+
+    # Fit outcome models with cross-fitting
+    Y = logs_df[metric_col].values
+
+    # Create observed features (client + chosen operator features)
+    X_obs_list = []
+    A_list = []  # Action indices
+
+    for _i, row in logs_df.iterrows():
+        day = row[day_col]
+        chosen_op = row[operator_id_col]
+
+        # Client features
+        obs_features: list[float] = []
+        for feat in design.cli_features:
+            obs_features.append(float(row[feat]))
+
+        # Chosen operator features
+        if str(day) in design.day_to_op_df:
+            op_df = design.day_to_op_df[str(day)]
+            op_row = op_df[op_df[operator_id_col] == chosen_op]
+            if len(op_row) > 0:
+                for feat in design.op_features:
+                    obs_features.append(float(op_row.iloc[0][feat]))
+            else:
+                # Fallback to zeros
+                for _feat in design.op_features:
+                    obs_features.append(0.0)
+        else:
+            # Fallback to zeros
+            for _feat in design.op_features:
+                obs_features.append(0.0)
+
+        X_obs_list.append(obs_features)
+
+        # Action index
+        if str(day) in design.ops_all_by_day and str(chosen_op) in design.ops_all_by_day[str(day)]:
+            A_list.append(design.ops_all_by_day[str(day)].index(str(chosen_op)))
+        else:
+            A_list.append(0)  # Fallback
+
+    X_obs = np.array(X_obs_list, dtype=np.float32)
+    A = np.array(A_list)
+
+    # Fit outcome model
+    estimator_obj = _get_outcome_estimator(outcome_estimator, task_type)
+    q_hat, _ = fit_outcome_crossfit(
+        X_obs, Y.astype(np.float64), n_splits, lambda: estimator_obj, random_state
+    )
+
+    # Convert policies to policy probabilities
+    max_ops = max(len(ops) for ops in design.ops_all_by_day.values())
+
+    detailed_results = {}
+    report_rows = []
+
+    for model_name, policy_decisions in policies.items():
+        # Convert policy decisions to probabilities
+        policy_probs = np.zeros((len(logs_df), max_ops))
+
+        for i, (_idx, row) in enumerate(logs_df.iterrows()):
+            day_str = str(row[day_col])
+            if day_str in design.ops_all_by_day:
+                chosen_op_str = str(policy_decisions[i])
+                if chosen_op_str in design.ops_all_by_day[day_str]:
+                    op_idx = design.ops_all_by_day[day_str].index(chosen_op_str)
+                    policy_probs[i, op_idx] = 1.0
+
+        # Create eligibility matrix
+        elig = np.zeros((len(logs_df), max_ops))
+        for idx, row in logs_df.iterrows():
+            i = int(idx) if isinstance(idx, int) else 0
+            day_str = str(row[day_col])
+            if day_str in design.ops_all_by_day:
+                if elig_col and elig_col in row:
+                    elig_ops = row[elig_col]
+                    # Handle pandas Series or direct list/tuple values
+                    if hasattr(elig_ops, 'iloc'):
+                        # It's a pandas Series, get the actual value
+                        elig_value = elig_ops.iloc[0] if len(elig_ops) > 0 else []
+                    else:
+                        elig_value = elig_ops
+                    if isinstance(elig_value, (list, tuple)):
+                        for op in elig_value:
+                            if str(op) in design.ops_all_by_day[day_str]:
+                                op_idx = design.ops_all_by_day[day_str].index(str(op))
+                                elig[i, op_idx] = 1.0
+                    else:
+                        elig[i, : len(design.ops_all_by_day[day_str])] = 1.0
+                else:
+                    elig[i, : len(design.ops_all_by_day[day_str])] = 1.0
+
+        # Compute DR values
+        try:
+            results = dr_value_with_clip(
+                propensities, policy_probs, Y.astype(np.float64), q_hat, A, elig, clip_grid, min_ess_frac
+            )
+
+            detailed_results[model_name] = results
+
+            # Add to report
+            for estimator_name, result in results.items():
+                report_row: dict[str, object] = {
+                    "model": model_name,
+                    "estimator": estimator_name,
+                    "clip": result.clip,
+                    "V_hat": result.V_hat,
+                    "SE_if": result.SE_if,
+                    "ESS": result.ESS,
+                    "tail_mass": result.tail_mass,
+                    "MSE_est": result.MSE_est,
+                    "match_rate": result.match_rate,
+                    "min_pscore": result.min_pscore,
+                    "pscore_q10": result.pscore_q10,
+                    "pscore_q05": result.pscore_q05,
+                    "pscore_q01": result.pscore_q01,
+                }
+
+                if ci_bootstrap:
+                    # Simplified CI (would need proper implementation)
+                    ci_lower, ci_upper = (
+                        result.V_hat - 1.96 * result.SE_if,
+                        result.V_hat + 1.96 * result.SE_if,
+                    )
+                    report_row["ci_lower"] = ci_lower
+                    report_row["ci_upper"] = ci_upper
+
+                report_rows.append(report_row)
+
+        except Exception as e:
+            logger.error(f"Error computing DR values for model {model_name}: {e}")
+
+    report = pd.DataFrame(report_rows)
+
+    logger.info(f"Completed pairwise evaluation for {len(models)} models")
 
     return report, detailed_results

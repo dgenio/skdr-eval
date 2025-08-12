@@ -6,7 +6,7 @@
 [![Coverage](https://codecov.io/gh/dandrsantos/skdr-eval/branch/main/graph/badge.svg)](https://codecov.io/gh/dandrsantos/skdr-eval)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Offline policy evaluation for service-time minimization using Doubly Robust (DR) and Stabilized Doubly Robust (SNDR) estimators with time-aware splits and calibration.**
+**Offline policy evaluation for service-time minimization using Doubly Robust (DR) and Stabilized Doubly Robust (SNDR) estimators with time-aware splits and calibration. Now with pairwise evaluation and autoscaling support.**
 
 ## Features
 
@@ -16,6 +16,9 @@
 - 📊 **Comprehensive Diagnostics**: ESS, match rates, propensity score analysis
 - 🚀 **Production Ready**: Type-hinted, tested, and documented
 - 📈 **Bootstrap Confidence Intervals**: Moving-block bootstrap for time-series data
+- 🤝 **Pairwise Evaluation**: Client-operator pairwise evaluation with autoscaling strategies
+- 🎛️ **Autoscaling**: Direct, stream, and stream_topk strategies with policy induction
+- 🧮 **Choice Models**: Conditional logit models for propensity estimation
 
 ## Installation
 
@@ -23,8 +26,19 @@
 pip install skdr-eval
 ```
 
-For development:
+### Optional Dependencies
 
+For choice models (conditional logit):
+```bash
+pip install skdr-eval[choice]
+```
+
+For speed optimizations (PyArrow, Polars):
+```bash
+pip install skdr-eval[speed]
+```
+
+For development:
 ```bash
 git clone https://github.com/dandrsantos/skdr-eval.git
 cd skdr-eval
@@ -32,6 +46,8 @@ pip install -e .[dev]
 ```
 
 ## Quick Start
+
+### Standard Evaluation
 
 ```python
 import skdr_eval
@@ -59,6 +75,41 @@ report, detailed_results = skdr_eval.evaluate_sklearn_models(
 print(report[['model', 'estimator', 'V_hat', 'ESS', 'match_rate']])
 ```
 
+### Pairwise Evaluation
+
+```python
+import skdr_eval
+from sklearn.ensemble import HistGradientBoostingRegressor, HistGradientBoostingClassifier
+
+# 1. Generate synthetic pairwise data (client-operator pairs)
+logs_df, op_daily_df = skdr_eval.make_pairwise_synth(
+    n_days=5,
+    n_clients_day=1000,
+    n_ops=20,
+    seed=42
+)
+
+# 2. Define models for different tasks
+models = {
+    "ServiceTime": HistGradientBoostingRegressor(random_state=42),
+    "Binary": HistGradientBoostingClassifier(random_state=42),
+}
+
+# 3. Run pairwise evaluation with autoscaling
+results = skdr_eval.evaluate_pairwise_models(
+    logs_df=logs_df,
+    op_daily_df=op_daily_df,
+    models=models,
+    autoscale_strategies=["direct", "stream", "stream_topk"],
+    n_splits=3,
+    random_state=42
+)
+
+# 4. View autoscaling results
+for strategy, result in results.items():
+    print(f"{strategy}: V_hat = {result['V_hat']:.4f}, ESS = {result['ESS']:.1f}")
+```
+
 ## API Reference
 
 ### Core Functions
@@ -82,15 +133,38 @@ Evaluate sklearn models using DR and SNDR estimators.
 
 **Parameters:**
 - `logs`: Service log DataFrame
-- `models`: Dict of model name -> model instance
+- `models`: Dict of model name to sklearn estimator
 - `fit_models`: Whether to fit models (default: True)
-- `n_splits`: Number of CV splits (default: 3)
-- `clip_grid`: Clipping thresholds (default: (2,5,10,20,50,∞))
-- `ci_bootstrap`: Compute bootstrap CIs (default: False)
+- `n_splits`: Number of time-series splits (default: 3)
+- `random_state`: Random seed for reproducibility
+
+#### `evaluate_pairwise_models(logs_df, op_daily_df, models, **kwargs)`
+Evaluate models using pairwise (client-operator) evaluation with autoscaling.
+
+**Parameters:**
+- `logs_df`: Pairwise decision log DataFrame
+- `op_daily_df`: Daily operator availability DataFrame
+- `models`: Dict of model name to sklearn estimator
+- `autoscale_strategies`: List of strategies ("direct", "stream", "stream_topk")
+- `n_splits`: Number of time-series splits (default: 3)
+- `random_state`: Random seed for reproducibility
 
 **Returns:**
-- `report`: Summary DataFrame with metrics
-- `detailed_results`: Detailed results per model
+- Dict mapping strategy names to evaluation results
+
+#### `make_pairwise_synth(n_days=5, n_clients_day=1000, n_ops=20, **kwargs)`
+Generate synthetic pairwise (client-operator) data for evaluation.
+
+**Parameters:**
+- `n_days`: Number of days to simulate
+- `n_clients_day`: Number of clients per day
+- `n_ops`: Number of operators
+- `seed`: Random seed for reproducibility
+- `binary`: Whether to generate binary outcomes (default: False)
+
+**Returns:**
+- `logs_df`: DataFrame with pairwise decisions
+- `op_daily_df`: DataFrame with daily operator data
 
 ### Advanced Functions
 
@@ -128,10 +202,23 @@ Where:
 
 ## Key Implementation Details
 
-### Time-Aware Evaluation
+### Autoscaling Strategies
+
+#### Direct Strategy
+Uses the logging policy directly without modification.
+
+#### Stream Strategy  
+Induces a policy from sklearn models and applies it to streaming decisions.
+
+#### Stream TopK Strategy
+Similar to stream but restricts choices to top-K operators based on predicted service times.
+
+### Time-Series Considerations
+
 - Uses `TimeSeriesSplit` for all cross-validation
 - Propensity scores include standardized timestamps
 - Respects temporal ordering in data splits
+- Pairwise evaluation maintains temporal consistency across client-operator pairs
 
 ### Propensity Score Calibration
 - Per-fold isotonic calibration via `CalibratedClassifierCV`
