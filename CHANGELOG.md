@@ -7,16 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2025-08-12
+
 ### Added
 - Professional development workflow with `develop` branch
 - Comprehensive contributing guidelines (`CONTRIBUTING.md`)
-- Pull request and issue templates
-- Development Makefile with common tasks
+- Pull request and issue templates (bug report, feature request)
+- Development Makefile with common tasks (check, lint, test, build, etc.)
+- Comprehensive DEVELOPMENT.md guide for contributors
 - Updated pre-commit configuration with latest tool versions
 
 ### Changed
 - CI workflow now runs on both `main` and `develop` branches
 - CI workflow accepts PRs to both `main` and `develop` branches
+
+### Fixed
+- Updated deprecated GitHub Actions to latest versions
+- Resolved mypy type annotation issues for Python 3.9 compatibility
+- Applied comprehensive ruff formatting to all source files
+- Permanently excluded auto-generated `_version.py` from ruff checks
 
 ## [0.1.1] - 2025-08-12
 
