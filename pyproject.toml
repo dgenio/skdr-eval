@@ -33,6 +33,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+choice = [
+    "scipy>=1.9",
+]
+speed = [
+    "pyarrow>=14",
+    "polars>=0.20",
+]
 dev = [
     "pytest",
     "pytest-cov",
