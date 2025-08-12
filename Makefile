@@ -57,9 +57,15 @@ test-cov:
 build: clean
 	python -m build
 
-# Documentation targets (placeholder for future)
+# Documentation targets
 docs:
-	@echo "Documentation generation not yet implemented"
+	cd docs && make html
+
+docs-clean:
+	cd docs && make clean
+
+docs-serve:
+	cd docs/_build/html && python -m http.server 8000
 	@echo "Future: sphinx-build -b html docs/ docs/_build/"
 
 # Composite targets

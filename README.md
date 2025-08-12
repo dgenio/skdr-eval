@@ -31,6 +31,22 @@ cd skdr-eval
 pip install -e .[dev]
 ```
 
+### Docker Development
+
+For consistent development environments:
+
+```bash
+# Build development image
+docker build --target development -t skdr-eval-dev .
+
+# Run development container
+docker run -it -v $(pwd):/workspace skdr-eval-dev
+```
+
+### GitHub Codespaces
+
+Click "Code" → "Codespaces" → "Create codespace on develop" for an instant development environment with all dependencies pre-configured.
+
 ## Quick Start
 
 ```python

@@ -43,10 +43,16 @@ dev = [
     "build",
     "twine",
     "pre-commit",
+    "sphinx",
+    "sphinx-rtd-theme",
+    "myst-parser",
+    "nbsphinx",
 ]
 examples = [
     "jupyter",
     "matplotlib",
+    "seaborn",
+    "plotly",
 ]
 
 [project.urls]

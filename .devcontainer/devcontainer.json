@@ -1,0 +1,61 @@
+{
+	"name": "skdr-eval Development",
+	"image": "mcr.microsoft.com/devcontainers/python:3.11",
+	
+	"features": {
+		"ghcr.io/devcontainers/features/git:1": {},
+		"ghcr.io/devcontainers/features/github-cli:1": {}
+	},
+
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python",
+				"ms-python.vscode-pylance",
+				"ms-python.black-formatter",
+				"charliermarsh.ruff",
+				"ms-python.mypy-type-checker",
+				"ms-toolsai.jupyter",
+				"eamodio.gitlens",
+				"github.vscode-pull-request-github",
+				"ms-vscode.vscode-json",
+				"redhat.vscode-yaml",
+				"ms-python.pytest"
+			],
+			"settings": {
+				"python.defaultInterpreterPath": "/usr/local/bin/python",
+				"python.linting.enabled": true,
+				"python.linting.pylintEnabled": false,
+				"python.linting.mypyEnabled": true,
+				"python.formatting.provider": "black",
+				"python.testing.pytestEnabled": true,
+				"python.testing.unittestEnabled": false,
+				"editor.formatOnSave": true,
+				"editor.codeActionsOnSave": {
+					"source.organizeImports": "explicit"
+				},
+				"files.exclude": {
+					"**/__pycache__": true,
+					"**/*.pyc": true,
+					".pytest_cache": true,
+					".mypy_cache": true,
+					".ruff_cache": true,
+					"htmlcov": true,
+					"dist": true,
+					"build": true,
+					"*.egg-info": true
+				}
+			}
+		}
+	},
+
+	"postCreateCommand": "pip install -e .[dev,examples] && pre-commit install",
+	
+	"remoteUser": "vscode",
+	
+	"forwardPorts": [8000, 8080, 8888],
+	
+	"mounts": [
+		"source=${localWorkspaceFolder}/.git,target=/workspaces/skdr-eval/.git,type=bind,consistency=cached"
+	]
+}
