@@ -1,6 +1,7 @@
-[lint]
-target-version = "py39"
 line-length = 88
+target-version = "py39"
+
+[lint]
 select = [
     "E",  # pycodestyle errors
     "W",  # pycodestyle warnings

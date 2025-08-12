@@ -1,6 +1,5 @@
 """Synthetic data generator for offline policy evaluation."""
 
-from typing import Tuple
 
 import numpy as np
 import pandas as pd
@@ -8,7 +7,7 @@ import pandas as pd
 
 def make_synth_logs(
     n: int = 5000, n_ops: int = 5, seed: int = 0
-) -> Tuple[pd.DataFrame, pd.Index, np.ndarray]:
+) -> tuple[pd.DataFrame, pd.Index, np.ndarray]:
     """Generate synthetic service logs for offline policy evaluation.
 
     Creates realistic synthetic data with:
@@ -87,7 +86,7 @@ def make_synth_logs(
         complexity_effect = cli_complexity * 3.0 * op_complexity_penalty[j]
         load_effect = st_load * 2.0
         time_effect = st_time_of_day * 1.5  # night shift slower
-        
+
         true_q[:, j] = (
             base_time + urgency_effect + complexity_effect + load_effect + time_effect
         )
@@ -101,13 +100,13 @@ def make_synth_logs(
         eligible_mask = eligibility[i]
         if eligible_mask.sum() == 0:
             continue
-        
+
         # Softmax over negative service times (prefer lower service time)
         eligible_q = true_q[i, eligible_mask]
         logits = -eligible_q / 2.0  # temperature = 2.0
         exp_logits = np.exp(logits - np.max(logits))
         probs = exp_logits / exp_logits.sum()
-        
+
         action_probs[i, eligible_mask] = probs
 
     # Sample actions
@@ -140,5 +139,5 @@ def make_synth_logs(
     data["service_time"] = observed_service_times
 
     logs = pd.DataFrame(data)
-    
+
     return logs, ops_all, true_q

@@ -1,13 +1,12 @@
 """Core implementation of DR and Stabilized DR for offline policy evaluation."""
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import numpy as np
 import pandas as pd
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
-from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
@@ -16,7 +15,7 @@ from sklearn.preprocessing import StandardScaler
 @dataclass
 class Design:
     """Design matrix for offline policy evaluation.
-    
+
     Attributes
     ----------
     X_base : np.ndarray
@@ -44,15 +43,15 @@ class Design:
     A: np.ndarray
     Y: np.ndarray
     ts: np.ndarray
-    ops_all: List[str]
+    ops_all: list[str]
     elig: np.ndarray
-    idx: Dict[str, int]
+    idx: dict[str, int]
 
 
 @dataclass
 class DRResult:
     """Results from DR/SNDR evaluation.
-    
+
     Attributes
     ----------
     clip : float
@@ -98,7 +97,7 @@ def build_design(
     logs: pd.DataFrame, cli_pref: str = "cli_", st_pref: str = "st_"
 ) -> Design:
     """Build design matrices from logs.
-    
+
     Parameters
     ----------
     logs : pd.DataFrame
@@ -107,7 +106,7 @@ def build_design(
         Prefix for client features.
     st_pref : str, default="st_"
         Prefix for service-time features.
-        
+
     Returns
     -------
     Design
@@ -117,33 +116,33 @@ def build_design(
     elig_cols = [col for col in logs.columns if col.endswith("_elig")]
     ops_all = [col.replace("_elig", "") for col in elig_cols]
     idx = {op: i for i, op in enumerate(ops_all)}
-    
+
     # Base features (context)
     cli_cols = [col for col in logs.columns if col.startswith(cli_pref)]
     st_cols = [col for col in logs.columns if col.startswith(st_pref)]
     base_cols = cli_cols + st_cols
     X_base = logs[base_cols].values
-    
+
     # Eligibility matrix
     elig = logs[elig_cols].values
-    
+
     # Action indices
     A = np.array([idx[action] for action in logs["action"]])
-    
+
     # Observed features (base + action one-hot)
     action_onehot = np.zeros((len(logs), len(ops_all)))
     action_onehot[np.arange(len(logs)), A] = 1
     X_obs = np.column_stack([X_base, action_onehot])
-    
+
     # Propensity features (base + standardized time, no action)
     scaler = StandardScaler()
     ts_norm = scaler.fit_transform(logs[["arrival_ts"]].values.astype(float))
     X_phi = np.column_stack([X_base, ts_norm])
-    
+
     # Outcomes and timestamps
     Y = logs["service_time"].values
     ts = logs["arrival_ts"].values
-    
+
     return Design(
         X_base=X_base,
         X_obs=X_obs,
@@ -158,11 +157,11 @@ def build_design(
 
 
 def fit_propensity_timecal(
-    X_phi: np.ndarray, A: np.ndarray, ts: Optional[np.ndarray] = None, 
+    X_phi: np.ndarray, A: np.ndarray, ts: Optional[np.ndarray] = None,
     n_splits: int = 3, random_state: int = 0
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Fit propensity model with time-aware cross-validation and calibration.
-    
+
     Parameters
     ----------
     X_phi : np.ndarray
@@ -175,7 +174,7 @@ def fit_propensity_timecal(
         Number of time-series splits.
     random_state : int, default=0
         Random seed.
-        
+
     Returns
     -------
     propensities : np.ndarray
@@ -185,7 +184,7 @@ def fit_propensity_timecal(
     """
     n_samples, n_features = X_phi.shape
     n_actions = A.max() + 1
-    
+
     # Sort by timestamp if provided to ensure proper time-series ordering
     if ts is not None:
         time_order = np.argsort(ts)
@@ -199,25 +198,25 @@ def fit_propensity_timecal(
         A_sorted = A
         time_order = np.arange(n_samples)
         inverse_order = np.arange(n_samples)
-    
+
     # Time-series split on sorted data
     tscv = TimeSeriesSplit(n_splits=n_splits)
     propensities = np.zeros((n_samples, n_actions))
     fold_indices = np.full(n_samples, -1)
-    
+
     for fold, (train_idx, test_idx) in enumerate(tscv.split(X_phi_sorted)):
         # Map sorted indices back to original order for fold assignment
         original_test_idx = time_order[test_idx]
         fold_indices[original_test_idx] = fold
-        
+
         X_train, X_test = X_phi_sorted[train_idx], X_phi_sorted[test_idx]
-        A_train, A_test = A_sorted[train_idx], A_sorted[test_idx]
-        
+        A_train, _A_test = A_sorted[train_idx], A_sorted[test_idx]
+
         # Fit base classifier with robustness for single class
         try:
             clf = LogisticRegression(random_state=random_state, max_iter=1000)
             clf.fit(X_train, A_train)
-            
+
             # Get uncalibrated predictions - ensure we have all actions
             if hasattr(clf, 'classes_') and len(clf.classes_) < n_actions:
                 # Handle case where not all actions are in training data
@@ -233,7 +232,7 @@ def fit_propensity_timecal(
                 pred_proba = pred_proba_full
             else:
                 pred_proba = clf.predict_proba(X_test)
-                
+
         except ValueError as e:
             if "only one class" in str(e):
                 # Handle single class case - assign uniform probabilities
@@ -241,14 +240,14 @@ def fit_propensity_timecal(
                 clf = None  # Mark as failed
             else:
                 raise
-        
+
         # Simple calibration using CalibratedClassifierCV approach
         try:
             if clf is not None and len(np.unique(A_train)) > 1:
                 # Use calibrated classifier for better probability estimates
                 cal_clf = CalibratedClassifierCV(clf, method='isotonic', cv=2)
                 cal_clf.fit(X_train, A_train)
-                
+
                 # Get calibrated predictions
                 if hasattr(cal_clf, 'classes_') and len(cal_clf.classes_) < n_actions:
                     # Handle missing classes
@@ -267,19 +266,19 @@ def fit_propensity_timecal(
         except Exception:
             # Fallback to uncalibrated predictions
             pass
-        
+
         # Ensure probabilities sum to 1 and are positive
         row_sums = pred_proba.sum(axis=1, keepdims=True)
         row_sums = np.where(row_sums > 0, row_sums, 1.0)
         pred_proba = pred_proba / row_sums
-        
+
         # Add small epsilon to avoid zero probabilities
         epsilon = 1e-8
         pred_proba = pred_proba + epsilon
         pred_proba = pred_proba / pred_proba.sum(axis=1, keepdims=True)
-        
+
         propensities[original_test_idx] = pred_proba
-    
+
     # Handle samples not assigned to any fold (shouldn't happen with TimeSeriesSplit but be safe)
     unassigned_mask = fold_indices == -1
     if np.any(unassigned_mask):
@@ -287,7 +286,7 @@ def fit_propensity_timecal(
         propensities[unassigned_mask] = 1.0 / n_actions
         # Assign them to the last fold
         fold_indices[unassigned_mask] = n_splits - 1
-    
+
     return propensities, fold_indices
 
 
@@ -297,9 +296,9 @@ def fit_outcome_crossfit(
     n_splits: int = 3,
     estimator: Union[str, Callable[[], Any]] = "hgb",
     random_state: int = 0,
-) -> Tuple[np.ndarray, List[Tuple[Any, np.ndarray, np.ndarray]]]:
+) -> tuple[np.ndarray, list[tuple[Any, np.ndarray, np.ndarray]]]:
     """Fit outcome model with cross-fitting.
-    
+
     Parameters
     ----------
     X_obs : np.ndarray
@@ -312,7 +311,7 @@ def fit_outcome_crossfit(
         Estimator type or factory function.
     random_state : int, default=0
         Random seed.
-        
+
     Returns
     -------
     predictions : np.ndarray
@@ -323,46 +322,49 @@ def fit_outcome_crossfit(
     n_samples = X_obs.shape[0]
     predictions = np.zeros(n_samples)
     models_info = []
-    
+
     # Get estimator
     if estimator == "hgb":
-        est_factory = lambda: HistGradientBoostingRegressor(random_state=random_state)
+        def est_factory():
+            return HistGradientBoostingRegressor(random_state=random_state)
     elif estimator == "ridge":
-        est_factory = lambda: Ridge(random_state=random_state)
+        def est_factory():
+            return Ridge(random_state=random_state)
     elif estimator == "rf":
-        est_factory = lambda: RandomForestRegressor(random_state=random_state)
+        def est_factory():
+            return RandomForestRegressor(random_state=random_state)
     elif callable(estimator):
         est_factory = estimator
     else:
         raise ValueError(f"Unknown estimator: {estimator}")
-    
+
     # Time-series split
     tscv = TimeSeriesSplit(n_splits=n_splits)
-    
+
     for train_idx, test_idx in tscv.split(X_obs):
         X_train, X_test = X_obs[train_idx], X_obs[test_idx]
         Y_train = Y[train_idx]
-        
+
         # Fit model
         model = est_factory()
         model.fit(X_train, Y_train)
-        
+
         # Predict
         predictions[test_idx] = model.predict(X_test)
         models_info.append((model, train_idx, test_idx))
-    
+
     return predictions, models_info
 
 
 def induce_policy_from_sklearn(
     model: Any,
     X_base: np.ndarray,
-    ops_all: List[str],
+    ops_all: list[str],
     elig: np.ndarray,
-    idx: Dict[str, int],
+    idx: dict[str, int],  # noqa: ARG001
 ) -> np.ndarray:
     """Induce policy from sklearn model by predicting service times.
-    
+
     Parameters
     ----------
     model : Any
@@ -375,7 +377,7 @@ def induce_policy_from_sklearn(
         Eligibility matrix.
     idx : Dict[str, int]
         Operator name to index mapping.
-        
+
     Returns
     -------
     policy_probs : np.ndarray
@@ -384,28 +386,28 @@ def induce_policy_from_sklearn(
     n_samples, n_base_features = X_base.shape
     n_ops = len(ops_all)
     policy_probs = np.zeros((n_samples, n_ops))
-    
+
     for i in range(n_samples):
         eligible_ops = np.where(elig[i])[0]
-        if len(eligible_ops) == 0:
-            continue
-            
+        pred_times = []
+
         # Predict service time for each eligible operator
-        service_times = []
         for op_idx in eligible_ops:
             # Create feature vector with this operator's one-hot
             action_onehot = np.zeros(n_ops)
             action_onehot[op_idx] = 1
             x_with_action = np.concatenate([X_base[i], action_onehot])
-            
+
             # Predict service time
             pred_time = model.predict(x_with_action.reshape(1, -1))[0]
-            service_times.append(pred_time)
-        
-        # Choose operator with minimum predicted service time
-        best_op_idx = eligible_ops[np.argmin(service_times)]
-        policy_probs[i, best_op_idx] = 1.0
-    
+            pred_times.append(pred_time)
+
+        # Convert to probabilities (lower time = higher probability)
+        if len(pred_times) > 0:
+            pred_times = np.array(pred_times)
+            policy_probs[i, eligible_ops] = 1.0 / (pred_times + 1e-8)
+            policy_probs[i] /= policy_probs[i].sum()
+
     return policy_probs
 
 
@@ -416,11 +418,11 @@ def dr_value_with_clip(
     q_hat: np.ndarray,
     A: np.ndarray,
     elig: np.ndarray,
-    clip_grid: Tuple[float, ...] = (2, 5, 10, 20, 50, float("inf")),
+    clip_grid: tuple[float, ...] = (2, 5, 10, 20, 50, float("inf")),
     min_ess_frac: float = 0.02,
-) -> Dict[str, DRResult]:
+) -> dict[str, DRResult]:
     """Compute DR and SNDR values with clipping threshold selection.
-    
+
     Parameters
     ----------
     propensities : np.ndarray
@@ -435,31 +437,31 @@ def dr_value_with_clip(
         Action indices.
     elig : np.ndarray
         Eligibility matrix.
-    clip_grid : Tuple[float, ...], default=(2, 5, 10, 20, 50, inf)
+    clip_grid : tuple[float, ...], default=(2, 5, 10, 20, 50, inf)
         Clipping thresholds to evaluate.
     min_ess_frac : float, default=0.02
         Minimum ESS fraction for DR clip selection.
-        
+
     Returns
     -------
-    results : Dict[str, DRResult]
+    results : dict[str, DRResult]
         Results for "DR" and "SNDR" estimators.
     """
     n_samples = len(Y)
     results_grid = []
-    
+
     # Compute policy value under each operator
     q_pi = np.sum(policy_probs * q_hat.reshape(n_samples, -1), axis=1)
-    
+
     # Get propensity scores for observed actions
     pi_obs = propensities[np.arange(n_samples), A]
-    
+
     # Compute importance weights and matched set
     matched = (pi_obs > 0) & elig[np.arange(n_samples), A]
-    
+
     if matched.sum() == 0:
         raise ValueError("No matched samples found")
-    
+
     # Diagnostics on matched set
     pi_matched = pi_obs[matched]
     match_rate = matched.mean()
@@ -467,7 +469,7 @@ def dr_value_with_clip(
     pscore_q01 = np.percentile(pi_matched, 1)
     pscore_q05 = np.percentile(pi_matched, 5)
     pscore_q10 = np.percentile(pi_matched, 10)
-    
+
     for clip_val in clip_grid:
         # Compute clipped weights with safe division
         if clip_val == float("inf"):
@@ -476,37 +478,34 @@ def dr_value_with_clip(
         else:
             w_clip = np.where(pi_obs > 0, np.minimum(1.0 / pi_obs, clip_val), 0.0)
             w_clip[~matched] = 0
-        
+
         # DR estimate
         dr_contrib = q_pi + w_clip * (Y - q_hat)
         V_dr = dr_contrib.mean()
-        
+
         # SNDR estimate
         if w_clip.sum() > 0:
             V_sndr = q_pi.mean() + (w_clip * (Y - q_hat)).sum() / w_clip.sum()
         else:
             V_sndr = q_pi.mean()
-        
+
         # Effective sample size
-        if w_clip.sum() > 0:
-            ess = (w_clip.sum() ** 2) / (w_clip ** 2).sum()
-        else:
-            ess = 0
-        
+        ess = w_clip.sum() ** 2 / (w_clip ** 2).sum() if w_clip.sum() > 0 else 0
+
         # Tail mass
         if clip_val == float("inf"):
             tail_mass = 0.0
         else:
             tail_mass = (pi_obs[matched] < 1.0 / clip_val).mean()
-        
+
         # Variance estimates (simplified)
         se_dr = np.std(dr_contrib) / np.sqrt(n_samples)
         se_sndr = se_dr  # Simplified
-        
+
         # MSE proxy (bias^2 + variance)
         mse_dr = se_dr ** 2  # Simplified, ignoring bias
         mse_sndr = se_sndr ** 2
-        
+
         results_grid.append({
             "clip": clip_val,
             "V_DR": V_dr,
@@ -518,9 +517,9 @@ def dr_value_with_clip(
             "MSE_DR": mse_dr,
             "MSE_SNDR": mse_sndr,
         })
-    
+
     grid_df = pd.DataFrame(results_grid)
-    
+
     # Select DR clip: minimize MSE with ESS floor
     min_ess = min_ess_frac * n_samples
     valid_dr = grid_df["ESS"] >= min_ess
@@ -529,12 +528,12 @@ def dr_value_with_clip(
         dr_idx = grid_df["ESS"].idxmax()
     else:
         dr_idx = grid_df.loc[valid_dr, "MSE_DR"].idxmin()
-    
+
     # Select SNDR clip: minimize |SNDR - DR| + MSE
     dr_value = grid_df.loc[dr_idx, "V_DR"]
     sndr_criterion = np.abs(grid_df["V_SNDR"] - dr_value) + grid_df["MSE_SNDR"]
     sndr_idx = sndr_criterion.idxmin()
-    
+
     # Create results
     dr_result = DRResult(
         clip=grid_df.loc[dr_idx, "clip"],
@@ -550,7 +549,7 @@ def dr_value_with_clip(
         pscore_q01=pscore_q01,
         grid=grid_df,
     )
-    
+
     sndr_result = DRResult(
         clip=grid_df.loc[sndr_idx, "clip"],
         V_hat=grid_df.loc[sndr_idx, "V_SNDR"],
@@ -565,21 +564,21 @@ def dr_value_with_clip(
         pscore_q01=pscore_q01,
         grid=grid_df,
     )
-    
+
     return {"DR": dr_result, "SNDR": sndr_result}
 
 
 def block_bootstrap_ci(
     values_num: np.ndarray,
     values_den: Optional[np.ndarray],
-    base_mean: np.ndarray,
+    base_mean: np.ndarray,  # noqa: ARG001
     n_boot: int = 400,
     block_len: Optional[int] = None,
     alpha: float = 0.05,
     random_state: int = 0,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Compute confidence interval using moving-block bootstrap.
-    
+
     Parameters
     ----------
     values_num : np.ndarray
@@ -596,7 +595,7 @@ def block_bootstrap_ci(
         Significance level (1-alpha confidence).
     random_state : int, default=0
         Random seed.
-        
+
     Returns
     -------
     ci_lower : float
@@ -606,60 +605,57 @@ def block_bootstrap_ci(
     """
     rng = np.random.RandomState(random_state)
     n = len(values_num)
-    
+
     if block_len is None:
         block_len = max(1, int(np.sqrt(n)))
-    
+
     bootstrap_stats = []
-    
+
     for _ in range(n_boot):
         # Generate block bootstrap sample
         n_blocks = int(np.ceil(n / block_len))
         boot_indices = []
-        
+
         for _ in range(n_blocks):
             start_idx = rng.randint(0, n - block_len + 1)
             boot_indices.extend(range(start_idx, min(start_idx + block_len, n)))
-        
+
         boot_indices = boot_indices[:n]  # Trim to original length
-        
+
         # Compute bootstrap statistic
         boot_num = values_num[boot_indices]
         if values_den is not None:
             boot_den = values_den[boot_indices]
-            if boot_den.sum() > 0:
-                boot_stat = boot_num.sum() / boot_den.sum()
-            else:
-                boot_stat = 0.0
+            boot_stat = boot_num.sum() / boot_den.sum() if boot_den.sum() > 0 else 0.0
         else:
             boot_stat = boot_num.mean()
-        
+
         bootstrap_stats.append(boot_stat)
-    
+
     bootstrap_stats = np.array(bootstrap_stats)
-    
+
     # Compute percentile confidence interval
     ci_lower = np.percentile(bootstrap_stats, 100 * alpha / 2)
     ci_upper = np.percentile(bootstrap_stats, 100 * (1 - alpha / 2))
-    
+
     return ci_lower, ci_upper
 
 
 def evaluate_sklearn_models(
     logs: pd.DataFrame,
-    models: Dict[str, Any],
+    models: dict[str, Any],
     fit_models: bool = True,
     n_splits: int = 3,
     outcome_estimator: Union[str, Callable[[], Any]] = "hgb",
     random_state: int = 0,
-    clip_grid: Tuple[float, ...] = (2, 5, 10, 20, 50, float("inf")),
+    clip_grid: tuple[float, ...] = (2, 5, 10, 20, 50, float("inf")),
     ci_bootstrap: bool = False,
-    alpha: float = 0.05,
+    alpha: float = 0.05,  # noqa: ARG001
     policy_train: str = "all",
     policy_train_frac: float = 0.85,
-) -> Tuple[pd.DataFrame, Dict[str, Dict[str, DRResult]]]:
+) -> tuple[pd.DataFrame, dict[str, dict[str, DRResult]]]:
     """Evaluate sklearn models using DR and SNDR estimators.
-    
+
     Parameters
     ----------
     logs : pd.DataFrame
@@ -684,7 +680,7 @@ def evaluate_sklearn_models(
         Training data for policy ("all" or "pre_split").
     policy_train_frac : float, default=0.85
         Fraction of data for policy training if policy_train="pre_split".
-        
+
     Returns
     -------
     report : pd.DataFrame
@@ -694,7 +690,7 @@ def evaluate_sklearn_models(
     """
     # Build design
     design = build_design(logs)
-    
+
     # Split data for policy training if needed
     if policy_train == "pre_split":
         n_train = int(len(logs) * policy_train_frac)
@@ -723,12 +719,12 @@ def evaluate_sklearn_models(
     else:
         train_design = design
         eval_design = design
-    
+
     # Fit propensity model
     propensities, _ = fit_propensity_timecal(
         eval_design.X_phi, eval_design.A, eval_design.ts, n_splits=n_splits, random_state=random_state
     )
-    
+
     # Fit outcome model
     q_hat, _ = fit_outcome_crossfit(
         eval_design.X_obs,
@@ -737,21 +733,21 @@ def evaluate_sklearn_models(
         estimator=outcome_estimator,
         random_state=random_state,
     )
-    
+
     # Evaluate each model
     report_rows = []
     detailed_results = {}
-    
+
     for model_name, model in models.items():
         if fit_models:
             # Fit model on training data
             model.fit(train_design.X_obs, train_design.Y)
-        
+
         # Induce policy
         policy_probs = induce_policy_from_sklearn(
             model, eval_design.X_base, eval_design.ops_all, eval_design.elig, eval_design.idx
         )
-        
+
         # Compute DR/SNDR values
         results = dr_value_with_clip(
             propensities=propensities,
@@ -762,9 +758,9 @@ def evaluate_sklearn_models(
             elig=eval_design.elig,
             clip_grid=clip_grid,
         )
-        
+
         detailed_results[model_name] = results
-        
+
         # Add to report
         for estimator_name, result in results.items():
             row = {
@@ -782,16 +778,16 @@ def evaluate_sklearn_models(
                 "pscore_q05": result.pscore_q05,
                 "pscore_q01": result.pscore_q01,
             }
-            
+
             # Add confidence intervals if requested
             if ci_bootstrap:
                 # Simplified bootstrap (would need more sophisticated implementation)
                 ci_lower, ci_upper = result.V_hat - 1.96 * result.SE_if, result.V_hat + 1.96 * result.SE_if
                 row["ci_lower"] = ci_lower
                 row["ci_upper"] = ci_upper
-            
+
             report_rows.append(row)
-    
+
     report = pd.DataFrame(report_rows)
-    
+
     return report, detailed_results
