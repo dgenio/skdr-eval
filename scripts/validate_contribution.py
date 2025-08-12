@@ -15,7 +15,17 @@ from typing import Optional
 
 # Configuration constants
 COVERAGE_THRESHOLD = 80
-CODE_DIRS = ["src/", "tests/", "examples/"]
+CODE_DIRS = ("src/", "tests/", "examples/")
+PROTECTED_BRANCHES = ("main", "develop")
+CONVENTIONAL_PREFIXES = (
+    "feat:",
+    "fix:",
+    "docs:",
+    "style:",
+    "refactor:",
+    "test:",
+    "chore:",
+)
 
 
 class ContributionValidator:
@@ -63,7 +73,7 @@ class ContributionValidator:
             return False
 
         current_branch = stdout.strip()
-        if current_branch in ["main", "develop"]:
+        if current_branch in PROTECTED_BRANCHES:
             self.errors.append(
                 f"You are on protected branch '{current_branch}'. Create a feature branch first!"
             )
@@ -257,21 +267,12 @@ class ContributionValidator:
             return True
 
         commits = stdout.strip().split("\n") if stdout.strip() else []
-        conventional_prefixes = [
-            "feat:",
-            "fix:",
-            "docs:",
-            "style:",
-            "refactor:",
-            "test:",
-            "chore:",
-        ]
 
         for commit in commits:
             if commit:
                 message = commit.split(" ", 1)[1] if " " in commit else commit
                 if not any(
-                    message.startswith(prefix) for prefix in conventional_prefixes
+                    message.startswith(prefix) for prefix in CONVENTIONAL_PREFIXES
                 ):
                     self.warnings.append(
                         f"Commit message may not follow conventional format: '{message}'"

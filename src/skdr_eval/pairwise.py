@@ -184,7 +184,7 @@ def build_candidate_pairs(
         if design.elig_col and design.elig_col in client_row:
             elig_ops = client_row[design.elig_col]
             # Handle pandas Series or direct list/tuple values
-            if hasattr(elig_ops, 'iloc'):
+            if hasattr(elig_ops, "iloc"):
                 # It's a pandas Series, get the actual value
                 elig_value = elig_ops.iloc[0] if len(elig_ops) > 0 else []
             else:

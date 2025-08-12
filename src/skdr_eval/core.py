@@ -569,7 +569,7 @@ def dr_value_with_clip(
 
     # Create results
     def _extract_scalar(value: object) -> float:
-        if hasattr(value, 'iloc'):
+        if hasattr(value, "iloc"):
             return float(value.iloc[0])
         return float(value)  # type: ignore[arg-type]
 
@@ -1299,7 +1299,10 @@ def evaluate_pairwise_models(
         X_obs_list.append(obs_features)
 
         # Action index
-        if str(day) in design.ops_all_by_day and str(chosen_op) in design.ops_all_by_day[str(day)]:
+        if (
+            str(day) in design.ops_all_by_day
+            and str(chosen_op) in design.ops_all_by_day[str(day)]
+        ):
             A_list.append(design.ops_all_by_day[str(day)].index(str(chosen_op)))
         else:
             A_list.append(0)  # Fallback
@@ -1340,7 +1343,7 @@ def evaluate_pairwise_models(
                 if elig_col and elig_col in row:
                     elig_ops = row[elig_col]
                     # Handle pandas Series or direct list/tuple values
-                    if hasattr(elig_ops, 'iloc'):
+                    if hasattr(elig_ops, "iloc"):
                         # It's a pandas Series, get the actual value
                         elig_value = elig_ops.iloc[0] if len(elig_ops) > 0 else []
                     else:
@@ -1358,7 +1361,14 @@ def evaluate_pairwise_models(
         # Compute DR values
         try:
             results = dr_value_with_clip(
-                propensities, policy_probs, Y.astype(np.float64), q_hat, A, elig, clip_grid, min_ess_frac
+                propensities,
+                policy_probs,
+                Y.astype(np.float64),
+                q_hat,
+                A,
+                elig,
+                clip_grid,
+                min_ess_frac,
             )
 
             detailed_results[model_name] = results
