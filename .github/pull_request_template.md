@@ -45,9 +45,9 @@ python examples/quickstart.py
 
 ### Code Changes
 <!-- List the main changes made -->
-- 
-- 
-- 
+-
+-
+-
 
 ### API Changes
 <!-- If applicable, describe any API changes -->
@@ -56,7 +56,7 @@ python examples/quickstart.py
 - [ ] Breaking API changes (requires major version bump)
 
 **API changes:**
-- 
+-
 
 ## 📚 Documentation
 
@@ -91,12 +91,12 @@ python examples/quickstart.py
 <!-- Any specific areas you'd like reviewers to focus on -->
 
 ### Focus Areas
-- 
-- 
+-
+-
 
 ### Questions for Reviewers
-- 
-- 
+-
+-
 
 ## 📸 Screenshots/Examples
 

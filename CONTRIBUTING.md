@@ -8,7 +8,7 @@ We follow a **Git Flow** inspired workflow with modern best practices:
 
 ### Branch Structure
 - **`main`**: Production-ready code, protected branch
-- **`develop`**: Integration branch for features, protected branch  
+- **`develop`**: Integration branch for features, protected branch
 - **`feature/*`**: Feature development branches
 - **`hotfix/*`**: Critical fixes for production
 - **`release/*`**: Release preparation branches
@@ -33,10 +33,10 @@ We follow a **Git Flow** inspired workflow with modern best practices:
    # Run linting
    ruff check src/ tests/ examples/
    ruff format src/ tests/ examples/
-   
+
    # Run type checking
    mypy src/skdr_eval/
-   
+
    # Run tests
    pytest -v --cov=skdr_eval
    ```
@@ -135,7 +135,7 @@ pre-commit install
 # Run all checks
 make check          # or: ruff check src/ tests/ examples/
 
-# Format code  
+# Format code
 make format         # or: ruff format src/ tests/ examples/
 
 # Run tests

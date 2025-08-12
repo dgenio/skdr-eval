@@ -9,7 +9,7 @@ We're excited to announce the initial release of `skdr-eval`, a Python library f
 `skdr-eval` provides robust tools for evaluating policies offline when your goal is to minimize service times. It's particularly useful for:
 
 - **Service optimization**: Evaluate routing policies, resource allocation strategies
-- **A/B testing**: Compare policies using historical data without online experiments  
+- **A/B testing**: Compare policies using historical data without online experiments
 - **Causal inference**: Estimate counterfactual performance with confidence intervals
 - **Production systems**: Time-aware evaluation with proper train/test splits
 
@@ -77,7 +77,7 @@ print(report)
 
 ### Advanced Features
 - **Custom clipping grids**: Configure bias-variance tradeoff
-- **Bootstrap confidence intervals**: Statistical uncertainty quantification  
+- **Bootstrap confidence intervals**: Statistical uncertainty quantification
 - **Policy training modes**: Flexible data splitting strategies
 - **Outcome estimator options**: Choose from multiple regression approaches
 
@@ -105,7 +105,7 @@ Plus detailed diagnostics:
 ## 🛠️ Technical Details
 
 ### Requirements
-- **Python**: 3.9+ 
+- **Python**: 3.9+
 - **Dependencies**: numpy, pandas, scikit-learn
 - **Optional**: matplotlib (for visualization examples)
 
@@ -134,7 +134,7 @@ Future releases will include:
 
 We welcome contributions! Please see our GitHub repository for:
 - Issue reporting and feature requests
-- Development setup instructions  
+- Development setup instructions
 - Code contribution guidelines
 - Documentation improvements
 

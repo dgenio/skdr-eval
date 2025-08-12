@@ -50,12 +50,12 @@ import skdr_eval
 <!-- If this relates to academic research, provide context -->
 
 ### Related Papers
-- 
-- 
+-
+-
 
 ### Existing Implementations
-- 
-- 
+-
+-
 
 ## 📈 Impact Assessment
 
@@ -81,12 +81,12 @@ import skdr_eval
 <!-- How should this feature be tested? -->
 
 ### Test Cases
-- 
-- 
+-
+-
 
 ### Examples Needed
-- 
-- 
+-
+-
 
 ## 📝 Documentation Requirements
 

@@ -12,7 +12,7 @@ main (production)     ←─── hotfix/critical-fix
   └─── release/v1.2.0 ←─── develop (integration)
                              ↑
                              ├─── feature/new-estimator
-                             ├─── feature/improved-docs  
+                             ├─── feature/improved-docs
                              └─── feature/performance-boost
 ```
 
@@ -180,7 +180,7 @@ Follow [Semantic Versioning](https://semver.org/):
    git pull origin main
    git tag v1.2.0
    git push origin v1.2.0
-   
+
    # Merge back to develop
    git checkout develop
    git merge main

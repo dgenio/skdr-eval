@@ -119,7 +119,7 @@ Generate synthetic service logs for evaluation.
 
 **Returns:**
 - `logs`: DataFrame with service logs
-- `ops_all`: Index of all operator names  
+- `ops_all`: Index of all operator names
 - `true_q`: Ground truth service times
 
 #### `build_design(logs, cli_pref='cli_', st_pref='st_')`
@@ -196,7 +196,7 @@ V̂_SNDR = (1/n) Σ q̂_π(x_i) + [Σ w_i * (y_i - q̂(x_i, a_i))] / [Σ w_i]
 
 Where:
 - `q̂_π(x)` = expected outcome under evaluation policy π
-- `q̂(x,a)` = outcome model prediction  
+- `q̂(x,a)` = outcome model prediction
 - `w_i = π(a_i|x_i) / e(a_i|x_i)` = importance weight (clipped)
 - `e(a_i|x_i)` = propensity score (calibrated)
 
@@ -207,7 +207,7 @@ Where:
 #### Direct Strategy
 Uses the logging policy directly without modification.
 
-#### Stream Strategy  
+#### Stream Strategy
 Induces a policy from sklearn models and applies it to streaming decisions.
 
 #### Stream TopK Strategy

@@ -56,10 +56,10 @@ jobs:
         # Extract tag version (remove 'v' prefix if present)
         TAG_VERSION=${GITHUB_REF#refs/tags/}
         TAG_VERSION=${TAG_VERSION#v}
-        
+
         echo "Built version: $BUILT_VERSION"
         echo "Tag version: $TAG_VERSION"
-        
+
         # Check if versions match
         if [ "$BUILT_VERSION" != "$TAG_VERSION" ]; then
           echo "❌ ERROR: Built version ($BUILT_VERSION) does not match tag version ($TAG_VERSION)"

@@ -151,7 +151,7 @@ def test_drresult_dataclass():
 
 def test_evaluate_sklearn_models_signature():
     """Test evaluate_sklearn_models function signature."""
-    from sklearn.ensemble import RandomForestRegressor  # noqa: PLC0415
+    from sklearn.ensemble import RandomForestRegressor
 
     logs, _, _ = skdr_eval.make_synth_logs(n=200, n_ops=3, seed=3)
     models = {"rf": RandomForestRegressor(n_estimators=10, random_state=0)}
