@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Validation script for AI agents and developers.
+Comprehensive contribution validation script for skdr-eval.
 
-This script performs comprehensive checks before submitting PRs to ensure
-compliance with the development guidelines and prevent CI failures.
+This script validates contributions before they are submitted as PRs,
+ensuring they meet all quality standards and will pass CI checks.
 """
 
 import ast
@@ -95,36 +95,55 @@ class ContributionValidator:
         return True
 
     def check_linting(self) -> bool:
-        """Check code linting with ruff."""
-        print("Checking code linting...")
+        """Check code linting with ruff - exactly as strict as CI."""
+        print("Checking code linting (CI-strict)...")
         self.total_checks += 1
 
-        code, stdout, stderr = self.run_command(["ruff", "check", *CODE_DIRS])
+        # Check each directory individually to match CI behavior exactly
+        for code_dir in CODE_DIRS:
+            if not Path(code_dir.rstrip("/")).exists():
+                continue
 
-        if code != 0:
-            self.errors.append(f"Linting errors found:\n{stdout}\n{stderr}")
-            return False
+            code, stdout, stderr = self.run_command(["ruff", "check", code_dir])
+
+            if code != 0:
+                self.errors.append(f"Linting errors in {code_dir}:\n{stdout}\n{stderr}")
+                print(f"FAIL {code_dir} has linting issues")
+                print(f"Fix with: ruff check --fix {code_dir}")
+                return False
+            else:
+                print(f"PASS {code_dir} linting OK")
 
         self.success_count += 1
-        print("Linting passed")
+        print("All linting passed (CI-strict)")
         return True
 
     def check_formatting(self) -> bool:
-        """Check code formatting with ruff."""
-        print("Checking code formatting...")
+        """Check code formatting with ruff - exactly as strict as CI."""
+        print("Checking code formatting (CI-strict)...")
         self.total_checks += 1
 
-        code, stdout, stderr = self.run_command(
-            ["ruff", "format", "--check", *CODE_DIRS]
-        )
+        # Check each directory individually to match CI behavior exactly
+        for code_dir in CODE_DIRS:
+            if not Path(code_dir.rstrip("/")).exists():
+                continue
 
-        if code != 0:
-            self.errors.append(f"Formatting issues found:\n{stdout}\n{stderr}")
-            print(f"Run 'make format' or 'ruff format {' '.join(CODE_DIRS)}' to fix")
-            return False
+            code, stdout, stderr = self.run_command(
+                ["ruff", "format", "--check", code_dir]
+            )
+
+            if code != 0:
+                self.errors.append(
+                    f"Formatting issues in {code_dir}:\n{stdout}\n{stderr}"
+                )
+                print(f"FAIL {code_dir} has formatting issues")
+                print(f"Fix with: ruff format {code_dir}")
+                return False
+            else:
+                print(f"PASS {code_dir} formatting OK")
 
         self.success_count += 1
-        print("Formatting passed")
+        print("All formatting passed (CI-strict)")
         return True
 
     def check_type_checking(self) -> bool:
