@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Release Workflow Versioning**: Fixed setuptools-scm version mismatch in CI builds
-- **Checkout Configuration**: Added explicit ref checkout to ensure workflow builds from exact tag
+- **Git State Management**: Ensured clean git state for accurate version calculation
 - **Version Validation**: Resolved issue where built version didn't match expected tag version
 - **CI Pipeline**: Enhanced release workflow to prevent version calculation errors
 
