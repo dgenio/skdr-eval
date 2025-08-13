@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2025-08-13
+
+### Fixed
+- **Release Workflow Versioning**: Fixed setuptools-scm version mismatch in CI builds
+- **Git State Management**: Ensured clean git state for accurate version calculation
+- **Version Validation**: Resolved issue where built version didn't match expected tag version
+- **CI Pipeline**: Enhanced release workflow to prevent version calculation errors
+
+### Infrastructure
+- **Release Process**: Improved workflow reliability for consistent version generation
+- **Quality Assurance**: Strengthened version validation in build pipeline
+
 ## [0.3.1] - 2025-08-13
 
 ### Fixed
