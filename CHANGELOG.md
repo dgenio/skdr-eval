@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2025-08-13
+
+### Fixed
+- **CI Build Failure**: Added missing `setuptools_scm` dependency to release workflow
+- **Release Pipeline**: Fixed ModuleNotFoundError that prevented v0.3.0 from building successfully
+- **Package Publication**: Ensured dynamic versioning works correctly in GitHub Actions
+
+### Infrastructure
+- **Release Workflow**: Enhanced build dependencies to include all required packages for successful builds
+
 ## [0.3.0] - 2025-08-13
 
 ### Added
