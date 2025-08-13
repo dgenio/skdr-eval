@@ -1,6 +1,6 @@
 # Makefile for skdr-eval development
 
-.PHONY: help install install-dev clean lint format typecheck test test-cov build docs check all
+.PHONY: help install install-dev clean lint format typecheck test test-cov build docs check validate all
 
 # Default target
 help:
@@ -16,6 +16,7 @@ help:
 	@echo "  build        Build package for distribution"
 	@echo "  docs         Generate documentation (future)"
 	@echo "  check        Run all quality checks (lint + typecheck + test)"
+	@echo "  validate     Run comprehensive contribution validation (AI agent friendly)"
 	@echo "  all          Run clean + check + build"
 
 # Installation targets
@@ -61,6 +62,10 @@ build: clean
 docs:
 	@echo "Documentation generation not yet implemented"
 	@echo "Future: sphinx-build -b html docs/ docs/_build/"
+
+# Validation target for AI agents and contributors
+validate:
+	python scripts/validate_contribution.py
 
 # Composite targets
 check: lint typecheck test
