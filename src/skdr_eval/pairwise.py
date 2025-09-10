@@ -266,26 +266,34 @@ def induce_policy_direct(
         all_pairs = []
         client_indices = []
 
-        # Precompute mapping from client_id to index to avoid O(n^2) lookups
+        # Precompute mapping from client_id to DataFrame index (not positional)
         client_id_to_index = {
-            str(row[design.client_id_col]): idx for idx, row in day_clients.iterrows()
+            str(row[design.client_id_col]): df_idx
+            for df_idx, row in day_clients.iterrows()
         }
 
         for chunk in build_candidate_pairs(design, day, chunk_pairs):
             if len(chunk) == 0:
                 continue
 
-            # Track which client each pair belongs to
-            chunk_client_indices = []
-            for _, row in chunk.iterrows():
-                client_id_key = str(row[design.client_id_col])
-                client_idx = client_id_to_index.get(client_id_key)
-                if client_idx is None:
-                    # Skip if client not found (should not happen, but be safe)
-                    continue
-                chunk_client_indices.append(client_idx)
+            # Map client ids to indices in one shot and filter invalids
+            client_ids_series = chunk[design.client_id_col].astype(str)
+            mapped_indices = client_ids_series.map(client_id_to_index)
+            valid_mask = mapped_indices.notna()
 
-            all_pairs.append(chunk)
+            if not bool(valid_mask.all()):
+                logger.warning(
+                    "Found pairs with unknown client_id; filtering out %d rows",
+                    int((~valid_mask).sum()),
+                )
+
+            filtered_chunk = chunk.loc[valid_mask].copy()
+            chunk_client_indices = mapped_indices.loc[valid_mask].astype(int).tolist()
+
+            if len(filtered_chunk) == 0:
+                continue
+
+            all_pairs.append(filtered_chunk)
             client_indices.extend(chunk_client_indices)
 
         if not all_pairs:
