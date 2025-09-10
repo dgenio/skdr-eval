@@ -21,23 +21,7 @@ from .choice import (
     fit_conditional_logit_with_sampling,
     predict_proba_condlogit,
 )
-from .exceptions import (
-    DataValidationError,
-    EvaluationError,
-)
 from .pairwise import PairwiseDesign, induce_policy
-from .types import (
-    BoolArray,
-    ClipValue,
-    FloatArray,
-    IntArray,
-    LogsDataFrame,
-    validate_bool_array,
-    validate_clip_grid,
-    validate_float_array,
-    validate_int_array,
-    validate_probability,
-)
 
 logger = logging.getLogger("skdr_eval")
 
@@ -126,13 +110,13 @@ class DRResult:
 
 
 def build_design(
-    logs: LogsDataFrame, cli_pref: str = "cli_", st_pref: str = "st_"
+    logs: pd.DataFrame, cli_pref: str = "cli_", st_pref: str = "st_"
 ) -> Design:
     """Build design matrices from logs.
 
     Parameters
     ----------
-    logs : LogsDataFrame
+    logs : pd.DataFrame
         Log data with columns: arrival_ts, cli_*, st_*, op_*_elig, action, service_time.
     cli_pref : str, default="cli_"
         Prefix for client features.
@@ -146,31 +130,27 @@ def build_design(
 
     Raises
     ------
-    DataValidationError
+    ValueError
         If required columns are missing or data is invalid.
     """
     # Validate input
     if not isinstance(logs, pd.DataFrame):
-        raise DataValidationError(
-            "logs must be a pandas DataFrame",
-            expected_type="pandas.DataFrame",
-            actual_type=type(logs).__name__,
+        raise ValueError(
+            f"logs must be a pandas DataFrame, got {type(logs).__name__}"
         )
 
     if len(logs) == 0:
-        raise DataValidationError("logs DataFrame cannot be empty")
+        raise ValueError("logs DataFrame cannot be empty")
 
     # Check required columns
     required_cols = ["arrival_ts", "action", "service_time"]
     missing_cols = [col for col in required_cols if col not in logs.columns]
     if missing_cols:
-        raise DataValidationError(
-            f"Missing required columns: {missing_cols}", column=", ".join(missing_cols)
-        )
+        raise ValueError(f"Missing required columns: {missing_cols}")
     # Extract operators from eligibility columns
     elig_cols = [col for col in logs.columns if col.endswith("_elig")]
     if not elig_cols:
-        raise DataValidationError("No eligibility columns found (ending with '_elig')")
+        raise ValueError("No eligibility columns found (ending with '_elig')")
 
     ops_all = [col.replace("_elig", "") for col in elig_cols]
     idx = {op: i for i, op in enumerate(ops_all)}
@@ -181,30 +161,29 @@ def build_design(
     base_cols = cli_cols + st_cols
 
     if not base_cols:
-        raise DataValidationError(
+        raise ValueError(
             f"No feature columns found with prefixes '{cli_pref}' or '{st_pref}'"
         )
 
     try:
-        X_base = validate_float_array(logs[base_cols].values, "base features")
+        X_base = logs[base_cols].values.astype(np.float64)
     except (ValueError, TypeError) as e:
-        raise DataValidationError(f"Invalid base features: {e}") from e
+        raise ValueError(f"Invalid base features: {e}") from e
 
     # Eligibility matrix
     try:
-        elig = validate_bool_array(logs[elig_cols].values, "eligibility matrix")
+        elig = logs[elig_cols].values.astype(bool)
     except (ValueError, TypeError) as e:
-        raise DataValidationError(f"Invalid eligibility matrix: {e}") from e
+        raise ValueError(f"Invalid eligibility matrix: {e}") from e
 
     # Action indices - validate all actions are valid operators
     invalid_actions = set(logs["action"]) - set(ops_all)
     if invalid_actions:
-        raise DataValidationError(
-            f"Invalid actions found: {invalid_actions}. Valid operators: {ops_all}",
-            column="action",
+        raise ValueError(
+            f"Invalid actions found: {invalid_actions}. Valid operators: {ops_all}"
         )
 
-    A = validate_int_array([idx[action] for action in logs["action"]], "action indices")
+    A = np.array([idx[action] for action in logs["action"]], dtype=np.int64)
 
     # Observed features (base + action one-hot)
     action_onehot = np.zeros((len(logs), len(ops_all)), dtype=np.float64)
@@ -213,13 +192,13 @@ def build_design(
 
     # Propensity features (base + standardized time, no action)
     scaler = StandardScaler()
-    ts_values = validate_float_array(logs[["arrival_ts"]].values, "timestamps")
+    ts_values = logs[["arrival_ts"]].values.astype(np.float64)
     ts_norm = scaler.fit_transform(ts_values)
     X_phi = np.column_stack([X_base, ts_norm])
 
     # Outcomes and timestamps
-    Y = validate_float_array(logs["service_time"].values, "service times")
-    ts = validate_float_array(logs["arrival_ts"].values, "timestamps")
+    Y = logs["service_time"].values.astype(np.float64)
+    ts = logs["arrival_ts"].values.astype(np.float64)
 
     return Design(
         X_base=X_base,
@@ -502,32 +481,32 @@ def induce_policy_from_sklearn(
 
 
 def dr_value_with_clip(
-    propensities: FloatArray,
-    policy_probs: FloatArray,
-    Y: FloatArray,
-    q_hat: FloatArray,
-    A: IntArray,
-    elig: BoolArray,
-    clip_grid: tuple[ClipValue, ...] = (2, 5, 10, 20, 50, float("inf")),
+    propensities: np.ndarray,
+    policy_probs: np.ndarray,
+    Y: np.ndarray,
+    q_hat: np.ndarray,
+    A: np.ndarray,
+    elig: np.ndarray,
+    clip_grid: tuple[float, ...] = (2, 5, 10, 20, 50, float("inf")),
     min_ess_frac: float = 0.02,
 ) -> dict[str, DRResult]:
     """Compute DR and SNDR values with clipping threshold selection.
 
     Parameters
     ----------
-    propensities : FloatArray
+    propensities : np.ndarray
         Propensity scores (n_samples, n_actions).
-    policy_probs : FloatArray
+    policy_probs : np.ndarray
         Policy probabilities (n_samples, n_actions).
-    Y : FloatArray
+    Y : np.ndarray
         Outcomes.
-    q_hat : FloatArray
+    q_hat : np.ndarray
         Outcome predictions.
-    A : IntArray
+    A : np.ndarray
         Action indices.
-    elig : BoolArray
+    elig : np.ndarray
         Eligibility matrix.
-    clip_grid : tuple[ClipValue, ...], default=(2, 5, 10, 20, 50, inf)
+    clip_grid : tuple[float, ...], default=(2, 5, 10, 20, 50, inf)
         Clipping thresholds to evaluate.
     min_ess_frac : float, default=0.02
         Minimum ESS fraction for DR clip selection.
@@ -539,9 +518,9 @@ def dr_value_with_clip(
 
     Raises
     ------
-    DataValidationError
+    ValueError
         If input arrays have incompatible shapes or invalid values.
-    EvaluationError
+    ValueError
         If no matched samples are found for evaluation.
     """
     # Validate inputs
@@ -549,29 +528,34 @@ def dr_value_with_clip(
 
     # Validate array shapes
     if propensities.shape[0] != n_samples:
-        raise DataValidationError(
+        raise ValueError(
             f"propensities shape mismatch: expected ({n_samples}, _), got {propensities.shape}"
         )
     if policy_probs.shape[0] != n_samples:
-        raise DataValidationError(
+        raise ValueError(
             f"policy_probs shape mismatch: expected ({n_samples}, _), got {policy_probs.shape}"
         )
     if q_hat.shape[0] != n_samples:
-        raise DataValidationError(
+        raise ValueError(
             f"q_hat shape mismatch: expected ({n_samples},), got {q_hat.shape}"
         )
     if A.shape[0] != n_samples:
-        raise DataValidationError(
+        raise ValueError(
             f"A shape mismatch: expected ({n_samples},), got {A.shape}"
         )
     if elig.shape[0] != n_samples:
-        raise DataValidationError(
+        raise ValueError(
             f"elig shape mismatch: expected ({n_samples}, _), got {elig.shape}"
         )
 
     # Validate parameter ranges
-    min_ess_frac = validate_probability(min_ess_frac, "min_ess_frac")
-    clip_grid = validate_clip_grid(clip_grid)
+    # Validate min_ess_frac is in [0, 1]
+    if not 0 <= min_ess_frac <= 1:
+        raise ValueError(f"min_ess_frac must be in [0, 1], got {min_ess_frac}")
+
+    # Validate clip_grid
+    if not isinstance(clip_grid, (tuple, list)) or len(clip_grid) == 0:
+        raise ValueError("clip_grid must be non-empty tuple or list")
     n_samples = len(Y)
     results_grid = []
 
@@ -588,9 +572,8 @@ def dr_value_with_clip(
     matched = (pi_obs > 0) & elig_bool[np.arange(n_samples), A_int]
 
     if matched.sum() == 0:
-        raise EvaluationError(
-            "No matched samples found - all propensity scores are zero or no eligible actions",
-            match_rate=0.0,
+        raise ValueError(
+            "No matched samples found - all propensity scores are zero or no eligible actions"
         )
 
     # Diagnostics on matched set

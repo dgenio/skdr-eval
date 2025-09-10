@@ -212,7 +212,7 @@ def test_propensity_time_aware_splits():
 
     # Fit with different numbers of splits
     for n_splits in [2, 3, 4]:
-        propensities, _fold_indices = skdr_eval.fit_propensity_timecal(
+        _propensities, _fold_indices = skdr_eval.fit_propensity_timecal(
             design.X_phi, design.A, design.ts, n_splits=n_splits, random_state=70
         )
 
