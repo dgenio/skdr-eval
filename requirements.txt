@@ -1,0 +1,24 @@
+# Core dependencies
+numpy>=1.21.0
+pandas>=1.3.0
+scikit-learn>=1.1.0
+
+# Optional dependencies
+scipy>=1.9.0; extra == "choice"
+pyarrow>=14.0.0; extra == "speed"
+polars>=0.20.0; extra == "speed"
+
+# Development dependencies
+pytest>=7.0.0; extra == "dev"
+pytest-cov>=4.0.0; extra == "dev"
+coverage>=7.0.0; extra == "dev"
+mypy>=1.0.0; extra == "dev"
+ruff>=0.1.0; extra == "dev"
+black>=23.0.0; extra == "dev"
+build>=0.10.0; extra == "dev"
+twine>=4.0.0; extra == "dev"
+pre-commit>=3.0.0; extra == "dev"
+
+# Examples dependencies
+jupyter>=1.0.0; extra == "examples"
+matplotlib>=3.5.0; extra == "examples"
