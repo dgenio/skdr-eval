@@ -482,12 +482,10 @@ def dr_value_with_clip(
     # Compute policy value under each operator
     # If per-action outcome predictions are provided, use them; otherwise
     # fall back to broadcasting the observed-action predictions.
-    if q_hat_all is not None:
-        q_pi = np.sum(policy_probs * q_hat_all, axis=1)
-    else:
-        # Without per-action predictions, best fallback is to use the
-        # observed-action prediction as the baseline for each sample.
-        q_pi = q_hat
+    # Fall back to observed-action baseline if per-action predictions are not provided
+    q_pi = (
+        np.sum(policy_probs * q_hat_all, axis=1) if q_hat_all is not None else q_hat
+    )
 
     # Get propensity scores for observed actions
     pi_obs = propensities[np.arange(n_samples), A]
