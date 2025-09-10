@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# setuptools-scm generated version file
+src/skdr_eval/_version.py
+
 # C extensions
 *.so
 

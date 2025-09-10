@@ -1,0 +1,21 @@
+[33mcommit 6cccacdf51ffe7e07804c56e8196c5fe96c94f03[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mfeature/improve-type-safety[m[33m, [m[1;31morigin/feature/improve-type-safety[m[33m)[m
+Author: Diogo Santos <diogofcul@gmail.com>
+Date:   Wed Sep 10 19:55:39 2025 +0100
+
+    feat(ci): add comprehensive CI/CD pipeline
+    
+    - Add GitHub Actions CI workflow with multi-Python version testing (3.9-3.12)
+    - Add automated release workflow with trusted publishing (PEP 740)
+    - Add dependency review workflow for security scanning
+    - Add requirements.txt for security scanning tools
+    - Include comprehensive quality checks: linting, type checking, testing, coverage
+    - Add security scanning with safety and bandit tools
+    - Support for codecov integration
+    - Build artifact upload for releases
+    
+    Closes #8
+
+.github/workflows/ci.yml
+.github/workflows/dependency-review.yml
+.github/workflows/release.yml
+requirements.txt

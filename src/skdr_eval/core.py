@@ -135,9 +135,7 @@ def build_design(
     """
     # Validate input
     if not isinstance(logs, pd.DataFrame):
-        raise ValueError(
-            f"logs must be a pandas DataFrame, got {type(logs).__name__}"
-        )
+        raise ValueError(f"logs must be a pandas DataFrame, got {type(logs).__name__}")
 
     if len(logs) == 0:
         raise ValueError("logs DataFrame cannot be empty")
@@ -166,13 +164,13 @@ def build_design(
         )
 
     try:
-        X_base = logs[base_cols].values.astype(np.float64)
+        X_base: np.ndarray = logs[base_cols].values.astype(np.float64)
     except (ValueError, TypeError) as e:
         raise ValueError(f"Invalid base features: {e}") from e
 
     # Eligibility matrix
     try:
-        elig = logs[elig_cols].values.astype(bool)
+        elig: np.ndarray = logs[elig_cols].values.astype(bool)
     except (ValueError, TypeError) as e:
         raise ValueError(f"Invalid eligibility matrix: {e}") from e
 
@@ -192,13 +190,13 @@ def build_design(
 
     # Propensity features (base + standardized time, no action)
     scaler = StandardScaler()
-    ts_values = logs[["arrival_ts"]].values.astype(np.float64)
+    ts_values: np.ndarray = logs[["arrival_ts"]].values.astype(np.float64)
     ts_norm = scaler.fit_transform(ts_values)
     X_phi = np.column_stack([X_base, ts_norm])
 
     # Outcomes and timestamps
-    Y = logs["service_time"].values.astype(np.float64)
-    ts = logs["arrival_ts"].values.astype(np.float64)
+    Y: np.ndarray = logs["service_time"].values.astype(np.float64)
+    ts: np.ndarray = logs["arrival_ts"].values.astype(np.float64)
 
     return Design(
         X_base=X_base,
@@ -540,9 +538,7 @@ def dr_value_with_clip(
             f"q_hat shape mismatch: expected ({n_samples},), got {q_hat.shape}"
         )
     if A.shape[0] != n_samples:
-        raise ValueError(
-            f"A shape mismatch: expected ({n_samples},), got {A.shape}"
-        )
+        raise ValueError(f"A shape mismatch: expected ({n_samples},), got {A.shape}")
     if elig.shape[0] != n_samples:
         raise ValueError(
             f"elig shape mismatch: expected ({n_samples}, _), got {elig.shape}"
