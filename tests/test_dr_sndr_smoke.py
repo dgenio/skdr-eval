@@ -11,7 +11,7 @@ import skdr_eval
 def test_dr_sndr_smoke():
     """Smoke test for DR and SNDR evaluation with two models."""
     # Generate synthetic data
-    logs, ops_all, true_q = skdr_eval.make_synth_logs(n=3000, n_ops=5, seed=7)
+    logs, _ops_all, _true_q = skdr_eval.make_synth_logs(n=3000, n_ops=5, seed=7)
 
     # Define models
     models = {
@@ -20,7 +20,7 @@ def test_dr_sndr_smoke():
     }
 
     # Evaluate models
-    report, detailed_results = skdr_eval.evaluate_sklearn_models(
+    report, _detailed_results = skdr_eval.evaluate_sklearn_models(
         logs=logs,
         models=models,
         fit_models=True,
@@ -76,14 +76,14 @@ def test_dr_sndr_smoke():
         assert row["min_pscore"] <= row["pscore_q01"], "min p-score > q01"
 
     # Check detailed results structure
-    assert isinstance(detailed_results, dict)
+    assert isinstance(_detailed_results, dict)
     for model_name in models:
-        assert model_name in detailed_results
-        assert "DR" in detailed_results[model_name]
-        assert "SNDR" in detailed_results[model_name]
+        assert model_name in _detailed_results
+        assert "DR" in _detailed_results[model_name]
+        assert "SNDR" in _detailed_results[model_name]
 
-        dr_result = detailed_results[model_name]["DR"]
-        sndr_result = detailed_results[model_name]["SNDR"]
+        dr_result = _detailed_results[model_name]["DR"]
+        sndr_result = _detailed_results[model_name]["SNDR"]
 
         assert isinstance(dr_result, skdr_eval.DRResult)
         assert isinstance(sndr_result, skdr_eval.DRResult)
@@ -98,14 +98,14 @@ def test_dr_sndr_smoke():
 def test_dr_sndr_values_reasonable():
     """Test that DR and SNDR values are in reasonable ranges."""
     # Generate smaller dataset for faster testing
-    logs, ops_all, true_q = skdr_eval.make_synth_logs(n=1000, n_ops=3, seed=42)
+    logs, _ops_all, _true_q = skdr_eval.make_synth_logs(n=1000, n_ops=3, seed=42)
 
     # Simple model
     models = {
         "simple_rf": RandomForestRegressor(n_estimators=10, random_state=42),
     }
 
-    report, detailed_results = skdr_eval.evaluate_sklearn_models(
+    report, _detailed_results = skdr_eval.evaluate_sklearn_models(
         logs=logs,
         models=models,
         fit_models=True,
@@ -135,7 +135,7 @@ def test_dr_sndr_values_reasonable():
 
 def test_clip_selection():
     """Test that clipping threshold selection works correctly."""
-    logs, ops_all, true_q = skdr_eval.make_synth_logs(n=500, n_ops=3, seed=123)
+    logs, _ops_all, _true_q = skdr_eval.make_synth_logs(n=500, n_ops=3, seed=123)
 
     models = {
         "test_model": RandomForestRegressor(n_estimators=10, random_state=123),
@@ -149,7 +149,7 @@ def test_clip_selection():
     ]
 
     for clip_grid in clip_grids:
-        report, detailed_results = skdr_eval.evaluate_sklearn_models(
+        report, _detailed_results = skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models=models,
             fit_models=True,
@@ -166,7 +166,7 @@ def test_clip_selection():
             )
 
         # Check that ESS decreases with higher clipping (generally)
-        dr_result = detailed_results["test_model"]["DR"]
+        dr_result = _detailed_results["test_model"]["DR"]
         grid = dr_result.grid
 
         # Sort by clip value
@@ -188,7 +188,7 @@ def test_edge_cases():
     }
 
     # Should still work with small dataset
-    report, detailed_results = skdr_eval.evaluate_sklearn_models(
+    report, _detailed_results = skdr_eval.evaluate_sklearn_models(
         logs=logs_small,
         models=models,
         fit_models=True,

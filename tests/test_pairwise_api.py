@@ -33,7 +33,7 @@ def test_pairwise_regression_basic():
         model.fit(X, y)
 
     # Run pairwise evaluation
-    report, detailed_results = evaluate_pairwise_models(
+    report, _detailed_results = evaluate_pairwise_models(
         logs_df=logs_df,
         op_daily_df=op_daily_df,
         models=models,
@@ -69,12 +69,12 @@ def test_pairwise_regression_basic():
     assert (report["match_rate"] <= 1).all(), "match_rate should be <= 1"
 
     # Check detailed results structure
-    assert isinstance(detailed_results, dict)
-    assert len(detailed_results) == len(models)
+    assert isinstance(_detailed_results, dict)
+    assert len(_detailed_results) == len(models)
 
     for model_name in models:
-        assert model_name in detailed_results
-        model_results = detailed_results[model_name]
+        assert model_name in _detailed_results
+        model_results = _detailed_results[model_name]
         assert isinstance(model_results, dict)
         assert "DR" in model_results or "SNDR" in model_results
 
@@ -100,7 +100,7 @@ def test_pairwise_binary_basic():
         model.fit(X, y)
 
     # Run pairwise evaluation
-    report, detailed_results = evaluate_pairwise_models(
+    report, _detailed_results = evaluate_pairwise_models(
         logs_df=logs_df,
         op_daily_df=op_daily_df,
         models=models,
@@ -249,7 +249,7 @@ def test_pairwise_error_handling():
         )
 
     # Test with invalid direction
-    with pytest.raises(ValueError, match="Unknown.*direction"):
+    with pytest.raises(ValueError, match=r"Unknown.*direction"):
         evaluate_pairwise_models(
             logs_df=logs_df,
             op_daily_df=op_daily_df,
