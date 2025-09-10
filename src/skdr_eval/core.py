@@ -448,6 +448,7 @@ def dr_value_with_clip(
     elig: np.ndarray,
     clip_grid: tuple[float, ...] = (2, 5, 10, 20, 50, float("inf")),
     min_ess_frac: float = 0.02,
+    q_hat_all: Optional[np.ndarray] = None,
 ) -> dict[str, DRResult]:
     """Compute DR and SNDR values with clipping threshold selection.
 
@@ -479,7 +480,14 @@ def dr_value_with_clip(
     results_grid = []
 
     # Compute policy value under each operator
-    q_pi = np.sum(policy_probs * q_hat.reshape(n_samples, -1), axis=1)
+    # If per-action outcome predictions are provided, use them; otherwise
+    # fall back to broadcasting the observed-action predictions.
+    if q_hat_all is not None:
+        q_pi = np.sum(policy_probs * q_hat_all, axis=1)
+    else:
+        # Without per-action predictions, best fallback is to use the
+        # observed-action prediction as the baseline for each sample.
+        q_pi = q_hat
 
     # Get propensity scores for observed actions
     pi_obs = propensities[np.arange(n_samples), A]
@@ -589,12 +597,12 @@ def dr_value_with_clip(
     )
 
     sndr_result = DRResult(
-        clip=grid_df.loc[sndr_idx, "clip"],
-        V_hat=grid_df.loc[sndr_idx, "V_SNDR"],
-        SE_if=grid_df.loc[sndr_idx, "SE_SNDR"],
-        ESS=grid_df.loc[sndr_idx, "ESS"],
-        tail_mass=grid_df.loc[sndr_idx, "tail_mass"],
-        MSE_est=grid_df.loc[sndr_idx, "MSE_SNDR"],
+        clip=_extract_scalar(grid_df.loc[sndr_idx, "clip"]),
+        V_hat=_extract_scalar(grid_df.loc[sndr_idx, "V_SNDR"]),
+        SE_if=_extract_scalar(grid_df.loc[sndr_idx, "SE_SNDR"]),
+        ESS=_extract_scalar(grid_df.loc[sndr_idx, "ESS"]),
+        tail_mass=_extract_scalar(grid_df.loc[sndr_idx, "tail_mass"]),
+        MSE_est=_extract_scalar(grid_df.loc[sndr_idx, "MSE_SNDR"]),
         match_rate=match_rate,
         min_pscore=min_pscore,
         pscore_q10=float(pscore_q10),
@@ -1336,8 +1344,7 @@ def evaluate_pairwise_models(
 
         # Create eligibility matrix
         elig = np.zeros((len(logs_df), max_ops))
-        for idx, row in logs_df.iterrows():
-            i = int(idx) if isinstance(idx, int) else 0
+        for i, (_idx, row) in enumerate(logs_df.iterrows()):
             day_str = str(row[day_col])
             if day_str in design.ops_all_by_day:
                 if elig_col and elig_col in row:

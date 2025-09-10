@@ -266,6 +266,11 @@ def induce_policy_direct(
         all_pairs = []
         client_indices = []
 
+        # Precompute mapping from client_id to index to avoid O(n^2) lookups
+        client_id_to_index = {
+            str(row[design.client_id_col]): idx for idx, row in day_clients.iterrows()
+        }
+
         for chunk in build_candidate_pairs(design, day, chunk_pairs):
             if len(chunk) == 0:
                 continue
@@ -273,9 +278,11 @@ def induce_policy_direct(
             # Track which client each pair belongs to
             chunk_client_indices = []
             for _, row in chunk.iterrows():
-                client_idx = day_clients[
-                    day_clients[design.client_id_col] == row[design.client_id_col]
-                ].index[0]
+                client_id_key = str(row[design.client_id_col])
+                client_idx = client_id_to_index.get(client_id_key)
+                if client_idx is None:
+                    # Skip if client not found (should not happen, but be safe)
+                    continue
                 chunk_client_indices.append(client_idx)
 
             all_pairs.append(chunk)
