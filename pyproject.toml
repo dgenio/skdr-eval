@@ -71,6 +71,7 @@ where = ["src"]
 write_to = "src/skdr_eval/_version.py"
 tag_regex = "^v(?P<version>[^\\+]+)(?:\\+.*)?$"
 fallback_version = "0.0.0"
+local_scheme = "dirty-tag"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
