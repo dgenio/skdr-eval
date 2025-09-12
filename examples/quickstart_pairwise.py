@@ -136,7 +136,7 @@ def main():
     # Run pairwise evaluation for binary task
     print("\n🎯 Running pairwise evaluation (binary, maximize success rate)...")
 
-    report_binary, detailed_binary = evaluate_pairwise_models(
+    report_binary, _ = evaluate_pairwise_models(
         logs_df=logs_binary,
         op_daily_df=op_daily_binary,
         models=models_binary,

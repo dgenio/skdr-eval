@@ -201,7 +201,7 @@ def fit_propensity_timecal(
     fold_indices : np.ndarray
         Fold assignment for each sample.
     """
-    n_samples, n_features = X_phi.shape
+    n_samples, _ = X_phi.shape
     n_actions = A.max() + 1
 
     # Sort by timestamp if provided to ensure proper time-series ordering
@@ -411,7 +411,7 @@ def induce_policy_from_sklearn(
     policy_probs : np.ndarray
         Policy probabilities (n_samples, n_ops).
     """
-    n_samples, n_base_features = X_base.shape
+    n_samples, _ = X_base.shape
     n_ops = len(ops_all)
     policy_probs = np.zeros((n_samples, n_ops))
 
