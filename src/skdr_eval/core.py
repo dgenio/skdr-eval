@@ -31,7 +31,7 @@ class EstimatorProtocol(Protocol):
     """Protocol for sklearn estimators."""
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> Any: ...
-    def predict(self, X: np.ndarray) -> np.ndarray: ...
+    def predict(self, X: np.ndarray) -> Any: ...
 
 
 @dataclass
@@ -444,7 +444,7 @@ def induce_policy_from_sklearn(
             policy_probs[i, eligible_ops] = 1.0 / (pred_times_array + 1e-8)
             policy_probs[i] /= policy_probs[i].sum()
 
-    return np.asarray(policy_probs)
+    return policy_probs
 
 
 def dr_value_with_clip(
@@ -851,8 +851,8 @@ def evaluate_sklearn_models(
 
 
 def _get_outcome_estimator(
-    estimator: Union[str, Callable[[], EstimatorProtocol]], task_type: str
-) -> EstimatorProtocol:
+    estimator: Union[str, Callable[[], Any]], task_type: str
+) -> Any:
     """Get outcome estimator based on task type."""
     if callable(estimator):
         return estimator()
