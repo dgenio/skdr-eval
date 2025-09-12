@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2025-01-15
+
+### Fixed
+- **Type Safety Violations**: Resolved critical type annotation issues in core functions
+- **induce_policy_from_sklearn**: Fixed return type annotation from `Any` to `np.ndarray`
+- **EstimatorProtocol**: Added proper protocol for sklearn estimators in `_get_outcome_estimator`
+- **estimate_propensity_pairwise**: Fixed parameter type from `Any` to `PairwiseDesign`
+- **Type Safety Workarounds**: Removed mypy workarounds that compromised type safety
+
+### Technical Debt
+- **Major Tech Debt Resolution**: Addressed critical type safety violations that were using `Any` types to avoid mypy issues
+- **Code Quality**: Improved type safety and maintainability by using proper type annotations
+- **Developer Experience**: Enhanced IDE support and static analysis capabilities
+
 ## [0.3.2] - 2025-08-13
 
 ### Fixed
