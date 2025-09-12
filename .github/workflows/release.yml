@@ -77,7 +77,8 @@ jobs:
 
         # Check if versions match (allow for dirty suffix in development)
         # Allow exact match, or match if built version is tag version plus a known separator (e.g., .dev, +, or .dirty)
-        if [[ "$BUILT_VERSION" == "$TAG_VERSION" ]] || [[ "$BUILT_VERSION" =~ ^${TAG_VERSION}(\.dev[0-9]+(\+g[0-9a-f]+)?|\.dirty|\+g[0-9a-f]+)?$ ]]; then
+        VERSION_MATCH_REGEX="^${TAG_VERSION}(\.dev[0-9]+(\+g[0-9a-f]+)?|\.dirty|\+g[0-9a-f]+)?$"
+        if [[ "$BUILT_VERSION" == "$TAG_VERSION" ]] || [[ "$BUILT_VERSION" =~ $VERSION_MATCH_REGEX ]]; then
           echo "✅ Version verification passed: $BUILT_VERSION (matches tag: $TAG_VERSION)"
         else
           echo "❌ ERROR: Built version ($BUILT_VERSION) does not match tag version ($TAG_VERSION)"
