@@ -71,6 +71,8 @@ where = ["src"]
 write_to = "src/skdr_eval/_version.py"
 tag_regex = "^v(?P<version>[^\\+]+)(?:\\+.*)?$"
 fallback_version = "0.0.0"
+# Use "dirty-tag" to append a tag to the version when the working directory has uncommitted changes,
+# making it clear when a build is not from a clean state.
 local_scheme = "dirty-tag"
 
 [tool.pytest.ini_options]
