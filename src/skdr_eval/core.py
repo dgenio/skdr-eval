@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional, Union, Protocol
+from typing import Any, Callable, Literal, Optional, Protocol, Union
 
 import numpy as np
 import pandas as pd
@@ -29,6 +29,7 @@ logger = logging.getLogger("skdr_eval")
 # Type definitions for better type safety
 class EstimatorProtocol(Protocol):
     """Protocol for sklearn estimators."""
+
     def fit(self, X: np.ndarray, y: np.ndarray) -> Any: ...
     def predict(self, X: np.ndarray) -> np.ndarray: ...
 
