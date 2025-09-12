@@ -180,6 +180,19 @@ Compute DR and SNDR values with automatic clipping threshold selection.
 #### `block_bootstrap_ci(values_num, values_den, base_mean, n_boot=400, **kwargs)`
 Compute confidence intervals using moving-block bootstrap for time-series data.
 
+**Parameters:**
+- `values_num`: Numerator values for bootstrap
+- `values_den`: Denominator values for ratio estimation (optional)
+- `base_mean`: Base mean for centering
+- `n_boot`: Number of bootstrap samples (default: 400)
+- `block_len`: Block length for time-series correlation (default: sqrt(n))
+- `alpha`: Significance level (default: 0.05)
+- `random_state`: Random seed for reproducibility
+
+**Returns:**
+- `ci_lower`: Lower confidence bound
+- `ci_upper`: Upper confidence bound
+
 ## Why DR and SNDR?
 
 **Doubly Robust (DR)** estimation provides unbiased policy evaluation when either the propensity model OR the outcome model is correctly specified. The estimator is:
@@ -238,7 +251,7 @@ Similar to stream but restricts choices to top-K operators based on predicted se
 
 ## Bootstrap Confidence Intervals
 
-For time-series data, use moving-block bootstrap:
+For time-series data, use moving-block bootstrap with proper statistical methodology:
 
 ```python
 # Enable bootstrap CIs
@@ -251,6 +264,12 @@ report, _ = skdr_eval.evaluate_sklearn_models(
 
 print(report[['model', 'estimator', 'V_hat', 'ci_lower', 'ci_upper']])
 ```
+
+**Key Features:**
+- **Moving-block bootstrap**: Preserves time-series correlation structure
+- **Proper statistical inference**: Uses bootstrap distribution of DR contributions
+- **Automatic fallback**: Falls back to normal approximation if bootstrap fails
+- **Configurable parameters**: Control bootstrap samples, block length, and significance level
 
 ## Examples
 

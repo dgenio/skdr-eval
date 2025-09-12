@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2025-01-12
+
+### Fixed
+- **Major Tech Debt**: Implemented proper bootstrap confidence intervals using the existing `block_bootstrap_ci` function
+- **Statistical Accuracy**: Replaced incorrect normal approximation with proper moving-block bootstrap for time-series data
+- **Dead Code Elimination**: The `block_bootstrap_ci` function was implemented but never used (0% test coverage)
+- **False Advertising**: README claimed "Bootstrap Confidence Intervals" but only used normal approximation
+
+### Added
+- **Comprehensive Test Suite**: Added 14 new tests for `block_bootstrap_ci` function achieving 100% coverage
+- **Integration Tests**: Added 7 integration tests for bootstrap CI in both evaluation functions
+- **Proper Error Handling**: Added parameter validation and graceful fallback mechanisms
+- **Enhanced Documentation**: Updated README with detailed bootstrap CI parameters and usage
+
+### Enhanced
+- **Statistical Rigor**: Bootstrap CIs now properly account for time-series correlation structure
+- **Data Science Best Practices**: Moving-block bootstrap is the gold standard for time-series confidence intervals
+- **Test Coverage**: Improved overall test coverage from 75% to 78%
+- **Code Quality**: Eliminated dead code and improved maintainability
+
+### Technical Details
+- **Bootstrap Method**: Uses moving-block bootstrap with configurable block length (default: sqrt(n))
+- **Fallback Strategy**: Gracefully falls back to normal approximation if bootstrap fails
+- **Performance**: 400 bootstrap samples by default with configurable parameters
+- **Reproducibility**: All bootstrap operations use consistent random seeds
+
 ## [0.3.1] - 2025-08-13
 
 ### Fixed

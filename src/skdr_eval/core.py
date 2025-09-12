@@ -640,12 +640,30 @@ def block_bootstrap_ci(
         Lower confidence bound.
     ci_upper : float
         Upper confidence bound.
+        
+    Raises
+    ------
+    ValueError
+        If alpha is not in (0, 1) or if values_num is empty.
     """
+    # Parameter validation
+    if len(values_num) == 0:
+        raise ValueError("values_num cannot be empty")
+    
+    if not (0 < alpha < 1):
+        raise ValueError(f"alpha must be in (0, 1), got {alpha}")
+    
+    if n_boot <= 0:
+        raise ValueError(f"n_boot must be positive, got {n_boot}")
+    
     rng = np.random.RandomState(random_state)
     n = len(values_num)
 
     if block_len is None:
         block_len = max(1, int(np.sqrt(n)))
+    
+    # Ensure block_len doesn't exceed data length
+    block_len = min(block_len, n)
 
     bootstrap_stats_list: list[float] = []
 
@@ -827,11 +845,45 @@ def evaluate_sklearn_models(
 
             # Add confidence intervals if requested
             if ci_bootstrap:
-                # Simplified bootstrap (would need more sophisticated implementation)
-                ci_lower, ci_upper = (
-                    result.V_hat - 1.96 * result.SE_if,
-                    result.V_hat + 1.96 * result.SE_if,
-                )
+                # Use proper block bootstrap for time-series data
+                try:
+                    # Recompute DR contributions for bootstrap
+                    q_pi = np.sum(policy_probs * q_hat.reshape(len(eval_design.Y), -1), axis=1)
+                    pi_obs = propensities[np.arange(len(eval_design.Y)), eval_design.A]
+                    A_int = eval_design.A.astype(int)
+                    elig_bool = eval_design.elig.astype(bool)
+                    matched = (pi_obs > 0) & elig_bool[np.arange(len(eval_design.Y)), A_int]
+                    
+                    if matched.sum() > 0:
+                        # Compute clipped weights
+                        if result.clip == float("inf"):
+                            w_clip = np.where(pi_obs > 0, 1.0 / pi_obs, 0.0)
+                        else:
+                            w_clip = np.where(pi_obs > 0, np.minimum(1.0 / pi_obs, result.clip), 0.0)
+                        w_clip[~matched] = 0
+                        
+                        # Create bootstrap values from DR contributions
+                        dr_contrib = q_pi + w_clip * (eval_design.Y - q_hat)
+                        ci_lower, ci_upper = block_bootstrap_ci(
+                            values_num=dr_contrib,
+                            values_den=None,
+                            base_mean=np.array([result.V_hat]),
+                            n_boot=400,
+                            alpha=alpha,
+                            random_state=random_state,
+                        )
+                    else:
+                        # Fallback if no matched samples
+                        ci_lower, ci_upper = (
+                            result.V_hat - 1.96 * result.SE_if,
+                            result.V_hat + 1.96 * result.SE_if,
+                        )
+                except Exception:
+                    # Fallback to normal approximation if bootstrap fails
+                    ci_lower, ci_upper = (
+                        result.V_hat - 1.96 * result.SE_if,
+                        result.V_hat + 1.96 * result.SE_if,
+                    )
                 row["ci_lower"] = ci_lower
                 row["ci_upper"] = ci_upper
 
@@ -1392,11 +1444,45 @@ def evaluate_pairwise_models(
                 }
 
                 if ci_bootstrap:
-                    # Simplified CI (would need proper implementation)
-                    ci_lower, ci_upper = (
-                        result.V_hat - 1.96 * result.SE_if,
-                        result.V_hat + 1.96 * result.SE_if,
-                    )
+                    # Use proper block bootstrap for time-series data
+                    try:
+                        # Recompute DR contributions for bootstrap
+                        q_pi = np.sum(policy_probs * q_hat.reshape(len(Y), -1), axis=1)
+                        pi_obs = propensities[np.arange(len(Y)), A]
+                        A_int = A.astype(int)
+                        elig_bool = elig.astype(bool)
+                        matched = (pi_obs > 0) & elig_bool[np.arange(len(Y)), A_int]
+                        
+                        if matched.sum() > 0:
+                            # Compute clipped weights
+                            if result.clip == float("inf"):
+                                w_clip = np.where(pi_obs > 0, 1.0 / pi_obs, 0.0)
+                            else:
+                                w_clip = np.where(pi_obs > 0, np.minimum(1.0 / pi_obs, result.clip), 0.0)
+                            w_clip[~matched] = 0
+                            
+                            # Create bootstrap values from DR contributions
+                            dr_contrib = q_pi + w_clip * (Y - q_hat)
+                            ci_lower, ci_upper = block_bootstrap_ci(
+                                values_num=dr_contrib,
+                                values_den=None,
+                                base_mean=np.array([result.V_hat]),
+                                n_boot=400,
+                                alpha=alpha,
+                                random_state=random_state,
+                            )
+                        else:
+                            # Fallback if no matched samples
+                            ci_lower, ci_upper = (
+                                result.V_hat - 1.96 * result.SE_if,
+                                result.V_hat + 1.96 * result.SE_if,
+                            )
+                    except Exception:
+                        # Fallback to normal approximation if bootstrap fails
+                        ci_lower, ci_upper = (
+                            result.V_hat - 1.96 * result.SE_if,
+                            result.V_hat + 1.96 * result.SE_if,
+                        )
                     report_row["ci_lower"] = ci_lower
                     report_row["ci_upper"] = ci_upper
 
