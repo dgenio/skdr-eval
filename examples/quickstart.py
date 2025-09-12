@@ -13,7 +13,7 @@ def main():
 
     # 1. Generate synthetic logs
     print("\n1. Generating synthetic service logs...")
-    logs, ops_all, true_q = skdr_eval.make_synth_logs(n=5000, n_ops=5, seed=42)
+    logs, ops_all, _ = skdr_eval.make_synth_logs(n=5000, n_ops=5, seed=42)
 
     print(f"   Generated {len(logs)} log entries")
     print(f"   Operators: {list(ops_all)}")
