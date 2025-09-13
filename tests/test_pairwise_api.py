@@ -100,7 +100,7 @@ def test_pairwise_binary_basic():
         model.fit(X, y)
 
     # Run pairwise evaluation
-    report, detailed_results = evaluate_pairwise_models(
+    report, _ = evaluate_pairwise_models(
         logs_df=logs_df,
         op_daily_df=op_daily_df,
         models=models,
@@ -249,7 +249,7 @@ def test_pairwise_error_handling():
         )
 
     # Test with invalid direction
-    with pytest.raises(ValueError, match="Unknown.*direction"):
+    with pytest.raises(ValueError, match=r"Unknown.*direction"):
         evaluate_pairwise_models(
             logs_df=logs_df,
             op_daily_df=op_daily_df,

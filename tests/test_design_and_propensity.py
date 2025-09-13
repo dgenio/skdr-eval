@@ -84,7 +84,7 @@ def test_propensities_row_normalized_over_eligibility():
     design = skdr_eval.build_design(logs)
 
     # Fit propensity model
-    propensities, fold_indices = skdr_eval.fit_propensity_timecal(
+    propensities, _ = skdr_eval.fit_propensity_timecal(
         design.X_phi, design.A, design.ts, n_splits=3, random_state=30
     )
 
@@ -123,7 +123,7 @@ def test_propensities_row_normalized_over_eligibility():
 
 def test_propensities_positive_when_matched():
     """Test that propensities are positive for observed actions when matched."""
-    logs, ops_all, _ = skdr_eval.make_synth_logs(n=250, n_ops=3, seed=40)
+    logs, _, _ = skdr_eval.make_synth_logs(n=250, n_ops=3, seed=40)
     design = skdr_eval.build_design(logs)
 
     # Fit propensity model
@@ -154,7 +154,7 @@ def test_propensities_positive_when_matched():
 
 def test_design_feature_construction():
     """Test that design features are constructed correctly."""
-    logs, ops_all, _ = skdr_eval.make_synth_logs(n=100, n_ops=2, seed=50)
+    logs, _, _ = skdr_eval.make_synth_logs(n=100, n_ops=2, seed=50)
     design = skdr_eval.build_design(logs, cli_pref="cli_", st_pref="st_")
 
     # Check that base features include client and service-time features
@@ -207,12 +207,12 @@ def test_design_with_custom_prefixes():
 
 def test_propensity_time_aware_splits():
     """Test that propensity fitting uses time-aware splits correctly."""
-    logs, ops_all, _ = skdr_eval.make_synth_logs(n=400, n_ops=3, seed=70)
+    logs, _, _ = skdr_eval.make_synth_logs(n=400, n_ops=3, seed=70)
     design = skdr_eval.build_design(logs)
 
     # Fit with different numbers of splits
     for n_splits in [2, 3, 4]:
-        propensities, fold_indices = skdr_eval.fit_propensity_timecal(
+        _, fold_indices = skdr_eval.fit_propensity_timecal(
             design.X_phi, design.A, design.ts, n_splits=n_splits, random_state=70
         )
 

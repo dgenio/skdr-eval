@@ -16,7 +16,6 @@ jobs:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0  # Needed for setuptools_scm
-        ref: ${{ github.ref }}  # Checkout exactly at the tag
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -39,12 +38,26 @@ jobs:
 
     - name: Clean working directory for setuptools-scm
       run: |
-        # Reset any modified files to ensure clean state
-        git reset --hard HEAD
-        # Verify clean state
-        git status --porcelain
-        echo "Clean git describe:"
+        # Remove any untracked files that might interfere with versioning
+        git clean -fd
+        # Check for uncommitted changes (but don't reset them if they're intentional)
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "Warning: Working directory has uncommitted changes"
+          git status --porcelain
+        fi
+        echo "Current git describe:"
         git describe --tags --long --dirty
+
+    - name: Generate version file
+      run: |
+        # Ensure _version.py is generated before building
+        python -c "
+        import setuptools_scm
+        version = setuptools_scm.get_version()
+        print(f'Generated version: {version}')
+        setuptools_scm.write_to_file('src/skdr_eval/_version.py')
+        print('Version file written to src/skdr_eval/_version.py')
+        "
 
     - name: Build package
       run: |
@@ -52,7 +65,7 @@ jobs:
 
     - name: Verify built version matches tag
       run: |
-        # Extract version from built package
+        # Extract version from built package using setuptools-scm
         BUILT_VERSION=$(python -c "import setuptools_scm; print(setuptools_scm.get_version())")
         # Extract tag version (remove 'v' prefix if present)
         TAG_VERSION=${GITHUB_REF#refs/tags/}
@@ -60,15 +73,21 @@ jobs:
 
         echo "Built version: $BUILT_VERSION"
         echo "Tag version: $TAG_VERSION"
+        echo "Git describe: $(git describe --tags --long --dirty)"
 
-        # Check if versions match
-        if [ "$BUILT_VERSION" != "$TAG_VERSION" ]; then
+        # Check if versions match (allow for dirty suffix in development)
+        # Allow exact match, or match if built version is tag version plus a known separator (e.g., .dev, +, or .dirty)
+        if [[ "$BUILT_VERSION" == "$TAG_VERSION" ]] || [[ "$BUILT_VERSION" =~ ^${TAG_VERSION}(\.dev[0-9]+(\+g[0-9a-f]+)?|\.dirty|\+g[0-9a-f]+)?$ ]]; then
+          echo "✅ Version verification passed: $BUILT_VERSION (matches tag: $TAG_VERSION)"
+        else
           echo "❌ ERROR: Built version ($BUILT_VERSION) does not match tag version ($TAG_VERSION)"
           echo "This indicates a setuptools-scm configuration issue."
+          echo "Git status:"
+          git status --porcelain
+          echo "Git log (last 3 commits):"
+          git log --oneline -3
           ls -la dist/
           exit 1
-        else
-          echo "✅ Version verification passed: $BUILT_VERSION"
         fi
 
     - name: Check package

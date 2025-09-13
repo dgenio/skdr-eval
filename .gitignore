@@ -176,3 +176,6 @@ Desktop.ini
 
 # Pre-commit
 .pre-commit-config.yaml.bak
+
+# setuptools-scm generated version file
+src/skdr_eval/_version.py
