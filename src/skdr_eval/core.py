@@ -311,7 +311,7 @@ def fit_propensity_timecal(
                     pred_proba = cal_proba_full
                 else:
                     pred_proba = cal_clf.predict_proba(X_test)
-        except (ValueError, RuntimeError, AttributeError) as e:
+        except (ValueError, RuntimeError, AttributeError):
             # Fallback to uncalibrated predictions if calibration fails
             # This can happen with edge cases in the calibration process
             pass
@@ -908,7 +908,7 @@ def evaluate_sklearn_models(
                             result.V_hat - 1.96 * result.SE_if,
                             result.V_hat + 1.96 * result.SE_if,
                         )
-                except (ValueError, RuntimeError, np.linalg.LinAlgError) as e:
+                except (ValueError, RuntimeError, np.linalg.LinAlgError):
                     # Fallback to normal approximation if bootstrap fails
                     # This can happen with numerical issues in bootstrap calculations
                     ci_lower, ci_upper = (
@@ -1525,7 +1525,7 @@ def evaluate_pairwise_models(
                                 result.V_hat - 1.96 * result.SE_if,
                                 result.V_hat + 1.96 * result.SE_if,
                             )
-                    except (ValueError, RuntimeError, np.linalg.LinAlgError) as e:
+                    except (ValueError, RuntimeError, np.linalg.LinAlgError):
                         # Fallback to normal approximation if bootstrap fails
                         # This can happen with numerical issues in bootstrap calculations
                         ci_lower, ci_upper = (

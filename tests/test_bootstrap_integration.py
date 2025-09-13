@@ -12,10 +12,10 @@ CI_TOLERANCE_MULTIPLIER = 2.0
 
 def _validate_ci_contains_estimate(row: pd.Series) -> None:
     """Validate that CI contains the point estimate or is close to it.
-    
+
     Args:
         row: DataFrame row containing 'ci_lower', 'ci_upper', and 'V_hat' columns
-        
+
     Raises:
         AssertionError: If CI doesn't contain estimate and isn't close enough
     """
@@ -300,10 +300,10 @@ class TestBootstrapIntegration:
         """Test bootstrap CI with different clipping scenarios to improve coverage."""
         # Generate data that will trigger clipping logic
         logs, _, _ = skdr_eval.make_synth_logs(n=1000, n_ops=3, seed=42)
-        
+
         # Use a model that will create extreme propensity scores
         models = {"rf": RandomForestRegressor(n_estimators=5, random_state=42)}
-        
+
         # Test with different clipping thresholds to cover both branches
         for clip_threshold in [2.0, 5.0, float("inf")]:
             report, _ = skdr_eval.evaluate_sklearn_models(
@@ -314,11 +314,11 @@ class TestBootstrapIntegration:
                 clip_grid=(clip_threshold,),  # Use specific clip threshold
                 random_state=42,
             )
-            
+
             # Should have CI columns
             assert "ci_lower" in report.columns
             assert "ci_upper" in report.columns
-            
+
             # CI should be reasonable
             for _, row in report.iterrows():
                 assert row["ci_lower"] < row["ci_upper"]
@@ -329,9 +329,9 @@ class TestBootstrapIntegration:
         """Test bootstrap CI fallback scenarios to improve coverage."""
         # Create data that might trigger fallback scenarios
         logs, _, _ = skdr_eval.make_synth_logs(n=100, n_ops=2, seed=42)
-        
+
         models = {"rf": RandomForestRegressor(n_estimators=3, random_state=42)}
-        
+
         # Test with very small dataset that might trigger fallbacks
         report, _ = skdr_eval.evaluate_sklearn_models(
             logs=logs,
@@ -341,11 +341,11 @@ class TestBootstrapIntegration:
             n_splits=2,  # Small number of splits
             random_state=42,
         )
-        
+
         # Should still work and have CI columns
         assert "ci_lower" in report.columns
         assert "ci_upper" in report.columns
-        
+
         # CI should be finite
         for _, row in report.iterrows():
             assert np.isfinite(row["ci_lower"])
