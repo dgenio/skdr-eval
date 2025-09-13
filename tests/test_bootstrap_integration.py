@@ -6,6 +6,27 @@ from sklearn.ensemble import RandomForestRegressor
 
 import skdr_eval
 
+# Constants for CI validation
+CI_TOLERANCE_MULTIPLIER = 2.0
+
+
+def _validate_ci_contains_estimate(row: pd.Series) -> None:
+    """Validate that CI contains the point estimate or is close to it.
+    
+    Args:
+        row: DataFrame row containing 'ci_lower', 'ci_upper', and 'V_hat' columns
+        
+    Raises:
+        AssertionError: If CI doesn't contain estimate and isn't close enough
+    """
+    ci_contains_estimate = row["ci_lower"] <= row["V_hat"] <= row["ci_upper"]
+    ci_close_to_estimate = abs(row["ci_lower"] - row["V_hat"]) < CI_TOLERANCE_MULTIPLIER * abs(
+        row["ci_upper"] - row["ci_lower"]
+    )
+    assert ci_contains_estimate or ci_close_to_estimate, (
+        f"CI [{row['ci_lower']:.3f}, {row['ci_upper']:.3f}] should contain or be close to V_hat {row['V_hat']:.3f}"
+    )
+
 
 class TestBootstrapIntegration:
     """Test suite for bootstrap CI integration."""
