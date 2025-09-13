@@ -311,8 +311,9 @@ def fit_propensity_timecal(
                     pred_proba = cal_proba_full
                 else:
                     pred_proba = cal_clf.predict_proba(X_test)
-        except Exception:
-            # Fallback to uncalibrated predictions
+        except (ValueError, RuntimeError, AttributeError) as e:
+            # Fallback to uncalibrated predictions if calibration fails
+            # This can happen with edge cases in the calibration process
             pass
 
         # Ensure probabilities sum to 1 and are positive
@@ -459,8 +460,7 @@ def induce_policy_from_sklearn(
             policy_probs[i, eligible_ops] = 1.0 / (pred_times_array + 1e-8)
             policy_probs[i] /= policy_probs[i].sum()
 
-    result: np.ndarray = np.asarray(policy_probs, dtype=np.float64)
-    return result
+    return np.asarray(policy_probs, dtype=np.float64)
 
 
 def dr_value_with_clip(
@@ -908,8 +908,9 @@ def evaluate_sklearn_models(
                             result.V_hat - 1.96 * result.SE_if,
                             result.V_hat + 1.96 * result.SE_if,
                         )
-                except Exception:
+                except (ValueError, RuntimeError, np.linalg.LinAlgError) as e:
                     # Fallback to normal approximation if bootstrap fails
+                    # This can happen with numerical issues in bootstrap calculations
                     ci_lower, ci_upper = (
                         result.V_hat - 1.96 * result.SE_if,
                         result.V_hat + 1.96 * result.SE_if,
@@ -1524,8 +1525,9 @@ def evaluate_pairwise_models(
                                 result.V_hat - 1.96 * result.SE_if,
                                 result.V_hat + 1.96 * result.SE_if,
                             )
-                    except Exception:
+                    except (ValueError, RuntimeError, np.linalg.LinAlgError) as e:
                         # Fallback to normal approximation if bootstrap fails
+                        # This can happen with numerical issues in bootstrap calculations
                         ci_lower, ci_upper = (
                             result.V_hat - 1.96 * result.SE_if,
                             result.V_hat + 1.96 * result.SE_if,

@@ -71,15 +71,7 @@ class TestBootstrapIntegration:
         # Check that CI values are reasonable
         for _, row in report_with_ci.iterrows():
             assert row["ci_lower"] < row["ci_upper"]
-            # CI should contain the point estimate (V_hat) or be close to it
-            # Allow some tolerance for bootstrap variability
-            ci_contains_estimate = row["ci_lower"] <= row["V_hat"] <= row["ci_upper"]
-            ci_close_to_estimate = abs(row["ci_lower"] - row["V_hat"]) < 2 * abs(
-                row["ci_upper"] - row["ci_lower"]
-            )
-            assert ci_contains_estimate or ci_close_to_estimate, (
-                f"CI [{row['ci_lower']:.3f}, {row['ci_upper']:.3f}] should contain or be close to V_hat {row['V_hat']:.3f}"
-            )
+            _validate_ci_contains_estimate(row)
             assert not pd.isna(row["ci_lower"])
             assert not pd.isna(row["ci_upper"])
 
@@ -131,15 +123,7 @@ class TestBootstrapIntegration:
         # Check that CI values are reasonable
         for _, row in report_with_ci.iterrows():
             assert row["ci_lower"] < row["ci_upper"]
-            # CI should contain the point estimate (V_hat) or be close to it
-            # Allow some tolerance for bootstrap variability
-            ci_contains_estimate = row["ci_lower"] <= row["V_hat"] <= row["ci_upper"]
-            ci_close_to_estimate = abs(row["ci_lower"] - row["V_hat"]) < 2 * abs(
-                row["ci_upper"] - row["ci_lower"]
-            )
-            assert ci_contains_estimate or ci_close_to_estimate, (
-                f"CI [{row['ci_lower']:.3f}, {row['ci_upper']:.3f}] should contain or be close to V_hat {row['V_hat']:.3f}"
-            )
+            _validate_ci_contains_estimate(row)
             assert not pd.isna(row["ci_lower"])
             assert not pd.isna(row["ci_upper"])
 
