@@ -23,7 +23,7 @@ class TestBlockBootstrapCI:
             values_den=values_den,
             base_mean=base_mean,
             n_boot=100,
-            random_state=42
+            random_state=42,
         )
 
         # Check that CI bounds are reasonable
@@ -48,7 +48,7 @@ class TestBlockBootstrapCI:
             values_den=values_den,
             base_mean=base_mean,
             n_boot=100,
-            random_state=42
+            random_state=42,
         )
 
         # Check that CI bounds are reasonable
@@ -71,7 +71,7 @@ class TestBlockBootstrapCI:
             base_mean=base_mean,
             n_boot=100,
             alpha=0.1,
-            random_state=42
+            random_state=42,
         )
 
         # Test 95% CI (alpha=0.05)
@@ -81,7 +81,7 @@ class TestBlockBootstrapCI:
             base_mean=base_mean,
             n_boot=100,
             alpha=0.05,
-            random_state=42
+            random_state=42,
         )
 
         # 90% CI should be narrower than 95% CI
@@ -103,7 +103,7 @@ class TestBlockBootstrapCI:
             base_mean=base_mean,
             n_boot=100,
             block_len=5,
-            random_state=42
+            random_state=42,
         )
 
         # Test with large block length
@@ -113,7 +113,7 @@ class TestBlockBootstrapCI:
             base_mean=base_mean,
             n_boot=100,
             block_len=20,
-            random_state=42
+            random_state=42,
         )
 
         # Both should produce valid CIs
@@ -134,7 +134,7 @@ class TestBlockBootstrapCI:
             base_mean=base_mean,
             n_boot=100,
             block_len=None,
-            random_state=42
+            random_state=42,
         )
 
         assert ci_lower < ci_upper
@@ -151,7 +151,7 @@ class TestBlockBootstrapCI:
             values_den=None,
             base_mean=base_mean,
             n_boot=50,  # Fewer bootstrap samples for speed
-            random_state=42
+            random_state=42,
         )
 
         assert ci_lower < ci_upper
@@ -169,7 +169,7 @@ class TestBlockBootstrapCI:
             values_den=values_den,
             base_mean=base_mean,
             n_boot=100,
-            random_state=42
+            random_state=42,
         )
 
         # Should handle zero denominators gracefully
@@ -189,7 +189,7 @@ class TestBlockBootstrapCI:
             values_den=None,
             base_mean=base_mean,
             n_boot=100,
-            random_state=42
+            random_state=42,
         )
 
         ci2_lower, ci2_upper = skdr_eval.block_bootstrap_ci(
@@ -197,7 +197,7 @@ class TestBlockBootstrapCI:
             values_den=None,
             base_mean=base_mean,
             n_boot=100,
-            random_state=42
+            random_state=42,
         )
 
         # Results should be identical
@@ -217,7 +217,7 @@ class TestBlockBootstrapCI:
             values_den=None,
             base_mean=base_mean,
             n_boot=100,
-            random_state=42
+            random_state=42,
         )
 
         ci2_lower, ci2_upper = skdr_eval.block_bootstrap_ci(
@@ -225,7 +225,7 @@ class TestBlockBootstrapCI:
             values_den=None,
             base_mean=base_mean,
             n_boot=100,
-            random_state=123
+            random_state=123,
         )
 
         # Results should be different (very unlikely to be identical)
@@ -241,7 +241,7 @@ class TestBlockBootstrapCI:
             values_den=None,
             base_mean=base_mean,
             n_boot=10,
-            random_state=42
+            random_state=42,
         )
 
         # With single value, CI should be the value itself
@@ -262,7 +262,7 @@ class TestBlockBootstrapCI:
             base_mean=base_mean,
             n_boot=100,
             block_len=10,  # Use block length appropriate for correlation
-            random_state=42
+            random_state=42,
         )
 
         assert ci_lower < ci_upper
@@ -282,7 +282,7 @@ class TestBlockBootstrapCI:
             values_den=None,
             base_mean=base_mean,
             n_boot=1000,  # Large number of bootstrap samples
-            random_state=42
+            random_state=42,
         )
 
         assert ci_lower < ci_upper
@@ -299,7 +299,7 @@ class TestBlockBootstrapCI:
                 values_den=None,
                 base_mean=base_mean,
                 alpha=1.5,  # Invalid alpha > 1
-                random_state=42
+                random_state=42,
             )
 
         with pytest.raises(ValueError):
@@ -308,7 +308,7 @@ class TestBlockBootstrapCI:
                 values_den=None,
                 base_mean=base_mean,
                 alpha=-0.1,  # Invalid alpha < 0
-                random_state=42
+                random_state=42,
             )
 
     def test_empty_array_handling(self):
@@ -321,5 +321,5 @@ class TestBlockBootstrapCI:
                 values_num=values_num,
                 values_den=None,
                 base_mean=base_mean,
-                random_state=42
+                random_state=42,
             )

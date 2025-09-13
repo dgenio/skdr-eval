@@ -52,9 +52,13 @@ class TestBootstrapIntegration:
             assert row["ci_lower"] < row["ci_upper"]
             # CI should contain the point estimate (V_hat) or be close to it
             # Allow some tolerance for bootstrap variability
-            ci_contains_estimate = (row["ci_lower"] <= row["V_hat"] <= row["ci_upper"])
-            ci_close_to_estimate = (abs(row["ci_lower"] - row["V_hat"]) < 2 * abs(row["ci_upper"] - row["ci_lower"]))
-            assert ci_contains_estimate or ci_close_to_estimate, f"CI [{row['ci_lower']:.3f}, {row['ci_upper']:.3f}] should contain or be close to V_hat {row['V_hat']:.3f}"
+            ci_contains_estimate = row["ci_lower"] <= row["V_hat"] <= row["ci_upper"]
+            ci_close_to_estimate = abs(row["ci_lower"] - row["V_hat"]) < 2 * abs(
+                row["ci_upper"] - row["ci_lower"]
+            )
+            assert ci_contains_estimate or ci_close_to_estimate, (
+                f"CI [{row['ci_lower']:.3f}, {row['ci_upper']:.3f}] should contain or be close to V_hat {row['V_hat']:.3f}"
+            )
             assert not pd.isna(row["ci_lower"])
             assert not pd.isna(row["ci_upper"])
 
@@ -108,9 +112,13 @@ class TestBootstrapIntegration:
             assert row["ci_lower"] < row["ci_upper"]
             # CI should contain the point estimate (V_hat) or be close to it
             # Allow some tolerance for bootstrap variability
-            ci_contains_estimate = (row["ci_lower"] <= row["V_hat"] <= row["ci_upper"])
-            ci_close_to_estimate = (abs(row["ci_lower"] - row["V_hat"]) < 2 * abs(row["ci_upper"] - row["ci_lower"]))
-            assert ci_contains_estimate or ci_close_to_estimate, f"CI [{row['ci_lower']:.3f}, {row['ci_upper']:.3f}] should contain or be close to V_hat {row['V_hat']:.3f}"
+            ci_contains_estimate = row["ci_lower"] <= row["V_hat"] <= row["ci_upper"]
+            ci_close_to_estimate = abs(row["ci_lower"] - row["V_hat"]) < 2 * abs(
+                row["ci_upper"] - row["ci_lower"]
+            )
+            assert ci_contains_estimate or ci_close_to_estimate, (
+                f"CI [{row['ci_lower']:.3f}, {row['ci_upper']:.3f}] should contain or be close to V_hat {row['V_hat']:.3f}"
+            )
             assert not pd.isna(row["ci_lower"])
             assert not pd.isna(row["ci_upper"])
 
@@ -228,7 +236,9 @@ class TestBootstrapIntegration:
 
             # Bootstrap CI should be different from normal approximation
             # (though they might be close for some cases)
-            assert not (bootstrap_lower == normal_lower and bootstrap_upper == normal_upper)
+            assert not (
+                bootstrap_lower == normal_lower and bootstrap_upper == normal_upper
+            )
 
     def test_bootstrap_ci_time_series_properties(self):
         """Test that bootstrap CI preserves time-series properties."""
@@ -249,7 +259,9 @@ class TestBootstrapIntegration:
             "cli_urgency": np.random.uniform(0, 1, n),
             "cli_complexity": np.random.exponential(1, n),
             "st_load": np.random.exponential(1, n),
-            "st_time_of_day": np.sin(2 * np.pi * pd.date_range("2024-01-01", periods=n, freq="1H").hour / 24),
+            "st_time_of_day": np.sin(
+                2 * np.pi * pd.date_range("2024-01-01", periods=n, freq="1H").hour / 24
+            ),
             "op_A_elig": np.ones(n, dtype=bool),
             "op_B_elig": np.ones(n, dtype=bool),
             "op_C_elig": np.ones(n, dtype=bool),

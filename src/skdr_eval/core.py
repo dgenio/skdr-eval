@@ -872,18 +872,24 @@ def evaluate_sklearn_models(
                 # Use proper block bootstrap for time-series data
                 try:
                     # Recompute DR contributions for bootstrap
-                    q_pi = np.sum(policy_probs * q_hat.reshape(len(eval_design.Y), -1), axis=1)
+                    q_pi = np.sum(
+                        policy_probs * q_hat.reshape(len(eval_design.Y), -1), axis=1
+                    )
                     pi_obs = propensities[np.arange(len(eval_design.Y)), eval_design.A]
                     A_int = eval_design.A.astype(int)
                     elig_bool = eval_design.elig.astype(bool)
-                    matched = (pi_obs > 0) & elig_bool[np.arange(len(eval_design.Y)), A_int]
+                    matched = (pi_obs > 0) & elig_bool[
+                        np.arange(len(eval_design.Y)), A_int
+                    ]
 
                     if matched.sum() > 0:
                         # Compute clipped weights
                         if result.clip == float("inf"):
                             w_clip = np.where(pi_obs > 0, 1.0 / pi_obs, 0.0)
                         else:
-                            w_clip = np.where(pi_obs > 0, np.minimum(1.0 / pi_obs, result.clip), 0.0)
+                            w_clip = np.where(
+                                pi_obs > 0, np.minimum(1.0 / pi_obs, result.clip), 0.0
+                            )
                         w_clip[~matched] = 0
 
                         # Create bootstrap values from DR contributions
@@ -1495,7 +1501,11 @@ def evaluate_pairwise_models(
                             if result.clip == float("inf"):
                                 w_clip = np.where(pi_obs > 0, 1.0 / pi_obs, 0.0)
                             else:
-                                w_clip = np.where(pi_obs > 0, np.minimum(1.0 / pi_obs, result.clip), 0.0)
+                                w_clip = np.where(
+                                    pi_obs > 0,
+                                    np.minimum(1.0 / pi_obs, result.clip),
+                                    0.0,
+                                )
                             w_clip[~matched] = 0
 
                             # Create bootstrap values from DR contributions
