@@ -208,7 +208,7 @@ class TestBootstrapIntegration:
         )
 
         # Get normal approximation CI
-        report_normal, _ = skdr_eval.evaluate_sklearn_models(
+        _report_normal, _ = skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models=models,
             fit_models=True,

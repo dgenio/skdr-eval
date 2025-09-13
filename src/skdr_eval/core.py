@@ -664,7 +664,7 @@ def block_bootstrap_ci(
         Lower confidence bound.
     ci_upper : float
         Upper confidence bound.
-        
+
     Raises
     ------
     ValueError
