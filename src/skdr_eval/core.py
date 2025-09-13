@@ -876,8 +876,8 @@ def evaluate_sklearn_models(
                         policy_probs * q_hat.reshape(len(eval_design.Y), -1), axis=1
                     )
                     pi_obs = propensities[np.arange(len(eval_design.Y)), eval_design.A]
-                    A_int = eval_design.A.astype(int)
-                    elig_bool = eval_design.elig.astype(bool)
+                    A_int: np.ndarray = eval_design.A.astype(int)
+                    elig_bool: np.ndarray = eval_design.elig.astype(bool)
                     matched = (pi_obs > 0) & elig_bool[
                         np.arange(len(eval_design.Y)), A_int
                     ]
@@ -1492,8 +1492,8 @@ def evaluate_pairwise_models(
                         # Recompute DR contributions for bootstrap
                         q_pi = np.sum(policy_probs * q_hat.reshape(len(Y), -1), axis=1)
                         pi_obs = propensities[np.arange(len(Y)), A]
-                        A_int = A.astype(int)
-                        elig_bool = elig.astype(bool)
+                        A_int: np.ndarray = A.astype(int)
+                        elig_bool: np.ndarray = elig.astype(bool)
                         matched = (pi_obs > 0) & elig_bool[np.arange(len(Y)), A_int]
 
                         if matched.sum() > 0:
