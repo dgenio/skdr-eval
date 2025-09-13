@@ -48,17 +48,6 @@ jobs:
         echo "Current git describe:"
         git describe --tags --long --dirty
 
-    - name: Generate version file
-      run: |
-        # Ensure _version.py is generated before building
-        python -c "
-        import setuptools_scm
-        version = setuptools_scm.get_version()
-        print(f'Generated version: {version}')
-        setuptools_scm.write_to_file('src/skdr_eval/_version.py')
-        print('Version file written to src/skdr_eval/_version.py')
-        "
-
     - name: Build package
       run: |
         python -m build
