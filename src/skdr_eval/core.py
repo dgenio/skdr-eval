@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional, Union
+from typing import Any, Callable, Literal, Optional, Protocol, Union
 
 import numpy as np
 import pandas as pd
@@ -24,6 +24,29 @@ from .choice import (
 from .pairwise import PairwiseDesign, induce_policy
 
 logger = logging.getLogger("skdr_eval")
+
+
+# Type definitions for better type safety
+class EstimatorProtocol(Protocol):
+    """Protocol for sklearn estimators."""
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> Any: ...
+    def predict(self, X: np.ndarray) -> Any: ...
+
+
+class ClassifierProtocol(Protocol):
+    """Protocol for sklearn classifiers."""
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> Any: ...
+    def predict(self, X: np.ndarray) -> Any: ...
+    def predict_proba(self, X: np.ndarray) -> Any: ...
+
+
+class RegressorProtocol(Protocol):
+    """Protocol for sklearn regressors."""
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> Any: ...
+    def predict(self, X: np.ndarray) -> Any: ...
 
 
 @dataclass
@@ -390,7 +413,7 @@ def induce_policy_from_sklearn(
     ops_all: list[str],
     elig: np.ndarray,
     idx: dict[str, int],  # noqa: ARG001
-) -> Any:  # Changed from np.ndarray to Any to avoid mypy issues
+) -> np.ndarray:
     """Induce policy from sklearn model by predicting service times.
 
     Parameters
@@ -436,7 +459,8 @@ def induce_policy_from_sklearn(
             policy_probs[i, eligible_ops] = 1.0 / (pred_times_array + 1e-8)
             policy_probs[i] /= policy_probs[i].sum()
 
-    return np.asarray(policy_probs)
+    result: np.ndarray = np.asarray(policy_probs, dtype=np.float64)
+    return result
 
 
 def dr_value_with_clip(
@@ -899,7 +923,20 @@ def _get_outcome_estimator(
 ) -> Any:
     """Get outcome estimator based on task type."""
     if callable(estimator):
-        return estimator()
+        result = estimator()
+        # Basic validation that the result has the expected methods
+        if not hasattr(result, "fit") or not hasattr(result, "predict"):
+            raise TypeError(
+                f"Callable estimator must return an object with 'fit' and 'predict' methods, "
+                f"got {type(result).__name__}"
+            )
+        # For binary classification, also check for predict_proba
+        if task_type == "binary" and not hasattr(result, "predict_proba"):
+            logger.warning(
+                f"Binary classifier {type(result).__name__} missing 'predict_proba' method. "
+                "This may cause issues in propensity estimation."
+            )
+        return result
 
     if task_type == "regression":
         if estimator == "hgb":
@@ -922,7 +959,7 @@ def _get_outcome_estimator(
 
 
 def estimate_propensity_pairwise(
-    design: Any,
+    design: PairwiseDesign,
     strategy: Literal["condlogit", "multinomial"] = "multinomial",
     method: Literal["condlogit", "multinomial"] = "condlogit",
     neg_per_pos: int = 5,

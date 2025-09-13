@@ -33,6 +33,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Performance**: 400 bootstrap samples by default with configurable parameters
 - **Reproducibility**: All bootstrap operations use consistent random seeds
 
+## [0.4.1] - 2025-01-15
+
+### Fixed
+- **Release Automation**: Configured GitHub Actions workflow to trigger on pushed tags
+- **Automatic PyPI Publishing**: Releases now automatically publish to PyPI when tags are pushed
+- **Developer Experience**: Simplified release process - just push a tag to trigger publication
+
+### Technical Details
+- **Workflow Trigger**: Added `push.tags: ['v*']` trigger to release workflow
+- **Backward Compatibility**: Maintains existing `release` and `workflow_dispatch` triggers
+- **Tag Pattern**: Supports any version tag pattern (v1.0.0, v2.1.3, etc.)
+
+## [0.4.0] - 2025-01-15
+
+### Added
+- **Comprehensive Type Safety**: Enhanced type annotations throughout the codebase
+- **Sklearn Protocol Definitions**: Added `ClassifierProtocol` and `RegressorProtocol` for better type safety
+- **Runtime Validation**: Added validation for callable estimators to prevent runtime errors
+- **Enhanced Error Handling**: Improved error messages and warnings for better debugging
+
+### Fixed
+- **Major Tech Debt Resolution**: Resolved critical type safety violations using `Any` types as workarounds
+- **Type Annotation Issues**: Fixed `induce_policy_from_sklearn` return type from `Any` to `np.ndarray`
+- **Mypy Compatibility**: Resolved all mypy type checking errors with proper type annotations
+- **Callable Estimator Safety**: Added runtime validation for callable estimators to prevent type errors
+- **Import Ordering**: Fixed ruff linting issues with proper import organization
+
+### Enhanced
+- **Type Safety**: Comprehensive protocols for sklearn estimators with proper method signatures
+- **Developer Experience**: Better IDE support and static analysis capabilities
+- **Error Prevention**: Runtime validation prevents common type-related runtime errors
+- **Code Quality**: All linting, formatting, and type checking standards now pass
+
+### Technical Details
+- **Protocols**: Added `ClassifierProtocol` with `predict_proba` method for sklearn classifiers
+- **Validation**: Runtime checks ensure callable estimators return compatible objects
+- **Type Inference**: Improved type inference with explicit type annotations
+- **Compatibility**: Maintains full backward compatibility while improving type safety
+
+## [0.3.3] - 2025-01-15
+
+### Fixed
+- **Type Safety Violations**: Resolved critical type annotation issues in core functions
+- **induce_policy_from_sklearn**: Fixed return type annotation from `Any` to `np.ndarray`
+- **EstimatorProtocol**: Added proper protocol for sklearn estimators in `_get_outcome_estimator`
+- **estimate_propensity_pairwise**: Fixed parameter type from `Any` to `PairwiseDesign`
+- **Type Safety Workarounds**: Removed mypy workarounds that compromised type safety
+
+### Technical Debt
+- **Major Tech Debt Resolution**: Addressed critical type safety violations that were using `Any` types to avoid mypy issues
+- **Code Quality**: Improved type safety and maintainability by using proper type annotations
+- **Developer Experience**: Enhanced IDE support and static analysis capabilities
+
+## [0.3.2] - 2025-08-13
+>>>>>>> origin/main
+
+### Fixed
+- **Major Tech Debt**: Implemented proper bootstrap confidence intervals using the existing `block_bootstrap_ci` function
+- **Statistical Accuracy**: Replaced incorrect normal approximation with proper moving-block bootstrap for time-series data
+- **Dead Code Elimination**: The `block_bootstrap_ci` function was implemented but never used (0% test coverage)
+- **False Advertising**: README claimed "Bootstrap Confidence Intervals" but only used normal approximation
+
+### Added
+- **Comprehensive Test Suite**: Added 14 new tests for `block_bootstrap_ci` function achieving 100% coverage
+- **Integration Tests**: Added 7 integration tests for bootstrap CI in both evaluation functions
+- **Proper Error Handling**: Added parameter validation and graceful fallback mechanisms
+- **Enhanced Documentation**: Updated README with detailed bootstrap CI parameters and usage
+
+### Enhanced
+- **Statistical Rigor**: Bootstrap CIs now properly account for time-series correlation structure
+- **Data Science Best Practices**: Moving-block bootstrap is the gold standard for time-series confidence intervals
+- **Test Coverage**: Improved overall test coverage from 75% to 78%
+- **Code Quality**: Eliminated dead code and improved maintainability
+
+### Technical Details
+- **Bootstrap Method**: Uses moving-block bootstrap with configurable block length (default: sqrt(n))
+- **Fallback Strategy**: Gracefully falls back to normal approximation if bootstrap fails
+- **Performance**: 400 bootstrap samples by default with configurable parameters
+- **Reproducibility**: All bootstrap operations use consistent random seeds
+
 ## [0.3.1] - 2025-08-13
 
 ### Fixed
