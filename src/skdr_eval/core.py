@@ -649,19 +649,19 @@ def block_bootstrap_ci(
     # Parameter validation
     if len(values_num) == 0:
         raise ValueError("values_num cannot be empty")
-    
+
     if not (0 < alpha < 1):
         raise ValueError(f"alpha must be in (0, 1), got {alpha}")
-    
+
     if n_boot <= 0:
         raise ValueError(f"n_boot must be positive, got {n_boot}")
-    
+
     rng = np.random.RandomState(random_state)
     n = len(values_num)
 
     if block_len is None:
         block_len = max(1, int(np.sqrt(n)))
-    
+
     # Ensure block_len doesn't exceed data length
     block_len = min(block_len, n)
 
@@ -706,7 +706,7 @@ def evaluate_sklearn_models(
     random_state: int = 0,
     clip_grid: tuple[float, ...] = (2, 5, 10, 20, 50, float("inf")),
     ci_bootstrap: bool = False,
-    alpha: float = 0.05,  # noqa: ARG001
+    alpha: float = 0.05,
     policy_train: str = "all",
     policy_train_frac: float = 0.85,
 ) -> tuple[pd.DataFrame, dict[str, dict[str, DRResult]]]:
@@ -853,7 +853,7 @@ def evaluate_sklearn_models(
                     A_int = eval_design.A.astype(int)
                     elig_bool = eval_design.elig.astype(bool)
                     matched = (pi_obs > 0) & elig_bool[np.arange(len(eval_design.Y)), A_int]
-                    
+
                     if matched.sum() > 0:
                         # Compute clipped weights
                         if result.clip == float("inf"):
@@ -861,7 +861,7 @@ def evaluate_sklearn_models(
                         else:
                             w_clip = np.where(pi_obs > 0, np.minimum(1.0 / pi_obs, result.clip), 0.0)
                         w_clip[~matched] = 0
-                        
+
                         # Create bootstrap values from DR contributions
                         dr_contrib = q_pi + w_clip * (eval_design.Y - q_hat)
                         ci_lower, ci_upper = block_bootstrap_ci(
@@ -1220,7 +1220,7 @@ def evaluate_pairwise_models(
     min_ess_frac: float = 0.02,
     clip_grid: tuple[float, ...] = (2, 5, 10, 20, 50, float("inf")),
     ci_bootstrap: bool = False,
-    alpha: float = 0.05,  # noqa: ARG001
+    alpha: float = 0.05,
     day_col: str = "arrival_day",
     client_id_col: str = "client_id",
     operator_id_col: str = "operator_id",
@@ -1452,7 +1452,7 @@ def evaluate_pairwise_models(
                         A_int = A.astype(int)
                         elig_bool = elig.astype(bool)
                         matched = (pi_obs > 0) & elig_bool[np.arange(len(Y)), A_int]
-                        
+
                         if matched.sum() > 0:
                             # Compute clipped weights
                             if result.clip == float("inf"):
@@ -1460,7 +1460,7 @@ def evaluate_pairwise_models(
                             else:
                                 w_clip = np.where(pi_obs > 0, np.minimum(1.0 / pi_obs, result.clip), 0.0)
                             w_clip[~matched] = 0
-                            
+
                             # Create bootstrap values from DR contributions
                             dr_contrib = q_pi + w_clip * (Y - q_hat)
                             ci_lower, ci_upper = block_bootstrap_ci(

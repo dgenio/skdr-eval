@@ -2,7 +2,6 @@
 
 import numpy as np
 import pandas as pd
-import pytest
 from sklearn.ensemble import RandomForestRegressor
 
 import skdr_eval
@@ -15,12 +14,12 @@ class TestBootstrapIntegration:
         """Test that bootstrap CI works in evaluate_sklearn_models."""
         # Generate synthetic data
         logs, _, _ = skdr_eval.make_synth_logs(n=500, n_ops=3, seed=42)
-        
+
         # Define models
         models = {
             "rf": RandomForestRegressor(n_estimators=10, random_state=42),
         }
-        
+
         # Test without bootstrap CI
         report_no_ci, _ = skdr_eval.evaluate_sklearn_models(
             logs=logs,
@@ -30,7 +29,7 @@ class TestBootstrapIntegration:
             ci_bootstrap=False,
             random_state=42,
         )
-        
+
         # Test with bootstrap CI
         report_with_ci, _ = skdr_eval.evaluate_sklearn_models(
             logs=logs,
@@ -41,13 +40,13 @@ class TestBootstrapIntegration:
             alpha=0.05,
             random_state=42,
         )
-        
+
         # Check that CI columns are added
         assert "ci_lower" not in report_no_ci.columns
         assert "ci_upper" not in report_no_ci.columns
         assert "ci_lower" in report_with_ci.columns
         assert "ci_upper" in report_with_ci.columns
-        
+
         # Check that CI values are reasonable
         for _, row in report_with_ci.iterrows():
             assert row["ci_lower"] < row["ci_upper"]
@@ -65,12 +64,12 @@ class TestBootstrapIntegration:
         logs_df, op_daily_df = skdr_eval.make_pairwise_synth(
             n_days=3, n_clients_day=100, n_ops=10, seed=42
         )
-        
+
         # Define models
         models = {
             "rf": RandomForestRegressor(n_estimators=10, random_state=42),
         }
-        
+
         # Test without bootstrap CI
         report_no_ci, _ = skdr_eval.evaluate_pairwise_models(
             logs_df=logs_df,
@@ -83,7 +82,7 @@ class TestBootstrapIntegration:
             ci_bootstrap=False,
             random_state=42,
         )
-        
+
         # Test with bootstrap CI
         report_with_ci, _ = skdr_eval.evaluate_pairwise_models(
             logs_df=logs_df,
@@ -97,13 +96,13 @@ class TestBootstrapIntegration:
             alpha=0.05,
             random_state=42,
         )
-        
+
         # Check that CI columns are added
         assert "ci_lower" not in report_no_ci.columns
         assert "ci_upper" not in report_no_ci.columns
         assert "ci_lower" in report_with_ci.columns
         assert "ci_upper" in report_with_ci.columns
-        
+
         # Check that CI values are reasonable
         for _, row in report_with_ci.iterrows():
             assert row["ci_lower"] < row["ci_upper"]
@@ -119,7 +118,7 @@ class TestBootstrapIntegration:
         """Test bootstrap CI with different alpha levels."""
         logs, _, _ = skdr_eval.make_synth_logs(n=300, n_ops=3, seed=42)
         models = {"rf": RandomForestRegressor(n_estimators=10, random_state=42)}
-        
+
         # Test 90% CI
         report_90, _ = skdr_eval.evaluate_sklearn_models(
             logs=logs,
@@ -129,7 +128,7 @@ class TestBootstrapIntegration:
             alpha=0.1,
             random_state=42,
         )
-        
+
         # Test 95% CI
         report_95, _ = skdr_eval.evaluate_sklearn_models(
             logs=logs,
@@ -139,7 +138,7 @@ class TestBootstrapIntegration:
             alpha=0.05,
             random_state=42,
         )
-        
+
         # 90% CI should be narrower than 95% CI
         for i in range(len(report_90)):
             ci_90_width = report_90.iloc[i]["ci_upper"] - report_90.iloc[i]["ci_lower"]
@@ -150,7 +149,7 @@ class TestBootstrapIntegration:
         """Test that bootstrap CI results are reproducible."""
         logs, _, _ = skdr_eval.make_synth_logs(n=200, n_ops=3, seed=42)
         models = {"rf": RandomForestRegressor(n_estimators=10, random_state=42)}
-        
+
         # Run twice with same random_state
         report1, _ = skdr_eval.evaluate_sklearn_models(
             logs=logs,
@@ -159,7 +158,7 @@ class TestBootstrapIntegration:
             ci_bootstrap=True,
             random_state=42,
         )
-        
+
         report2, _ = skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models=models,
@@ -167,7 +166,7 @@ class TestBootstrapIntegration:
             ci_bootstrap=True,
             random_state=42,
         )
-        
+
         # Results should be identical
         pd.testing.assert_frame_equal(report1, report2)
 
@@ -175,7 +174,7 @@ class TestBootstrapIntegration:
         """Test that bootstrap CI falls back gracefully on errors."""
         logs, _, _ = skdr_eval.make_synth_logs(n=50, n_ops=2, seed=42)  # Small dataset
         models = {"rf": RandomForestRegressor(n_estimators=5, random_state=42)}
-        
+
         # This should not raise an exception even with small dataset
         report, _ = skdr_eval.evaluate_sklearn_models(
             logs=logs,
@@ -184,11 +183,11 @@ class TestBootstrapIntegration:
             ci_bootstrap=True,
             random_state=42,
         )
-        
+
         # Should have CI columns
         assert "ci_lower" in report.columns
         assert "ci_upper" in report.columns
-        
+
         # CI values should be finite
         for _, row in report.iterrows():
             assert np.isfinite(row["ci_lower"])
@@ -198,7 +197,7 @@ class TestBootstrapIntegration:
         """Test that bootstrap CI differs from normal approximation."""
         logs, _, _ = skdr_eval.make_synth_logs(n=1000, n_ops=3, seed=42)
         models = {"rf": RandomForestRegressor(n_estimators=50, random_state=42)}
-        
+
         # Get bootstrap CI
         report_bootstrap, _ = skdr_eval.evaluate_sklearn_models(
             logs=logs,
@@ -207,7 +206,7 @@ class TestBootstrapIntegration:
             ci_bootstrap=True,
             random_state=42,
         )
-        
+
         # Get normal approximation CI
         report_normal, _ = skdr_eval.evaluate_sklearn_models(
             logs=logs,
@@ -216,17 +215,17 @@ class TestBootstrapIntegration:
             ci_bootstrap=False,
             random_state=42,
         )
-        
+
         # Compute normal approximation manually
         for i in range(len(report_bootstrap)):
             v_hat = report_bootstrap.iloc[i]["V_hat"]
             se_if = report_bootstrap.iloc[i]["SE_if"]
             normal_lower = v_hat - 1.96 * se_if
             normal_upper = v_hat + 1.96 * se_if
-            
+
             bootstrap_lower = report_bootstrap.iloc[i]["ci_lower"]
             bootstrap_upper = report_bootstrap.iloc[i]["ci_upper"]
-            
+
             # Bootstrap CI should be different from normal approximation
             # (though they might be close for some cases)
             assert not (bootstrap_lower == normal_lower and bootstrap_upper == normal_upper)
@@ -237,13 +236,13 @@ class TestBootstrapIntegration:
         np.random.seed(42)
         n = 500
         t = np.arange(n)
-        
+
         # Create correlated time series
         base_trend = 0.01 * t
         seasonal = 2 * np.sin(2 * np.pi * t / 50)
         noise = np.random.normal(0, 0.5, n)
         service_times = 10 + base_trend + seasonal + noise
-        
+
         # Create logs with time-ordered data
         logs_data = {
             "arrival_ts": pd.date_range("2024-01-01", periods=n, freq="1H"),
@@ -258,9 +257,9 @@ class TestBootstrapIntegration:
             "service_time": service_times,
         }
         logs = pd.DataFrame(logs_data)
-        
+
         models = {"rf": RandomForestRegressor(n_estimators=20, random_state=42)}
-        
+
         # Test bootstrap CI with time-series data
         report, _ = skdr_eval.evaluate_sklearn_models(
             logs=logs,
@@ -269,11 +268,11 @@ class TestBootstrapIntegration:
             ci_bootstrap=True,
             random_state=42,
         )
-        
+
         # Should work without errors
         assert "ci_lower" in report.columns
         assert "ci_upper" in report.columns
-        
+
         # CI should be reasonable
         for _, row in report.iterrows():
             assert row["ci_lower"] < row["ci_upper"]

@@ -17,7 +17,7 @@ class TestBlockBootstrapCI:
         values_num = np.random.normal(10, 2, n)
         values_den = None
         base_mean = np.array([10.0])
-        
+
         ci_lower, ci_upper = skdr_eval.block_bootstrap_ci(
             values_num=values_num,
             values_den=values_den,
@@ -25,12 +25,12 @@ class TestBlockBootstrapCI:
             n_boot=100,
             random_state=42
         )
-        
+
         # Check that CI bounds are reasonable
         assert ci_lower < ci_upper
         assert ci_lower < np.mean(values_num)
         assert ci_upper > np.mean(values_num)
-        
+
         # Check that CI is not too wide (should be reasonable for normal data)
         ci_width = ci_upper - ci_lower
         assert ci_width < 10.0  # Should be much smaller than data range
@@ -42,7 +42,7 @@ class TestBlockBootstrapCI:
         values_num = np.random.normal(10, 2, n)
         values_den = np.random.normal(1, 0.1, n)  # Denominator close to 1
         base_mean = np.array([10.0])
-        
+
         ci_lower, ci_upper = skdr_eval.block_bootstrap_ci(
             values_num=values_num,
             values_den=values_den,
@@ -50,7 +50,7 @@ class TestBlockBootstrapCI:
             n_boot=100,
             random_state=42
         )
-        
+
         # Check that CI bounds are reasonable
         assert ci_lower < ci_upper
         ratio_mean = np.mean(values_num) / np.mean(values_den)
@@ -63,7 +63,7 @@ class TestBlockBootstrapCI:
         n = 100
         values_num = np.random.normal(10, 2, n)
         base_mean = np.array([10.0])
-        
+
         # Test 90% CI (alpha=0.1)
         ci_90_lower, ci_90_upper = skdr_eval.block_bootstrap_ci(
             values_num=values_num,
@@ -73,7 +73,7 @@ class TestBlockBootstrapCI:
             alpha=0.1,
             random_state=42
         )
-        
+
         # Test 95% CI (alpha=0.05)
         ci_95_lower, ci_95_upper = skdr_eval.block_bootstrap_ci(
             values_num=values_num,
@@ -83,7 +83,7 @@ class TestBlockBootstrapCI:
             alpha=0.05,
             random_state=42
         )
-        
+
         # 90% CI should be narrower than 95% CI
         ci_90_width = ci_90_upper - ci_90_lower
         ci_95_width = ci_95_upper - ci_95_lower
@@ -95,7 +95,7 @@ class TestBlockBootstrapCI:
         n = 100
         values_num = np.random.normal(10, 2, n)
         base_mean = np.array([10.0])
-        
+
         # Test with small block length
         ci_small_lower, ci_small_upper = skdr_eval.block_bootstrap_ci(
             values_num=values_num,
@@ -105,7 +105,7 @@ class TestBlockBootstrapCI:
             block_len=5,
             random_state=42
         )
-        
+
         # Test with large block length
         ci_large_lower, ci_large_upper = skdr_eval.block_bootstrap_ci(
             values_num=values_num,
@@ -115,7 +115,7 @@ class TestBlockBootstrapCI:
             block_len=20,
             random_state=42
         )
-        
+
         # Both should produce valid CIs
         assert ci_small_lower < ci_small_upper
         assert ci_large_lower < ci_large_upper
@@ -126,7 +126,7 @@ class TestBlockBootstrapCI:
         n = 100
         values_num = np.random.normal(10, 2, n)
         base_mean = np.array([10.0])
-        
+
         # Test with None block_len (should use sqrt(n))
         ci_lower, ci_upper = skdr_eval.block_bootstrap_ci(
             values_num=values_num,
@@ -136,7 +136,7 @@ class TestBlockBootstrapCI:
             block_len=None,
             random_state=42
         )
-        
+
         assert ci_lower < ci_upper
 
     def test_small_dataset(self):
@@ -145,7 +145,7 @@ class TestBlockBootstrapCI:
         n = 20  # Small dataset
         values_num = np.random.normal(10, 2, n)
         base_mean = np.array([10.0])
-        
+
         ci_lower, ci_upper = skdr_eval.block_bootstrap_ci(
             values_num=values_num,
             values_den=None,
@@ -153,7 +153,7 @@ class TestBlockBootstrapCI:
             n_boot=50,  # Fewer bootstrap samples for speed
             random_state=42
         )
-        
+
         assert ci_lower < ci_upper
 
     def test_zero_denominator_handling(self):
@@ -163,7 +163,7 @@ class TestBlockBootstrapCI:
         values_num = np.random.normal(10, 2, n)
         values_den = np.zeros(n)  # All zeros
         base_mean = np.array([10.0])
-        
+
         ci_lower, ci_upper = skdr_eval.block_bootstrap_ci(
             values_num=values_num,
             values_den=values_den,
@@ -171,7 +171,7 @@ class TestBlockBootstrapCI:
             n_boot=100,
             random_state=42
         )
-        
+
         # Should handle zero denominators gracefully
         assert ci_lower == 0.0
         assert ci_upper == 0.0
@@ -182,7 +182,7 @@ class TestBlockBootstrapCI:
         n = 100
         values_num = np.random.normal(10, 2, n)
         base_mean = np.array([10.0])
-        
+
         # Run twice with same random_state
         ci1_lower, ci1_upper = skdr_eval.block_bootstrap_ci(
             values_num=values_num,
@@ -191,7 +191,7 @@ class TestBlockBootstrapCI:
             n_boot=100,
             random_state=42
         )
-        
+
         ci2_lower, ci2_upper = skdr_eval.block_bootstrap_ci(
             values_num=values_num,
             values_den=None,
@@ -199,7 +199,7 @@ class TestBlockBootstrapCI:
             n_boot=100,
             random_state=42
         )
-        
+
         # Results should be identical
         assert ci1_lower == ci2_lower
         assert ci1_upper == ci2_upper
@@ -210,7 +210,7 @@ class TestBlockBootstrapCI:
         n = 100
         values_num = np.random.normal(10, 2, n)
         base_mean = np.array([10.0])
-        
+
         # Run with different random states
         ci1_lower, ci1_upper = skdr_eval.block_bootstrap_ci(
             values_num=values_num,
@@ -219,7 +219,7 @@ class TestBlockBootstrapCI:
             n_boot=100,
             random_state=42
         )
-        
+
         ci2_lower, ci2_upper = skdr_eval.block_bootstrap_ci(
             values_num=values_num,
             values_den=None,
@@ -227,7 +227,7 @@ class TestBlockBootstrapCI:
             n_boot=100,
             random_state=123
         )
-        
+
         # Results should be different (very unlikely to be identical)
         assert not (ci1_lower == ci2_lower and ci1_upper == ci2_upper)
 
@@ -235,7 +235,7 @@ class TestBlockBootstrapCI:
         """Test edge case with single value."""
         values_num = np.array([10.0])
         base_mean = np.array([10.0])
-        
+
         ci_lower, ci_upper = skdr_eval.block_bootstrap_ci(
             values_num=values_num,
             values_den=None,
@@ -243,7 +243,7 @@ class TestBlockBootstrapCI:
             n_boot=10,
             random_state=42
         )
-        
+
         # With single value, CI should be the value itself
         assert ci_lower == ci_upper == 10.0
 
@@ -255,7 +255,7 @@ class TestBlockBootstrapCI:
         t = np.arange(n)
         values_num = np.sin(2 * np.pi * t / 50) + 0.1 * np.random.normal(0, 1, n)
         base_mean = np.array([0.0])
-        
+
         ci_lower, ci_upper = skdr_eval.block_bootstrap_ci(
             values_num=values_num,
             values_den=None,
@@ -264,7 +264,7 @@ class TestBlockBootstrapCI:
             block_len=10,  # Use block length appropriate for correlation
             random_state=42
         )
-        
+
         assert ci_lower < ci_upper
         # CI should contain the mean
         assert ci_lower < np.mean(values_num)
@@ -276,7 +276,7 @@ class TestBlockBootstrapCI:
         n = 100
         values_num = np.random.normal(10, 2, n)
         base_mean = np.array([10.0])
-        
+
         ci_lower, ci_upper = skdr_eval.block_bootstrap_ci(
             values_num=values_num,
             values_den=None,
@@ -284,14 +284,14 @@ class TestBlockBootstrapCI:
             n_boot=1000,  # Large number of bootstrap samples
             random_state=42
         )
-        
+
         assert ci_lower < ci_upper
 
     def test_parameter_validation(self):
         """Test parameter validation."""
         values_num = np.array([1, 2, 3, 4, 5])
         base_mean = np.array([3.0])
-        
+
         # Test with invalid alpha
         with pytest.raises(ValueError):
             skdr_eval.block_bootstrap_ci(
@@ -301,7 +301,7 @@ class TestBlockBootstrapCI:
                 alpha=1.5,  # Invalid alpha > 1
                 random_state=42
             )
-        
+
         with pytest.raises(ValueError):
             skdr_eval.block_bootstrap_ci(
                 values_num=values_num,
@@ -315,7 +315,7 @@ class TestBlockBootstrapCI:
         """Test handling of empty arrays."""
         values_num = np.array([])
         base_mean = np.array([0.0])
-        
+
         with pytest.raises(ValueError):
             skdr_eval.block_bootstrap_ci(
                 values_num=values_num,
