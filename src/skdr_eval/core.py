@@ -34,6 +34,21 @@ class EstimatorProtocol(Protocol):
     def predict(self, X: np.ndarray) -> Any: ...
 
 
+class ClassifierProtocol(Protocol):
+    """Protocol for sklearn classifiers."""
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> Any: ...
+    def predict(self, X: np.ndarray) -> Any: ...
+    def predict_proba(self, X: np.ndarray) -> Any: ...
+
+
+class RegressorProtocol(Protocol):
+    """Protocol for sklearn regressors."""
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> Any: ...
+    def predict(self, X: np.ndarray) -> Any: ...
+
+
 @dataclass
 class Design:
     """Design matrix for offline policy evaluation.
@@ -444,7 +459,8 @@ def induce_policy_from_sklearn(
             policy_probs[i, eligible_ops] = 1.0 / (pred_times_array + 1e-8)
             policy_probs[i] /= policy_probs[i].sum()
 
-    return np.asarray(policy_probs, dtype=np.float64)
+    result: np.ndarray = np.asarray(policy_probs, dtype=np.float64)
+    return result
 
 
 def dr_value_with_clip(
