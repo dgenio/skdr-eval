@@ -54,8 +54,29 @@ jobs:
 
     - name: Verify built version matches tag
       run: |
-        # Extract version from built package using setuptools-scm
-        BUILT_VERSION=$(python -c "import setuptools_scm; print(setuptools_scm.get_version())")
+        # Extract version from the built wheel file
+        BUILT_VERSION=$(python -c "
+        import zipfile
+        import os
+        import re
+        
+        # Find the wheel file
+        for file in os.listdir('dist'):
+            if file.endswith('.whl'):
+                with zipfile.ZipFile(f'dist/{file}', 'r') as wheel:
+                    # Look for the package metadata
+                    for name in wheel.namelist():
+                        if name.endswith('.dist-info/METADATA'):
+                            content = wheel.read(name).decode('utf-8')
+                            # Extract version from metadata
+                            for line in content.split('\n'):
+                                if line.startswith('Version:'):
+                                    print(line.split(':', 1)[1].strip())
+                                    break
+                            break
+                break
+        ")
+        
         # Extract tag version (remove 'v' prefix if present)
         TAG_VERSION=${GITHUB_REF#refs/tags/}
         TAG_VERSION=${TAG_VERSION#v}
@@ -64,10 +85,8 @@ jobs:
         echo "Tag version: $TAG_VERSION"
         echo "Git describe: $(git describe --tags --long --dirty)"
 
-        # Check if versions match (allow for dirty suffix in development)
-        # Allow exact match, or match if built version is tag version plus a known separator (e.g., .dev, +, or .dirty)
-        VERSION_MATCH_REGEX="^${TAG_VERSION}(\.dev[0-9]+(\+g[0-9a-f]+)?|\.dirty|\+g[0-9a-f]+)?$"
-        if [[ "$BUILT_VERSION" == "$TAG_VERSION" ]] || [[ "$BUILT_VERSION" =~ $VERSION_MATCH_REGEX ]]; then
+        # Check if versions match
+        if [[ "$BUILT_VERSION" == "$TAG_VERSION" ]]; then
           echo "✅ Version verification passed: $BUILT_VERSION (matches tag: $TAG_VERSION)"
         else
           echo "❌ ERROR: Built version ($BUILT_VERSION) does not match tag version ($TAG_VERSION)"
