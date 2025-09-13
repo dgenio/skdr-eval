@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2025-01-15
+
+### Added
+- **Comprehensive Type Safety**: Enhanced type annotations throughout the codebase
+- **Sklearn Protocol Definitions**: Added `ClassifierProtocol` and `RegressorProtocol` for better type safety
+- **Runtime Validation**: Added validation for callable estimators to prevent runtime errors
+- **Enhanced Error Handling**: Improved error messages and warnings for better debugging
+
+### Fixed
+- **Major Tech Debt Resolution**: Resolved critical type safety violations using `Any` types as workarounds
+- **Type Annotation Issues**: Fixed `induce_policy_from_sklearn` return type from `Any` to `np.ndarray`
+- **Mypy Compatibility**: Resolved all mypy type checking errors with proper type annotations
+- **Callable Estimator Safety**: Added runtime validation for callable estimators to prevent type errors
+- **Import Ordering**: Fixed ruff linting issues with proper import organization
+
+### Enhanced
+- **Type Safety**: Comprehensive protocols for sklearn estimators with proper method signatures
+- **Developer Experience**: Better IDE support and static analysis capabilities
+- **Error Prevention**: Runtime validation prevents common type-related runtime errors
+- **Code Quality**: All linting, formatting, and type checking standards now pass
+
+### Technical Details
+- **Protocols**: Added `ClassifierProtocol` with `predict_proba` method for sklearn classifiers
+- **Validation**: Runtime checks ensure callable estimators return compatible objects
+- **Type Inference**: Improved type inference with explicit type annotations
+- **Compatibility**: Maintains full backward compatibility while improving type safety
+
 ## [0.3.3] - 2025-01-15
 
 ### Fixed
