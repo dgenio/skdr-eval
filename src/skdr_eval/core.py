@@ -871,7 +871,20 @@ def _get_outcome_estimator(
 ) -> Any:
     """Get outcome estimator based on task type."""
     if callable(estimator):
-        return estimator()
+        result = estimator()
+        # Basic validation that the result has the expected methods
+        if not hasattr(result, "fit") or not hasattr(result, "predict"):
+            raise TypeError(
+                f"Callable estimator must return an object with 'fit' and 'predict' methods, "
+                f"got {type(result).__name__}"
+            )
+        # For binary classification, also check for predict_proba
+        if task_type == "binary" and not hasattr(result, "predict_proba"):
+            logger.warning(
+                f"Binary classifier {type(result).__name__} missing 'predict_proba' method. "
+                "This may cause issues in propensity estimation."
+            )
+        return result
 
     if task_type == "regression":
         if estimator == "hgb":
