@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2025-01-15
+
+### Fixed
+- **Release Automation**: Configured GitHub Actions workflow to trigger on pushed tags
+- **Automatic PyPI Publishing**: Releases now automatically publish to PyPI when tags are pushed
+- **Developer Experience**: Simplified release process - just push a tag to trigger publication
+
+### Technical Details
+- **Workflow Trigger**: Added `push.tags: ['v*']` trigger to release workflow
+- **Backward Compatibility**: Maintains existing `release` and `workflow_dispatch` triggers
+- **Tag Pattern**: Supports any version tag pattern (v1.0.0, v2.1.3, etc.)
+
 ## [0.4.0] - 2025-01-15
 
 ### Added
