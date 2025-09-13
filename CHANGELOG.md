@@ -87,7 +87,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Developer Experience**: Enhanced IDE support and static analysis capabilities
 
 ## [0.3.2] - 2025-08-13
->>>>>>> origin/main
 
 ### Fixed
 - **Major Tech Debt**: Implemented proper bootstrap confidence intervals using the existing `block_bootstrap_ci` function
