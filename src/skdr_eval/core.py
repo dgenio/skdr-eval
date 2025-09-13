@@ -444,7 +444,7 @@ def induce_policy_from_sklearn(
             policy_probs[i, eligible_ops] = 1.0 / (pred_times_array + 1e-8)
             policy_probs[i] /= policy_probs[i].sum()
 
-    return policy_probs
+    return np.asarray(policy_probs, dtype=np.float64)
 
 
 def dr_value_with_clip(
