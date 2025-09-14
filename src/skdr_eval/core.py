@@ -529,16 +529,15 @@ def fit_outcome_crossfit(
         predictions = np.zeros(n_samples)
         models_info = []
 
-        # Get estimator
-        if estimator == "hgb":
-            def est_factory() -> HistGradientBoostingRegressor:
-                return HistGradientBoostingRegressor(random_state=random_state)
-        elif estimator == "ridge":
-            def est_factory() -> Ridge:
-                return Ridge(random_state=random_state)
-        elif estimator == "rf":
-            def est_factory() -> RandomForestRegressor:
-                return RandomForestRegressor(random_state=random_state)
+        # Get estimator factory
+        estimator_factories = {
+            "hgb": lambda: HistGradientBoostingRegressor(random_state=random_state),
+            "ridge": lambda: Ridge(random_state=random_state),
+            "rf": lambda: RandomForestRegressor(random_state=random_state),
+        }
+
+        if estimator in estimator_factories:
+            est_factory = estimator_factories[estimator]
         elif callable(estimator):
             est_factory = estimator
             # Validate the estimator
