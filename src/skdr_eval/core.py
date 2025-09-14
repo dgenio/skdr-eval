@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional, Union
+from typing import Any, Callable, Literal, Optional, Protocol, Union
 
 import numpy as np
 import pandas as pd
@@ -24,6 +24,29 @@ from .choice import (
 from .pairwise import PairwiseDesign, induce_policy
 
 logger = logging.getLogger("skdr_eval")
+
+
+# Type definitions for better type safety
+class EstimatorProtocol(Protocol):
+    """Protocol for sklearn estimators."""
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> Any: ...
+    def predict(self, X: np.ndarray) -> Any: ...
+
+
+class ClassifierProtocol(Protocol):
+    """Protocol for sklearn classifiers."""
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> Any: ...
+    def predict(self, X: np.ndarray) -> Any: ...
+    def predict_proba(self, X: np.ndarray) -> Any: ...
+
+
+class RegressorProtocol(Protocol):
+    """Protocol for sklearn regressors."""
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> Any: ...
+    def predict(self, X: np.ndarray) -> Any: ...
 
 
 @dataclass
@@ -288,8 +311,9 @@ def fit_propensity_timecal(
                     pred_proba = cal_proba_full
                 else:
                     pred_proba = cal_clf.predict_proba(X_test)
-        except Exception:
-            # Fallback to uncalibrated predictions
+        except (ValueError, RuntimeError, AttributeError):
+            # Fallback to uncalibrated predictions if calibration fails
+            # This can happen with edge cases in the calibration process
             pass
 
         # Ensure probabilities sum to 1 and are positive
@@ -390,7 +414,7 @@ def induce_policy_from_sklearn(
     ops_all: list[str],
     elig: np.ndarray,
     idx: dict[str, int],  # noqa: ARG001
-) -> Any:  # Changed from np.ndarray to Any to avoid mypy issues
+) -> np.ndarray:
     """Induce policy from sklearn model by predicting service times.
 
     Parameters
@@ -436,7 +460,8 @@ def induce_policy_from_sklearn(
             policy_probs[i, eligible_ops] = 1.0 / (pred_times_array + 1e-8)
             policy_probs[i] /= policy_probs[i].sum()
 
-    return np.asarray(policy_probs)
+    result: np.ndarray = np.array(policy_probs, dtype=np.float64)
+    return result
 
 
 def dr_value_with_clip(
@@ -640,12 +665,30 @@ def block_bootstrap_ci(
         Lower confidence bound.
     ci_upper : float
         Upper confidence bound.
+
+    Raises
+    ------
+    ValueError
+        If alpha is not in (0, 1) or if values_num is empty.
     """
+    # Parameter validation
+    if len(values_num) == 0:
+        raise ValueError("values_num cannot be empty")
+
+    if not (0 < alpha < 1):
+        raise ValueError(f"alpha must be in (0, 1), got {alpha}")
+
+    if n_boot <= 0:
+        raise ValueError(f"n_boot must be positive, got {n_boot}")
+
     rng = np.random.RandomState(random_state)
     n = len(values_num)
 
     if block_len is None:
         block_len = max(1, int(np.sqrt(n)))
+
+    # Ensure block_len doesn't exceed data length
+    block_len = min(block_len, n)
 
     bootstrap_stats_list: list[float] = []
 
@@ -688,7 +731,7 @@ def evaluate_sklearn_models(
     random_state: int = 0,
     clip_grid: tuple[float, ...] = (2, 5, 10, 20, 50, float("inf")),
     ci_bootstrap: bool = False,
-    alpha: float = 0.05,  # noqa: ARG001
+    alpha: float = 0.05,
     policy_train: str = "all",
     policy_train_frac: float = 0.85,
 ) -> tuple[pd.DataFrame, dict[str, dict[str, DRResult]]]:
@@ -827,11 +870,52 @@ def evaluate_sklearn_models(
 
             # Add confidence intervals if requested
             if ci_bootstrap:
-                # Simplified bootstrap (would need more sophisticated implementation)
-                ci_lower, ci_upper = (
-                    result.V_hat - 1.96 * result.SE_if,
-                    result.V_hat + 1.96 * result.SE_if,
-                )
+                # Use proper block bootstrap for time-series data
+                try:
+                    # Recompute DR contributions for bootstrap
+                    q_pi = np.sum(
+                        policy_probs * q_hat.reshape(len(eval_design.Y), -1), axis=1
+                    )
+                    pi_obs = propensities[np.arange(len(eval_design.Y)), eval_design.A]
+                    A_int: np.ndarray = eval_design.A.astype(int)
+                    elig_bool: np.ndarray = eval_design.elig.astype(bool)
+                    matched = (pi_obs > 0) & elig_bool[
+                        np.arange(len(eval_design.Y)), A_int
+                    ]
+
+                    if matched.sum() > 0:
+                        # Compute clipped weights
+                        if result.clip == float("inf"):
+                            w_clip = np.where(pi_obs > 0, 1.0 / pi_obs, 0.0)
+                        else:
+                            w_clip = np.where(
+                                pi_obs > 0, np.minimum(1.0 / pi_obs, result.clip), 0.0
+                            )
+                        w_clip[~matched] = 0
+
+                        # Create bootstrap values from DR contributions
+                        dr_contrib = q_pi + w_clip * (eval_design.Y - q_hat)
+                        ci_lower, ci_upper = block_bootstrap_ci(
+                            values_num=dr_contrib,
+                            values_den=None,
+                            base_mean=np.array([result.V_hat]),
+                            n_boot=400,
+                            alpha=alpha,
+                            random_state=random_state,
+                        )
+                    else:
+                        # Fallback if no matched samples
+                        ci_lower, ci_upper = (
+                            result.V_hat - 1.96 * result.SE_if,
+                            result.V_hat + 1.96 * result.SE_if,
+                        )
+                except (ValueError, RuntimeError, np.linalg.LinAlgError):
+                    # Fallback to normal approximation if bootstrap fails
+                    # This can happen with numerical issues in bootstrap calculations
+                    ci_lower, ci_upper = (
+                        result.V_hat - 1.96 * result.SE_if,
+                        result.V_hat + 1.96 * result.SE_if,
+                    )
                 row["ci_lower"] = ci_lower
                 row["ci_upper"] = ci_upper
 
@@ -847,7 +931,20 @@ def _get_outcome_estimator(
 ) -> Any:
     """Get outcome estimator based on task type."""
     if callable(estimator):
-        return estimator()
+        result = estimator()
+        # Basic validation that the result has the expected methods
+        if not hasattr(result, "fit") or not hasattr(result, "predict"):
+            raise TypeError(
+                f"Callable estimator must return an object with 'fit' and 'predict' methods, "
+                f"got {type(result).__name__}"
+            )
+        # For binary classification, also check for predict_proba
+        if task_type == "binary" and not hasattr(result, "predict_proba"):
+            logger.warning(
+                f"Binary classifier {type(result).__name__} missing 'predict_proba' method. "
+                "This may cause issues in propensity estimation."
+            )
+        return result
 
     if task_type == "regression":
         if estimator == "hgb":
@@ -870,7 +967,7 @@ def _get_outcome_estimator(
 
 
 def estimate_propensity_pairwise(
-    design: Any,
+    design: PairwiseDesign,
     strategy: Literal["condlogit", "multinomial"] = "multinomial",
     method: Literal["condlogit", "multinomial"] = "condlogit",
     neg_per_pos: int = 5,
@@ -1168,7 +1265,7 @@ def evaluate_pairwise_models(
     min_ess_frac: float = 0.02,
     clip_grid: tuple[float, ...] = (2, 5, 10, 20, 50, float("inf")),
     ci_bootstrap: bool = False,
-    alpha: float = 0.05,  # noqa: ARG001
+    alpha: float = 0.05,
     day_col: str = "arrival_day",
     client_id_col: str = "client_id",
     operator_id_col: str = "operator_id",
@@ -1392,11 +1489,50 @@ def evaluate_pairwise_models(
                 }
 
                 if ci_bootstrap:
-                    # Simplified CI (would need proper implementation)
-                    ci_lower, ci_upper = (
-                        result.V_hat - 1.96 * result.SE_if,
-                        result.V_hat + 1.96 * result.SE_if,
-                    )
+                    # Use proper block bootstrap for time-series data
+                    try:
+                        # Recompute DR contributions for bootstrap
+                        q_pi = np.sum(policy_probs * q_hat.reshape(len(Y), -1), axis=1)
+                        pi_obs = propensities[np.arange(len(Y)), A]
+                        A_int: np.ndarray = A.astype(int)
+                        elig_bool: np.ndarray = elig.astype(bool)
+                        matched = (pi_obs > 0) & elig_bool[np.arange(len(Y)), A_int]
+
+                        if matched.sum() > 0:
+                            # Compute clipped weights
+                            if result.clip == float("inf"):
+                                w_clip = np.where(pi_obs > 0, 1.0 / pi_obs, 0.0)
+                            else:
+                                w_clip = np.where(
+                                    pi_obs > 0,
+                                    np.minimum(1.0 / pi_obs, result.clip),
+                                    0.0,
+                                )
+                            w_clip[~matched] = 0
+
+                            # Create bootstrap values from DR contributions
+                            dr_contrib = q_pi + w_clip * (Y - q_hat)
+                            ci_lower, ci_upper = block_bootstrap_ci(
+                                values_num=dr_contrib,
+                                values_den=None,
+                                base_mean=np.array([result.V_hat]),
+                                n_boot=400,
+                                alpha=alpha,
+                                random_state=random_state,
+                            )
+                        else:
+                            # Fallback if no matched samples
+                            ci_lower, ci_upper = (
+                                result.V_hat - 1.96 * result.SE_if,
+                                result.V_hat + 1.96 * result.SE_if,
+                            )
+                    except (ValueError, RuntimeError, np.linalg.LinAlgError):
+                        # Fallback to normal approximation if bootstrap fails
+                        # This can happen with numerical issues in bootstrap calculations
+                        ci_lower, ci_upper = (
+                            result.V_hat - 1.96 * result.SE_if,
+                            result.V_hat + 1.96 * result.SE_if,
+                        )
                     report_row["ci_lower"] = ci_lower
                     report_row["ci_upper"] = ci_upper
 

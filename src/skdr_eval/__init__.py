@@ -1,5 +1,7 @@
 """skdr-eval: Offline policy evaluation using DR and Stabilized DR."""
 
+import importlib
+
 from .core import (
     Design,
     DRResult,
@@ -15,10 +17,14 @@ from .core import (
 from .pairwise import PairwiseDesign
 from .synth import make_pairwise_synth, make_synth_logs
 
+# Version is set by setuptools-scm
+__version__: str = "unknown"
+
 try:
-    from ._version import version as __version__
+    _version_module = importlib.import_module("skdr_eval._version")
+    __version__ = _version_module.version
 except ImportError:
-    __version__ = "unknown"
+    pass
 
 __all__ = [
     "DRResult",

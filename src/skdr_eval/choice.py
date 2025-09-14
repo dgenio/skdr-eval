@@ -223,7 +223,8 @@ def calibrate_temperature(
                 best_nll = nll
                 best_temp = temp
 
-        except Exception:
+        except (ValueError, RuntimeError, np.linalg.LinAlgError, OverflowError):
+            # Skip this temperature if numerical issues occur
             continue
 
     return best_temp

@@ -1,6 +1,9 @@
 name: Release
 
 on:
+  push:
+    tags:
+      - 'v*'  # Trigger on any version tag (v1.0.0, v2.1.3, etc.)
   release:
     types: [published]
   workflow_dispatch:  # Allow manual triggering
@@ -48,25 +51,35 @@ jobs:
         echo "Current git describe:"
         git describe --tags --long --dirty
 
-    - name: Generate version file
-      run: |
-        # Ensure _version.py is generated before building
-        python -c "
-        import setuptools_scm
-        version = setuptools_scm.get_version()
-        print(f'Generated version: {version}')
-        setuptools_scm.write_to_file('src/skdr_eval/_version.py')
-        print('Version file written to src/skdr_eval/_version.py')
-        "
-
     - name: Build package
       run: |
         python -m build
 
     - name: Verify built version matches tag
       run: |
-        # Extract version from built package using setuptools-scm
-        BUILT_VERSION=$(python -c "import setuptools_scm; print(setuptools_scm.get_version())")
+        # Extract version from the built wheel file
+        BUILT_VERSION=$(python -c "
+        import zipfile
+        import os
+        import re
+        
+        # Find the wheel file
+        for file in os.listdir('dist'):
+            if file.endswith('.whl'):
+                with zipfile.ZipFile(f'dist/{file}', 'r') as wheel:
+                    # Look for the package metadata
+                    for name in wheel.namelist():
+                        if name.endswith('.dist-info/METADATA'):
+                            content = wheel.read(name).decode('utf-8')
+                            # Extract version from metadata
+                            for line in content.split('\n'):
+                                if line.startswith('Version:'):
+                                    print(line.split(':', 1)[1].strip())
+                                    break
+                            break
+                break
+        ")
+        
         # Extract tag version (remove 'v' prefix if present)
         TAG_VERSION=${GITHUB_REF#refs/tags/}
         TAG_VERSION=${TAG_VERSION#v}
@@ -75,9 +88,8 @@ jobs:
         echo "Tag version: $TAG_VERSION"
         echo "Git describe: $(git describe --tags --long --dirty)"
 
-        # Check if versions match (allow for dirty suffix in development)
-        # Allow exact match, or match if built version is tag version plus a known separator (e.g., .dev, +, or .dirty)
-        if [[ "$BUILT_VERSION" == "$TAG_VERSION" ]] || [[ "$BUILT_VERSION" =~ ^${TAG_VERSION}(\.dev[0-9]+(\+g[0-9a-f]+)?|\.dirty|\+g[0-9a-f]+)?$ ]]; then
+        # Check if versions match
+        if [[ "$BUILT_VERSION" == "$TAG_VERSION" ]]; then
           echo "✅ Version verification passed: $BUILT_VERSION (matches tag: $TAG_VERSION)"
         else
           echo "❌ ERROR: Built version ($BUILT_VERSION) does not match tag version ($TAG_VERSION)"
