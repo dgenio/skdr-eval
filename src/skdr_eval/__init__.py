@@ -14,6 +14,22 @@ from .core import (
     fit_propensity_timecal,
     induce_policy_from_sklearn,
 )
+from .exceptions import (
+    BootstrapError,
+    ConfigurationError,
+    ConvergenceError,
+    DataValidationError,
+    EstimationError,
+    InsufficientDataError,
+    MemoryError,
+    ModelValidationError,
+    OutcomeModelError,
+    PairwiseEvaluationError,
+    PolicyInductionError,
+    PropensityScoreError,
+    SkdrEvalError,
+    VersionError,
+)
 from .pairwise import PairwiseDesign
 from .synth import make_pairwise_synth, make_synth_logs
 
@@ -41,4 +57,19 @@ __all__ = [
     "induce_policy_from_sklearn",
     "make_pairwise_synth",
     "make_synth_logs",
+    # Exceptions
+    "BootstrapError",
+    "ConfigurationError",
+    "ConvergenceError",
+    "DataValidationError",
+    "EstimationError",
+    "InsufficientDataError",
+    "MemoryError",
+    "ModelValidationError",
+    "OutcomeModelError",
+    "PairwiseEvaluationError",
+    "PolicyInductionError",
+    "PropensityScoreError",
+    "SkdrEvalError",
+    "VersionError",
 ]

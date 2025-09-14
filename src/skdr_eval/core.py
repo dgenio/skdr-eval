@@ -21,7 +21,28 @@ from .choice import (
     fit_conditional_logit_with_sampling,
     predict_proba_condlogit,
 )
+from .exceptions import (
+    ConvergenceError,
+    DataValidationError,
+    EstimationError,
+    InsufficientDataError,
+    ModelValidationError,
+    OutcomeModelError,
+    PolicyInductionError,
+    PropensityScoreError,
+)
 from .pairwise import PairwiseDesign, induce_policy
+from .validation import (
+    validate_dataframe,
+    validate_finite_values,
+    validate_numpy_array,
+    validate_parameter_range,
+    validate_positive_integer,
+    validate_probabilities,
+    validate_random_state,
+    validate_sklearn_estimator,
+    validate_string_choice,
+)
 
 logger = logging.getLogger("skdr_eval")
 
@@ -150,49 +171,105 @@ def build_design(
     -------
     Design
         Design matrices and metadata.
+
+    Raises
+    ------
+    DataValidationError
+        If input data is invalid
+    InsufficientDataError
+        If there's insufficient data for estimation
     """
-    # Extract operators from eligibility columns
-    elig_cols = [col for col in logs.columns if col.endswith("_elig")]
-    ops_all = [col.replace("_elig", "") for col in elig_cols]
-    idx = {op: i for i, op in enumerate(ops_all)}
+    try:
+        # Validate input DataFrame
+        required_columns = ["arrival_ts", "action", "service_time"]
+        validate_dataframe(logs, "logs", required_columns, min_rows=10)
 
-    # Base features (context)
-    cli_cols = [col for col in logs.columns if col.startswith(cli_pref)]
-    st_cols = [col for col in logs.columns if col.startswith(st_pref)]
-    base_cols = cli_cols + st_cols
-    X_base = logs[base_cols].values
+        # Validate prefixes
+        validate_string_choice(cli_pref, "cli_pref", ["cli_", "client_", ""])
+        validate_string_choice(st_pref, "st_pref", ["st_", "service_", ""])
 
-    # Eligibility matrix
-    elig = logs[elig_cols].values
+        # Extract operators from eligibility columns
+        elig_cols = [col for col in logs.columns if col.endswith("_elig")]
+        if not elig_cols:
+            raise DataValidationError(
+                "No eligibility columns found (ending with '_elig')"
+            )
 
-    # Action indices
-    A = np.array([idx[action] for action in logs["action"]])
+        ops_all = [col.replace("_elig", "") for col in elig_cols]
+        idx = {op: i for i, op in enumerate(ops_all)}
 
-    # Observed features (base + action one-hot)
-    action_onehot = np.zeros((len(logs), len(ops_all)))
-    action_onehot[np.arange(len(logs)), A] = 1
-    X_obs = np.column_stack([X_base, action_onehot])
+        # Validate actions are valid
+        invalid_actions = set(logs["action"]) - set(ops_all)
+        if invalid_actions:
+            raise DataValidationError(
+                f"Invalid actions found: {sorted(invalid_actions)}. "
+                f"Valid actions: {sorted(ops_all)}"
+            )
 
-    # Propensity features (base + standardized time, no action)
-    scaler = StandardScaler()
-    ts_norm = scaler.fit_transform(logs[["arrival_ts"]].values.astype(float))
-    X_phi = np.column_stack([X_base, ts_norm])
+        # Base features (context)
+        cli_cols = [col for col in logs.columns if col.startswith(cli_pref)]
+        st_cols = [col for col in logs.columns if col.startswith(st_pref)]
+        base_cols = cli_cols + st_cols
 
-    # Outcomes and timestamps
-    Y: np.ndarray = logs["service_time"].values.astype(np.float64)
-    ts: np.ndarray = logs["arrival_ts"].values.astype(np.float64)
+        if not base_cols:
+            raise DataValidationError(
+                f"No base features found with prefixes '{cli_pref}' or '{st_pref}'"
+            )
 
-    return Design(
-        X_base=X_base,
-        X_obs=X_obs,
-        X_phi=X_phi,
-        A=A,
-        Y=Y,
-        ts=ts,
-        ops_all=ops_all,
-        elig=elig,
-        idx=idx,
-    )
+        X_base = logs[base_cols].values
+        validate_numpy_array(X_base, "X_base", min_size=1)
+        validate_finite_values(X_base, "X_base")
+
+        # Eligibility matrix
+        elig = logs[elig_cols].values
+        validate_numpy_array(elig, "elig", expected_shape=(len(logs), len(ops_all)))
+        
+        # Check eligibility values are 0 or 1
+        if not np.all(np.isin(elig, [0, 1])):
+            raise DataValidationError("Eligibility matrix must contain only 0s and 1s")
+
+        # Action indices
+        A = np.array([idx[action] for action in logs["action"]])
+        validate_numpy_array(A, "A", min_size=1)
+        validate_finite_values(A, "A")
+
+        # Observed features (base + action one-hot)
+        action_onehot = np.zeros((len(logs), len(ops_all)))
+        action_onehot[np.arange(len(logs)), A] = 1
+        X_obs = np.column_stack([X_base, action_onehot])
+        validate_finite_values(X_obs, "X_obs")
+
+        # Propensity features (base + standardized time, no action)
+        scaler = StandardScaler()
+        ts_norm = scaler.fit_transform(logs[["arrival_ts"]].values.astype(float))
+        X_phi = np.column_stack([X_base, ts_norm])
+        validate_finite_values(X_phi, "X_phi")
+
+        # Outcomes and timestamps
+        Y: np.ndarray = logs["service_time"].values.astype(np.float64)
+        ts: np.ndarray = logs["arrival_ts"].values.astype(np.float64)
+        
+        validate_numpy_array(Y, "Y", min_size=1)
+        validate_finite_values(Y, "Y")
+        validate_numpy_array(ts, "ts", min_size=1)
+        validate_finite_values(ts, "ts")
+
+        return Design(
+            X_base=X_base,
+            X_obs=X_obs,
+            X_phi=X_phi,
+            A=A,
+            Y=Y,
+            ts=ts,
+            ops_all=ops_all,
+            elig=elig,
+            idx=idx,
+        )
+
+    except Exception as e:
+        if isinstance(e, (DataValidationError, InsufficientDataError)):
+            raise
+        raise DataValidationError(f"Error building design: {str(e)}") from e
 
 
 def fit_propensity_timecal(
@@ -223,9 +300,52 @@ def fit_propensity_timecal(
         Calibrated propensity scores (n_samples, n_actions).
     fold_indices : np.ndarray
         Fold assignment for each sample.
+
+    Raises
+    ------
+    DataValidationError
+        If input data is invalid
+    PropensityScoreError
+        If propensity score estimation fails
+    ConvergenceError
+        If optimization fails to converge
     """
-    n_samples, _ = X_phi.shape
-    n_actions = A.max() + 1
+    try:
+        # Validate inputs
+        validate_numpy_array(X_phi, "X_phi", min_size=1)
+        validate_finite_values(X_phi, "X_phi")
+        
+        validate_numpy_array(A, "A", min_size=1)
+        validate_finite_values(A, "A")
+        
+        if ts is not None:
+            validate_numpy_array(ts, "ts", min_size=1)
+            validate_finite_values(ts, "ts")
+            if len(ts) != len(X_phi):
+                raise DataValidationError(
+                    f"ts length {len(ts)} doesn't match X_phi length {len(X_phi)}"
+                )
+        
+        validate_positive_integer(n_splits)
+        validate_random_state(random_state)
+        
+        if len(X_phi) != len(A):
+            raise DataValidationError(
+                f"X_phi length {len(X_phi)} doesn't match A length {len(A)}"
+            )
+        
+        n_samples, _ = X_phi.shape
+        n_actions = A.max() + 1
+        
+        if n_actions <= 1:
+            raise InsufficientDataError(
+                f"Need at least 2 actions, got {n_actions}"
+            )
+        
+        if n_samples < n_splits * 2:
+            raise InsufficientDataError(
+                f"Need at least {n_splits * 2} samples for {n_splits} splits, got {n_samples}"
+            )
 
     # Sort by timestamp if provided to ensure proper time-series ordering
     if ts is not None:
@@ -328,15 +448,24 @@ def fit_propensity_timecal(
 
         propensities[original_test_idx] = pred_proba
 
-    # Handle samples not assigned to any fold (shouldn't happen with TimeSeriesSplit but be safe)
-    unassigned_mask = fold_indices == -1
-    if np.any(unassigned_mask):
-        # Assign uniform probabilities to unassigned samples
-        propensities[unassigned_mask] = 1.0 / n_actions
-        # Assign them to the last fold
-        fold_indices[unassigned_mask] = n_splits - 1
+        # Handle samples not assigned to any fold (shouldn't happen with TimeSeriesSplit but be safe)
+        unassigned_mask = fold_indices == -1
+        if np.any(unassigned_mask):
+            # Assign uniform probabilities to unassigned samples
+            propensities[unassigned_mask] = 1.0 / n_actions
+            # Assign them to the last fold
+            fold_indices[unassigned_mask] = n_splits - 1
 
-    return propensities, fold_indices
+        # Validate output
+        validate_probabilities(propensities, "propensities")
+        validate_finite_values(fold_indices, "fold_indices")
+
+        return propensities, fold_indices
+
+    except Exception as e:
+        if isinstance(e, (DataValidationError, InsufficientDataError, PropensityScoreError, ConvergenceError)):
+            raise
+        raise PropensityScoreError(f"Error fitting propensity model: {str(e)}") from e
 
 
 def fit_outcome_crossfit(
@@ -367,45 +496,93 @@ def fit_outcome_crossfit(
         Cross-fitted predictions.
     models_info : List[Tuple[Any, np.ndarray, np.ndarray]]
         List of (model, train_idx, test_idx) for each fold.
+
+    Raises
+    ------
+    DataValidationError
+        If input data is invalid
+    OutcomeModelError
+        If outcome model fitting fails
+    ModelValidationError
+        If estimator is invalid
     """
-    n_samples = X_obs.shape[0]
-    predictions = np.zeros(n_samples)
-    models_info = []
+    try:
+        # Validate inputs
+        validate_numpy_array(X_obs, "X_obs", min_size=1)
+        validate_finite_values(X_obs, "X_obs")
+        
+        validate_numpy_array(Y, "Y", min_size=1)
+        validate_finite_values(Y, "Y")
+        
+        validate_positive_integer(n_splits)
+        validate_random_state(random_state)
+        
+        if len(X_obs) != len(Y):
+            raise DataValidationError(
+                f"X_obs length {len(X_obs)} doesn't match Y length {len(Y)}"
+            )
+        
+        n_samples = X_obs.shape[0]
+        if n_samples < n_splits * 2:
+            raise InsufficientDataError(
+                f"Need at least {n_splits * 2} samples for {n_splits} splits, got {n_samples}"
+            )
 
-    # Get estimator
-    if estimator == "hgb":
+        predictions = np.zeros(n_samples)
+        models_info = []
 
-        def est_factory() -> HistGradientBoostingRegressor:
-            return HistGradientBoostingRegressor(random_state=random_state)
-    elif estimator == "ridge":
+        # Get estimator
+        if estimator == "hgb":
+            def est_factory() -> HistGradientBoostingRegressor:
+                return HistGradientBoostingRegressor(random_state=random_state)
+        elif estimator == "ridge":
+            def est_factory() -> Ridge:
+                return Ridge(random_state=random_state)
+        elif estimator == "rf":
+            def est_factory() -> RandomForestRegressor:
+                return RandomForestRegressor(random_state=random_state)
+        elif callable(estimator):
+            est_factory = estimator
+            # Validate the estimator
+            try:
+                test_est = est_factory()
+                validate_sklearn_estimator(test_est, "estimator", ["fit", "predict"])
+            except Exception as e:
+                raise ModelValidationError(f"Invalid estimator factory: {str(e)}") from e
+        else:
+            validate_string_choice(estimator, "estimator", ["hgb", "ridge", "rf"])
+            raise ValueError(f"Unknown estimator: {estimator}")
 
-        def est_factory() -> Ridge:
-            return Ridge(random_state=random_state)
-    elif estimator == "rf":
+        # Time-series split
+        tscv = TimeSeriesSplit(n_splits=n_splits)
 
-        def est_factory() -> RandomForestRegressor:
-            return RandomForestRegressor(random_state=random_state)
-    elif callable(estimator):
-        est_factory = estimator
-    else:
-        raise ValueError(f"Unknown estimator: {estimator}")
+        for fold_idx, (train_idx, test_idx) in enumerate(tscv.split(X_obs)):
+            try:
+                X_train, X_test = X_obs[train_idx], X_obs[test_idx]
+                Y_train = Y[train_idx]
 
-    # Time-series split
-    tscv = TimeSeriesSplit(n_splits=n_splits)
+                # Fit model
+                model = est_factory()
+                model.fit(X_train, Y_train)
 
-    for train_idx, test_idx in tscv.split(X_obs):
-        X_train, X_test = X_obs[train_idx], X_obs[test_idx]
-        Y_train = Y[train_idx]
+                # Predict
+                pred = model.predict(X_test)
+                validate_finite_values(pred, f"predictions_fold_{fold_idx}")
+                predictions[test_idx] = pred
+                models_info.append((model, train_idx, test_idx))
+                
+            except Exception as e:
+                raise OutcomeModelError(f"Error in fold {fold_idx}: {str(e)}") from e
 
-        # Fit model
-        model = est_factory()
-        model.fit(X_train, Y_train)
+        # Validate output
+        validate_finite_values(predictions, "predictions")
+        
+        return predictions, models_info
 
-        # Predict
-        predictions[test_idx] = model.predict(X_test)
-        models_info.append((model, train_idx, test_idx))
-
-    return predictions, models_info
+    except Exception as e:
+        if isinstance(e, (DataValidationError, InsufficientDataError, OutcomeModelError, ModelValidationError)):
+            raise
+        raise OutcomeModelError(f"Error fitting outcome model: {str(e)}") from e
 
 
 def induce_policy_from_sklearn(
@@ -434,34 +611,90 @@ def induce_policy_from_sklearn(
     -------
     policy_probs : np.ndarray
         Policy probabilities (n_samples, n_ops).
+
+    Raises
+    ------
+    DataValidationError
+        If input data is invalid
+    PolicyInductionError
+        If policy induction fails
+    ModelValidationError
+        If model is invalid
     """
-    n_samples, _ = X_base.shape
-    n_ops = len(ops_all)
-    policy_probs = np.zeros((n_samples, n_ops))
+    try:
+        # Validate inputs
+        validate_sklearn_estimator(model, "model", ["predict"])
+        
+        validate_numpy_array(X_base, "X_base", min_size=1)
+        validate_finite_values(X_base, "X_base")
+        
+        if not ops_all:
+            raise DataValidationError("ops_all cannot be empty")
+        
+        validate_numpy_array(elig, "elig", min_size=1)
+        if not np.all(np.isin(elig, [0, 1])):
+            raise DataValidationError("Eligibility matrix must contain only 0s and 1s")
+        
+        if len(X_base) != len(elig):
+            raise DataValidationError(
+                f"X_base length {len(X_base)} doesn't match elig length {len(elig)}"
+            )
+        
+        if elig.shape[1] != len(ops_all):
+            raise DataValidationError(
+                f"elig width {elig.shape[1]} doesn't match ops_all length {len(ops_all)}"
+            )
 
-    for i in range(n_samples):
-        eligible_ops = np.where(elig[i])[0]
-        pred_times: list[float] = []
+        n_samples, _ = X_base.shape
+        n_ops = len(ops_all)
+        policy_probs = np.zeros((n_samples, n_ops))
 
-        # Predict service time for each eligible operator
-        for op_idx in eligible_ops:
-            # Create feature vector with this operator's one-hot
-            action_onehot = np.zeros(n_ops)
-            action_onehot[op_idx] = 1
-            x_with_action = np.concatenate([X_base[i], action_onehot])
+        for i in range(n_samples):
+            try:
+                eligible_ops = np.where(elig[i])[0]
+                pred_times: list[float] = []
 
-            # Predict service time
-            pred_time = model.predict(x_with_action.reshape(1, -1))[0]
-            pred_times.append(pred_time)
+                # Predict service time for each eligible operator
+                for op_idx in eligible_ops:
+                    # Create feature vector with this operator's one-hot
+                    action_onehot = np.zeros(n_ops)
+                    action_onehot[op_idx] = 1
+                    x_with_action = np.concatenate([X_base[i], action_onehot])
 
-        # Convert to probabilities (lower time = higher probability)
-        if len(pred_times) > 0:
-            pred_times_array = np.array(pred_times)
-            policy_probs[i, eligible_ops] = 1.0 / (pred_times_array + 1e-8)
-            policy_probs[i] /= policy_probs[i].sum()
+                    # Predict service time
+                    pred_time = model.predict(x_with_action.reshape(1, -1))[0]
+                    if not np.isfinite(pred_time):
+                        raise PolicyInductionError(
+                            f"Non-finite prediction for sample {i}, operator {op_idx}"
+                        )
+                    pred_times.append(pred_time)
 
-    result: np.ndarray = np.array(policy_probs, dtype=np.float64)
-    return result
+                # Convert to probabilities (lower time = higher probability)
+                if len(pred_times) > 0:
+                    pred_times_array = np.array(pred_times)
+                    if np.any(pred_times_array < 0):
+                        logger.warning(f"Negative predictions for sample {i}, using absolute values")
+                        pred_times_array = np.abs(pred_times_array)
+                    
+                    policy_probs[i, eligible_ops] = 1.0 / (pred_times_array + 1e-8)
+                    policy_probs[i] /= policy_probs[i].sum()
+                else:
+                    # No eligible operators - uniform distribution
+                    policy_probs[i] = 1.0 / n_ops
+                    
+            except Exception as e:
+                raise PolicyInductionError(f"Error inducing policy for sample {i}: {str(e)}") from e
+
+        # Validate output
+        validate_probabilities(policy_probs, "policy_probs")
+        
+        result: np.ndarray = np.array(policy_probs, dtype=np.float64)
+        return result
+
+    except Exception as e:
+        if isinstance(e, (DataValidationError, PolicyInductionError, ModelValidationError)):
+            raise
+        raise PolicyInductionError(f"Error inducing policy: {str(e)}") from e
 
 
 def dr_value_with_clip(
