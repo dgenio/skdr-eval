@@ -35,24 +35,28 @@ def test_build_design_validation():
         skdr_eval.build_design(pd.DataFrame({"col1": [1, 2, 3]}))
 
     # Test invalid actions
-    logs = pd.DataFrame({
-        "arrival_ts": [1, 2, 3],
-        "action": ["op1", "invalid_op"],
-        "service_time": [1.0, 2.0],
-        "op1_elig": [1, 1],
-        "op2_elig": [1, 1],
-    })
+    logs = pd.DataFrame(
+        {
+            "arrival_ts": [1, 2, 3],
+            "action": ["op1", "invalid_op"],
+            "service_time": [1.0, 2.0],
+            "op1_elig": [1, 1],
+            "op2_elig": [1, 1],
+        }
+    )
     with pytest.raises(DataValidationError):
         skdr_eval.build_design(logs)
 
     # Test invalid eligibility values
-    logs = pd.DataFrame({
-        "arrival_ts": [1, 2, 3],
-        "action": ["op1", "op2"],
-        "service_time": [1.0, 2.0],
-        "op1_elig": [1, 0],
-        "op2_elig": [1, 2],  # Invalid: should be 0 or 1
-    })
+    logs = pd.DataFrame(
+        {
+            "arrival_ts": [1, 2, 3],
+            "action": ["op1", "op2"],
+            "service_time": [1.0, 2.0],
+            "op1_elig": [1, 0],
+            "op2_elig": [1, 2],  # Invalid: should be 0 or 1
+        }
+    )
     with pytest.raises(DataValidationError):
         skdr_eval.build_design(logs)
 
@@ -96,6 +100,7 @@ def test_fit_outcome_crossfit_validation():
     class BadEstimator:
         def fit(self, X, y):
             pass
+
         # Missing predict method
 
     def bad_est_factory():
@@ -107,6 +112,7 @@ def test_fit_outcome_crossfit_validation():
 
 def test_induce_policy_from_sklearn_validation():
     """Test induce_policy_from_sklearn input validation."""
+
     # Test invalid model
     class BadModel:
         # Missing predict method
@@ -187,15 +193,17 @@ def test_validation_utilities():
 def test_error_handling_integration():
     """Test error handling in integrated workflow."""
     # Create valid test data
-    logs = pd.DataFrame({
-        "arrival_ts": [1, 2, 3, 4, 5],
-        "action": ["op1", "op2", "op1", "op2", "op1"],
-        "service_time": [1.0, 2.0, 1.5, 2.5, 1.2],
-        "op1_elig": [1, 1, 1, 1, 1],
-        "op2_elig": [1, 1, 1, 1, 1],
-        "cli_feat1": [0.1, 0.2, 0.3, 0.4, 0.5],
-        "cli_feat2": [1.1, 1.2, 1.3, 1.4, 1.5],
-    })
+    logs = pd.DataFrame(
+        {
+            "arrival_ts": [1, 2, 3, 4, 5],
+            "action": ["op1", "op2", "op1", "op2", "op1"],
+            "service_time": [1.0, 2.0, 1.5, 2.5, 1.2],
+            "op1_elig": [1, 1, 1, 1, 1],
+            "op2_elig": [1, 1, 1, 1, 1],
+            "cli_feat1": [0.1, 0.2, 0.3, 0.4, 0.5],
+            "cli_feat2": [1.1, 1.2, 1.3, 1.4, 1.5],
+        }
+    )
 
     # This should work without errors
     design = skdr_eval.build_design(logs)

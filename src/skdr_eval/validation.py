@@ -188,9 +188,7 @@ def validate_probabilities(
 
     row_sums = np.sum(probs, axis=axis)
     if not np.allclose(row_sums, 1.0, atol=tolerance):
-        raise DataValidationError(
-            f"{name} probabilities don't sum to 1 (axis={axis})"
-        )
+        raise DataValidationError(f"{name} probabilities don't sum to 1 (axis={axis})")
 
 
 def validate_positive_values(
@@ -327,9 +325,7 @@ def validate_string_choice(
         choices = [c.lower() for c in choices]
 
     if value not in choices:
-        raise DataValidationError(
-            f"{name} must be one of {choices}, got '{value}'"
-        )
+        raise DataValidationError(f"{name} must be one of {choices}, got '{value}'")
 
 
 def validate_positive_integer(
@@ -351,7 +347,9 @@ def validate_positive_integer(
         If validation fails
     """
     if not isinstance(value, int):
-        raise DataValidationError(f"{name} must be an integer, got {type(value).__name__}")
+        raise DataValidationError(
+            f"{name} must be an integer, got {type(value).__name__}"
+        )
 
     if value <= 0:
         raise DataValidationError(f"{name} must be positive, got {value}")
@@ -381,4 +379,6 @@ def validate_random_state(
                 f"{name} must be an integer or RandomState, got {type(random_state).__name__}"
             )
         if isinstance(random_state, int) and random_state < 0:
-            raise DataValidationError(f"{name} must be non-negative, got {random_state}")
+            raise DataValidationError(
+                f"{name} must be non-negative, got {random_state}"
+            )

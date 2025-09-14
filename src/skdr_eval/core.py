@@ -336,9 +336,7 @@ def fit_propensity_timecal(
         n_actions = A.max() + 1
 
         if n_actions <= 1:
-            raise InsufficientDataError(
-                f"Need at least 2 actions, got {n_actions}"
-            )
+            raise InsufficientDataError(f"Need at least 2 actions, got {n_actions}")
 
         if n_samples < n_splits * 2:
             raise InsufficientDataError(
@@ -411,7 +409,10 @@ def fit_propensity_timecal(
                     cal_clf.fit(X_train, A_train)
 
                     # Get calibrated predictions
-                    if hasattr(cal_clf, "classes_") and len(cal_clf.classes_) < n_actions:
+                    if (
+                        hasattr(cal_clf, "classes_")
+                        and len(cal_clf.classes_) < n_actions
+                    ):
                         # Handle missing classes
                         cal_proba_full = np.zeros((len(X_test), n_actions))
                         cal_proba_partial = cal_clf.predict_proba(X_test)
@@ -461,7 +462,15 @@ def fit_propensity_timecal(
         return propensities, fold_indices
 
     except Exception as e:
-        if isinstance(e, (DataValidationError, InsufficientDataError, PropensityScoreError, ConvergenceError)):
+        if isinstance(
+            e,
+            (
+                DataValidationError,
+                InsufficientDataError,
+                PropensityScoreError,
+                ConvergenceError,
+            ),
+        ):
             raise
         raise PropensityScoreError(f"Error fitting propensity model: {e!s}") from e
 
@@ -576,7 +585,15 @@ def fit_outcome_crossfit(
         return predictions, models_info
 
     except Exception as e:
-        if isinstance(e, (DataValidationError, InsufficientDataError, OutcomeModelError, ModelValidationError)):
+        if isinstance(
+            e,
+            (
+                DataValidationError,
+                InsufficientDataError,
+                OutcomeModelError,
+                ModelValidationError,
+            ),
+        ):
             raise
         raise OutcomeModelError(f"Error fitting outcome model: {e!s}") from e
 
@@ -669,7 +686,9 @@ def induce_policy_from_sklearn(
                 if len(pred_times) > 0:
                     pred_times_array = np.array(pred_times)
                     if np.any(pred_times_array < 0):
-                        logger.warning(f"Negative predictions for sample {i}, using absolute values")
+                        logger.warning(
+                            f"Negative predictions for sample {i}, using absolute values"
+                        )
                         pred_times_array = np.abs(pred_times_array)
 
                     policy_probs[i, eligible_ops] = 1.0 / (pred_times_array + 1e-8)
@@ -679,7 +698,9 @@ def induce_policy_from_sklearn(
                     policy_probs[i] = 1.0 / n_ops
 
             except Exception as e:
-                raise PolicyInductionError(f"Error inducing policy for sample {i}: {e!s}") from e
+                raise PolicyInductionError(
+                    f"Error inducing policy for sample {i}: {e!s}"
+                ) from e
 
         # Validate output
         validate_probabilities(policy_probs, "policy_probs")
@@ -688,7 +709,9 @@ def induce_policy_from_sklearn(
         return result
 
     except Exception as e:
-        if isinstance(e, (DataValidationError, PolicyInductionError, ModelValidationError)):
+        if isinstance(
+            e, (DataValidationError, PolicyInductionError, ModelValidationError)
+        ):
             raise
         raise PolicyInductionError(f"Error inducing policy: {e!s}") from e
 
