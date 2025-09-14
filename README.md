@@ -8,6 +8,25 @@
 
 **Offline policy evaluation for service-time minimization using Doubly Robust (DR) and Stabilized Doubly Robust (SNDR) estimators with time-aware splits and calibration. Now with pairwise evaluation and autoscaling support.**
 
+## What is this?
+
+`skdr-eval` is a Python package for offline policy evaluation in service-time optimization scenarios. It implements state-of-the-art Doubly Robust (DR) and Stabilized Doubly Robust (SNDR) estimators with time-aware cross-validation and calibration. The package is designed for evaluating machine learning models that make decisions about service allocation, with special support for pairwise (client-operator) evaluation and autoscaling strategies.
+
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+  - [Standard Evaluation](#standard-evaluation)
+  - [Pairwise Evaluation](#pairwise-evaluation)
+- [API Reference](#api-reference)
+- [Theory](#theory)
+- [Implementation Details](#implementation-details)
+- [Bootstrap Confidence Intervals](#bootstrap-confidence-intervals)
+- [Examples](#examples)
+- [Development](#development)
+- [Citation](#citation)
+
 ## Features
 
 - 🎯 **Doubly Robust Estimation**: Implements both DR and Stabilized DR (SNDR) estimators
@@ -180,7 +199,9 @@ Compute DR and SNDR values with automatic clipping threshold selection.
 #### `block_bootstrap_ci(values_num, values_den, base_mean, n_boot=400, **kwargs)`
 Compute confidence intervals using moving-block bootstrap for time-series data.
 
-## Why DR and SNDR?
+## Theory
+
+### Why DR and SNDR?
 
 **Doubly Robust (DR)** estimation provides unbiased policy evaluation when either the propensity model OR the outcome model is correctly specified. The estimator is:
 
@@ -200,41 +221,20 @@ Where:
 - `w_i = π(a_i|x_i) / e(a_i|x_i)` = importance weight (clipped)
 - `e(a_i|x_i)` = propensity score (calibrated)
 
-## Key Implementation Details
+## Implementation Details
 
 ### Autoscaling Strategies
 
-#### Direct Strategy
-Uses the logging policy directly without modification.
+- **Direct**: Uses the logging policy directly without modification
+- **Stream**: Induces a policy from sklearn models and applies it to streaming decisions  
+- **Stream TopK**: Similar to stream but restricts choices to top-K operators based on predicted service times
 
-#### Stream Strategy
-Induces a policy from sklearn models and applies it to streaming decisions.
+### Key Features
 
-#### Stream TopK Strategy
-Similar to stream but restricts choices to top-K operators based on predicted service times.
-
-### Time-Series Considerations
-
-- Uses `TimeSeriesSplit` for all cross-validation
-- Propensity scores include standardized timestamps
-- Respects temporal ordering in data splits
-- Pairwise evaluation maintains temporal consistency across client-operator pairs
-
-### Propensity Score Calibration
-- Per-fold isotonic calibration via `CalibratedClassifierCV`
-- Fallback to uncalibrated scores if calibration fails
-- Handles class imbalance gracefully
-
-### Clipping Threshold Selection
-- **DR**: Minimize MSE proxy with ESS floor (default: 2% of samples)
-- **SNDR**: Minimize |SNDR - DR| + MSE proxy
-- Automatic selection from grid: `(2, 5, 10, 20, 50, ∞)`
-
-### Diagnostics and Quality Checks
-- **Effective Sample Size (ESS)**: `(Σw)² / Σw²`
-- **Match Rate**: Fraction with positive propensity scores
-- **Propensity Quantiles**: P01, P05, P10 for positivity assessment
-- **Tail Mass**: Fraction of samples affected by clipping
+- **Time-Series Aware**: Uses `TimeSeriesSplit` for all cross-validation with temporal ordering
+- **Calibrated Propensities**: Per-fold isotonic calibration via `CalibratedClassifierCV`
+- **Automatic Clipping**: Smart threshold selection to minimize variance while maintaining ESS
+- **Comprehensive Diagnostics**: ESS, match rates, propensity quantiles, and tail mass analysis
 
 ## Bootstrap Confidence Intervals
 
