@@ -14,6 +14,17 @@ from .core import (
     fit_propensity_timecal,
     induce_policy_from_sklearn,
 )
+from .config import (
+    ConfigManager,
+    EvaluationConfig,
+    ModelConfig,
+    VisualizationConfig,
+    get_default_config,
+    load_config_from_file,
+    merge_configs,
+    save_config_to_file,
+    validate_config,
+)
 from .pairwise import PairwiseDesign
 from .synth import make_pairwise_synth, make_synth_logs
 
