@@ -21,6 +21,7 @@ from .choice import (
     fit_conditional_logit_with_sampling,
     predict_proba_condlogit,
 )
+from .diagnostics import PropensityDiagnostics
 from .exceptions import (
     ConvergenceError,
     DataValidationError,
@@ -1798,3 +1799,46 @@ def evaluate_pairwise_models(
     logger.info(f"Completed pairwise evaluation for {len(models)} models")
 
     return report, detailed_results
+
+
+def evaluate_propensity_diagnostics(
+    propensities: np.ndarray,
+    actions: np.ndarray,
+    output_format: str = "text",
+) -> tuple[PropensityDiagnostics, str]:
+    """Evaluate propensity score diagnostics and generate a report.
+
+    This function provides comprehensive diagnostics for propensity scores including
+    overlap analysis, balance assessment, calibration evaluation, and discrimination
+    analysis.
+
+    Parameters
+    ----------
+    propensities : np.ndarray
+        Array of propensity scores with shape (n_samples, n_actions)
+    actions : np.ndarray
+        Array of action indices with shape (n_samples,)
+    output_format : str, default="text"
+        Output format for the report ("text" or "markdown")
+
+    Returns
+    -------
+    tuple[PropensityDiagnostics, str]
+        A tuple containing the diagnostics object and the generated report
+
+    Raises
+    ------
+    DataValidationError
+        If input data is invalid
+    InsufficientDataError
+        If there's insufficient data for evaluation
+    """
+    from .diagnostics import comprehensive_propensity_diagnostics, generate_propensity_report
+
+    # Run comprehensive diagnostics
+    diagnostics = comprehensive_propensity_diagnostics(propensities, actions)
+
+    # Generate report
+    report = generate_propensity_report(diagnostics, output_format=output_format)
+
+    return diagnostics, report
