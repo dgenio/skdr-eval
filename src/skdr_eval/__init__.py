@@ -1,5 +1,7 @@
 """skdr-eval: Offline policy evaluation using DR and Stabilized DR."""
 
+import contextlib
+
 from .core import (
     Design,
     DRResult,
@@ -15,10 +17,13 @@ from .core import (
 from .pairwise import PairwiseDesign
 from .synth import make_pairwise_synth, make_synth_logs
 
-try:
-    from ._version import version as __version__  # type: ignore
-except ImportError:
-    __version__ = "unknown"
+# Version is set by setuptools-scm
+__version__: str = "unknown"
+
+with contextlib.suppress(ImportError):
+    from ._version import version  # type: ignore[import-untyped]
+
+    __version__ = version
 
 __all__ = [
     "DRResult",
