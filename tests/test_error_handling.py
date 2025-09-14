@@ -10,6 +10,7 @@ from skdr_eval.exceptions import (
     DataValidationError,
     InsufficientDataError,
     ModelValidationError,
+    OutcomeModelError,
 )
 from skdr_eval.validation import (
     validate_dataframe,
@@ -38,10 +39,10 @@ def test_build_design_validation():
     logs = pd.DataFrame(
         {
             "arrival_ts": [1, 2, 3],
-            "action": ["op1", "invalid_op"],
-            "service_time": [1.0, 2.0],
-            "op1_elig": [1, 1],
-            "op2_elig": [1, 1],
+            "action": ["op1", "op2", "invalid_op"],
+            "service_time": [1.0, 2.0, 3.0],
+            "op1_elig": [1, 1, 1],
+            "op2_elig": [1, 1, 1],
         }
     )
     with pytest.raises(DataValidationError):
@@ -51,10 +52,10 @@ def test_build_design_validation():
     logs = pd.DataFrame(
         {
             "arrival_ts": [1, 2, 3],
-            "action": ["op1", "op2"],
-            "service_time": [1.0, 2.0],
-            "op1_elig": [1, 0],
-            "op2_elig": [1, 2],  # Invalid: should be 0 or 1
+            "action": ["op1", "op2", "op1"],
+            "service_time": [1.0, 2.0, 3.0],
+            "op1_elig": [1, 0, 1],
+            "op2_elig": [1, 2, 0],  # Invalid: should be 0 or 1
         }
     )
     with pytest.raises(DataValidationError):
@@ -93,7 +94,7 @@ def test_fit_outcome_crossfit_validation():
     # Test invalid estimator
     X_obs = np.random.randn(10, 5)
     Y = np.random.randn(10)
-    with pytest.raises(ValueError):
+    with pytest.raises(OutcomeModelError):
         skdr_eval.fit_outcome_crossfit(X_obs, Y, estimator="invalid")
 
     # Test callable estimator without required methods
@@ -195,13 +196,24 @@ def test_error_handling_integration():
     # Create valid test data
     logs = pd.DataFrame(
         {
-            "arrival_ts": [1, 2, 3, 4, 5],
-            "action": ["op1", "op2", "op1", "op2", "op1"],
-            "service_time": [1.0, 2.0, 1.5, 2.5, 1.2],
-            "op1_elig": [1, 1, 1, 1, 1],
-            "op2_elig": [1, 1, 1, 1, 1],
-            "cli_feat1": [0.1, 0.2, 0.3, 0.4, 0.5],
-            "cli_feat2": [1.1, 1.2, 1.3, 1.4, 1.5],
+            "arrival_ts": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            "action": [
+                "op1",
+                "op2",
+                "op1",
+                "op2",
+                "op1",
+                "op2",
+                "op1",
+                "op2",
+                "op1",
+                "op2",
+            ],
+            "service_time": [1.0, 2.0, 1.5, 2.5, 1.2, 1.8, 2.1, 1.7, 1.9, 2.3],
+            "op1_elig": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            "op2_elig": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            "cli_feat1": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+            "cli_feat2": [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0],
         }
     )
 
@@ -211,7 +223,18 @@ def test_error_handling_integration():
 
     # Test with invalid data that should raise appropriate errors
     invalid_logs = logs.copy()
-    invalid_logs["service_time"] = [np.inf, 2.0, 1.5, 2.5, 1.2]  # Contains inf
+    invalid_logs["service_time"] = [
+        np.inf,
+        2.0,
+        1.5,
+        2.5,
+        1.2,
+        1.8,
+        2.1,
+        1.7,
+        1.9,
+        2.3,
+    ]  # Contains inf
 
     with pytest.raises(DataValidationError):
         skdr_eval.build_design(invalid_logs)

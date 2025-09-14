@@ -324,7 +324,7 @@ def fit_propensity_timecal(
                     f"ts length {len(ts)} doesn't match X_phi length {len(X_phi)}"
                 )
 
-        validate_positive_integer(n_splits)
+        validate_positive_integer(n_splits, "n_splits")
         validate_random_state(random_state)
 
         if len(X_phi) != len(A):
@@ -521,7 +521,7 @@ def fit_outcome_crossfit(
         validate_numpy_array(Y, "Y", min_size=1)
         validate_finite_values(Y, "Y")
 
-        validate_positive_integer(n_splits)
+        validate_positive_integer(n_splits, "n_splits")
         validate_random_state(random_state)
 
         if len(X_obs) != len(Y):
