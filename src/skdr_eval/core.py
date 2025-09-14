@@ -547,7 +547,6 @@ def fit_outcome_crossfit(
             except Exception as e:
                 raise ModelValidationError(f"Invalid estimator factory: {e!s}") from e
         else:
-            validate_string_choice(estimator, "estimator", ["hgb", "ridge", "rf"])
             raise ValueError(f"Unknown estimator: {estimator}")
 
         # Time-series split
