@@ -16,7 +16,7 @@ from .pairwise import PairwiseDesign
 from .synth import make_pairwise_synth, make_synth_logs
 
 try:
-    from ._version import version as __version__  # type: ignore[import-untyped]
+    from ._version import version as __version__  # type: ignore
 except ImportError:
     __version__ = "unknown"
 
