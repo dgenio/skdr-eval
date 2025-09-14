@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "skdr-eval"
 dynamic = ["version"]
-description = "Offline policy evaluation for service-time minimization using DR and Stabilized DR"
+description = "Offline policy evaluation using Doubly Robust and Stabilized DR estimators"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
     {name = "Diogo Santos", email = "diogofcul@gmail.com"}
 ]
-keywords = ["offline evaluation", "doubly robust", "bandits", "causal"]
+keywords = ["offline evaluation", "doubly robust", "policy evaluation", "service time", "time series", "autoscaling", "bandits", "causal inference"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -24,6 +24,8 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 requires-python = ">=3.9"
 dependencies = [
