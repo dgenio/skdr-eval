@@ -5,13 +5,12 @@ from typing import Any, Optional, Union
 
 import numpy as np
 import pandas as pd
-from sklearn.base import BaseEstimator
 
 from .exceptions import (
     DataValidationError,
     InsufficientDataError,
-    ModelValidationError,
     MemoryError,
+    ModelValidationError,
 )
 
 logger = logging.getLogger("skdr_eval")
@@ -218,9 +217,8 @@ def validate_positive_values(
     if strict:
         if np.any(values <= 0):
             raise DataValidationError(f"{name} contains non-positive values")
-    else:
-        if np.any(values < 0):
-            raise DataValidationError(f"{name} contains negative values")
+    elif np.any(values < 0):
+        raise DataValidationError(f"{name} contains negative values")
 
 
 def validate_finite_values(

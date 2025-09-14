@@ -24,7 +24,6 @@ from .choice import (
 from .exceptions import (
     ConvergenceError,
     DataValidationError,
-    EstimationError,
     InsufficientDataError,
     ModelValidationError,
     OutcomeModelError,
@@ -36,7 +35,6 @@ from .validation import (
     validate_dataframe,
     validate_finite_values,
     validate_numpy_array,
-    validate_parameter_range,
     validate_positive_integer,
     validate_probabilities,
     validate_random_state,
@@ -223,7 +221,7 @@ def build_design(
         # Eligibility matrix
         elig = logs[elig_cols].values
         validate_numpy_array(elig, "elig", expected_shape=(len(logs), len(ops_all)))
-        
+
         # Check eligibility values are 0 or 1
         if not np.all(np.isin(elig, [0, 1])):
             raise DataValidationError("Eligibility matrix must contain only 0s and 1s")
@@ -248,7 +246,7 @@ def build_design(
         # Outcomes and timestamps
         Y: np.ndarray = logs["service_time"].values.astype(np.float64)
         ts: np.ndarray = logs["arrival_ts"].values.astype(np.float64)
-        
+
         validate_numpy_array(Y, "Y", min_size=1)
         validate_finite_values(Y, "Y")
         validate_numpy_array(ts, "ts", min_size=1)
@@ -269,7 +267,7 @@ def build_design(
     except Exception as e:
         if isinstance(e, (DataValidationError, InsufficientDataError)):
             raise
-        raise DataValidationError(f"Error building design: {str(e)}") from e
+        raise DataValidationError(f"Error building design: {e!s}") from e
 
 
 def fit_propensity_timecal(
@@ -314,10 +312,10 @@ def fit_propensity_timecal(
         # Validate inputs
         validate_numpy_array(X_phi, "X_phi", min_size=1)
         validate_finite_values(X_phi, "X_phi")
-        
+
         validate_numpy_array(A, "A", min_size=1)
         validate_finite_values(A, "A")
-        
+
         if ts is not None:
             validate_numpy_array(ts, "ts", min_size=1)
             validate_finite_values(ts, "ts")
@@ -325,128 +323,128 @@ def fit_propensity_timecal(
                 raise DataValidationError(
                     f"ts length {len(ts)} doesn't match X_phi length {len(X_phi)}"
                 )
-        
+
         validate_positive_integer(n_splits)
         validate_random_state(random_state)
-        
+
         if len(X_phi) != len(A):
             raise DataValidationError(
                 f"X_phi length {len(X_phi)} doesn't match A length {len(A)}"
             )
-        
+
         n_samples, _ = X_phi.shape
         n_actions = A.max() + 1
-        
+
         if n_actions <= 1:
             raise InsufficientDataError(
                 f"Need at least 2 actions, got {n_actions}"
             )
-        
+
         if n_samples < n_splits * 2:
             raise InsufficientDataError(
                 f"Need at least {n_splits * 2} samples for {n_splits} splits, got {n_samples}"
             )
 
-    # Sort by timestamp if provided to ensure proper time-series ordering
-    if ts is not None:
-        time_order = np.argsort(ts)
-        X_phi_sorted = X_phi[time_order]
-        A_sorted = A[time_order]
-        # Keep track of original indices for mapping back
-        inverse_order = np.empty_like(time_order)
-        inverse_order[time_order] = np.arange(len(time_order))
-    else:
-        X_phi_sorted = X_phi
-        A_sorted = A
-        time_order = np.arange(n_samples)
-        inverse_order = np.arange(n_samples)
+        # Sort by timestamp if provided to ensure proper time-series ordering
+        if ts is not None:
+            time_order = np.argsort(ts)
+            X_phi_sorted = X_phi[time_order]
+            A_sorted = A[time_order]
+            # Keep track of original indices for mapping back
+            inverse_order = np.empty_like(time_order)
+            inverse_order[time_order] = np.arange(len(time_order))
+        else:
+            X_phi_sorted = X_phi
+            A_sorted = A
+            time_order = np.arange(n_samples)
+            inverse_order = np.arange(n_samples)
 
-    # Time-series split on sorted data
-    tscv = TimeSeriesSplit(n_splits=n_splits)
-    propensities = np.zeros((n_samples, n_actions))
-    fold_indices = np.full(n_samples, -1)
+        # Time-series split on sorted data
+        tscv = TimeSeriesSplit(n_splits=n_splits)
+        propensities = np.zeros((n_samples, n_actions))
+        fold_indices = np.full(n_samples, -1)
 
-    for fold, (train_idx, test_idx) in enumerate(tscv.split(X_phi_sorted)):
-        # Map sorted indices back to original order for fold assignment
-        original_test_idx = time_order[test_idx]
-        fold_indices[original_test_idx] = fold
+        for fold, (train_idx, test_idx) in enumerate(tscv.split(X_phi_sorted)):
+            # Map sorted indices back to original order for fold assignment
+            original_test_idx = time_order[test_idx]
+            fold_indices[original_test_idx] = fold
 
-        X_train, X_test = X_phi_sorted[train_idx], X_phi_sorted[test_idx]
-        A_train, _A_test = A_sorted[train_idx], A_sorted[test_idx]
+            X_train, X_test = X_phi_sorted[train_idx], X_phi_sorted[test_idx]
+            A_train, _A_test = A_sorted[train_idx], A_sorted[test_idx]
 
-        # Fit base classifier with robustness for single class
-        try:
-            clf = LogisticRegression(random_state=random_state, max_iter=1000)
-            clf.fit(X_train, A_train)
+            # Fit base classifier with robustness for single class
+            try:
+                clf = LogisticRegression(random_state=random_state, max_iter=1000)
+                clf.fit(X_train, A_train)
 
-            # Get uncalibrated predictions - ensure we have all actions
-            if hasattr(clf, "classes_") and len(clf.classes_) < n_actions:
-                # Handle case where not all actions are in training data
-                pred_proba_full = np.zeros((len(X_test), n_actions))
-                pred_proba_partial = clf.predict_proba(X_test)
-                for i, class_idx in enumerate(clf.classes_):
-                    pred_proba_full[:, class_idx] = pred_proba_partial[:, i]
-                # Add small uniform probability for missing classes
-                missing_mass = 1.0 - pred_proba_full.sum(axis=1, keepdims=True)
-                missing_classes = np.setdiff1d(np.arange(n_actions), clf.classes_)
-                if len(missing_classes) > 0:
-                    pred_proba_full[:, missing_classes] = missing_mass / len(
-                        missing_classes
-                    )
-                pred_proba = pred_proba_full
-            else:
-                pred_proba = clf.predict_proba(X_test)
-
-        except ValueError as e:
-            if "only one class" in str(e):
-                # Handle single class case - assign uniform probabilities
-                pred_proba = np.ones((len(X_test), n_actions)) / n_actions
-                clf = None  # Mark as failed
-            else:
-                raise
-
-        # Simple calibration using CalibratedClassifierCV approach
-        try:
-            if clf is not None and len(np.unique(A_train)) > 1:
-                # Use calibrated classifier for better probability estimates
-                cal_clf = CalibratedClassifierCV(clf, method="isotonic", cv=2)
-                cal_clf.fit(X_train, A_train)
-
-                # Get calibrated predictions
-                if hasattr(cal_clf, "classes_") and len(cal_clf.classes_) < n_actions:
-                    # Handle missing classes
-                    cal_proba_full = np.zeros((len(X_test), n_actions))
-                    cal_proba_partial = cal_clf.predict_proba(X_test)
-                    for i, class_idx in enumerate(cal_clf.classes_):
-                        cal_proba_full[:, class_idx] = cal_proba_partial[:, i]
+                # Get uncalibrated predictions - ensure we have all actions
+                if hasattr(clf, "classes_") and len(clf.classes_) < n_actions:
+                    # Handle case where not all actions are in training data
+                    pred_proba_full = np.zeros((len(X_test), n_actions))
+                    pred_proba_partial = clf.predict_proba(X_test)
+                    for i, class_idx in enumerate(clf.classes_):
+                        pred_proba_full[:, class_idx] = pred_proba_partial[:, i]
                     # Add small uniform probability for missing classes
-                    missing_mass = 1.0 - cal_proba_full.sum(axis=1, keepdims=True)
-                    missing_classes = np.setdiff1d(
-                        np.arange(n_actions), cal_clf.classes_
-                    )
+                    missing_mass = 1.0 - pred_proba_full.sum(axis=1, keepdims=True)
+                    missing_classes = np.setdiff1d(np.arange(n_actions), clf.classes_)
                     if len(missing_classes) > 0:
-                        cal_proba_full[:, missing_classes] = missing_mass / len(
+                        pred_proba_full[:, missing_classes] = missing_mass / len(
                             missing_classes
                         )
-                    pred_proba = cal_proba_full
+                    pred_proba = pred_proba_full
                 else:
-                    pred_proba = cal_clf.predict_proba(X_test)
-        except (ValueError, RuntimeError, AttributeError):
-            # Fallback to uncalibrated predictions if calibration fails
-            # This can happen with edge cases in the calibration process
-            pass
+                    pred_proba = clf.predict_proba(X_test)
 
-        # Ensure probabilities sum to 1 and are positive
-        row_sums = pred_proba.sum(axis=1, keepdims=True)
-        row_sums = np.where(row_sums > 0, row_sums, 1.0)
-        pred_proba = pred_proba / row_sums
+            except ValueError as e:
+                if "only one class" in str(e):
+                    # Handle single class case - assign uniform probabilities
+                    pred_proba = np.ones((len(X_test), n_actions)) / n_actions
+                    clf = None  # Mark as failed
+                else:
+                    raise
 
-        # Add small epsilon to avoid zero probabilities
-        epsilon = 1e-8
-        pred_proba = pred_proba + epsilon
-        pred_proba = pred_proba / pred_proba.sum(axis=1, keepdims=True)
+            # Simple calibration using CalibratedClassifierCV approach
+            try:
+                if clf is not None and len(np.unique(A_train)) > 1:
+                    # Use calibrated classifier for better probability estimates
+                    cal_clf = CalibratedClassifierCV(clf, method="isotonic", cv=2)
+                    cal_clf.fit(X_train, A_train)
 
-        propensities[original_test_idx] = pred_proba
+                    # Get calibrated predictions
+                    if hasattr(cal_clf, "classes_") and len(cal_clf.classes_) < n_actions:
+                        # Handle missing classes
+                        cal_proba_full = np.zeros((len(X_test), n_actions))
+                        cal_proba_partial = cal_clf.predict_proba(X_test)
+                        for i, class_idx in enumerate(cal_clf.classes_):
+                            cal_proba_full[:, class_idx] = cal_proba_partial[:, i]
+                        # Add small uniform probability for missing classes
+                        missing_mass = 1.0 - cal_proba_full.sum(axis=1, keepdims=True)
+                        missing_classes = np.setdiff1d(
+                            np.arange(n_actions), cal_clf.classes_
+                        )
+                        if len(missing_classes) > 0:
+                            cal_proba_full[:, missing_classes] = missing_mass / len(
+                                missing_classes
+                            )
+                        pred_proba = cal_proba_full
+                    else:
+                        pred_proba = cal_clf.predict_proba(X_test)
+            except (ValueError, RuntimeError, AttributeError):
+                # Fallback to uncalibrated predictions if calibration fails
+                # This can happen with edge cases in the calibration process
+                pass
+
+            # Ensure probabilities sum to 1 and are positive
+            row_sums = pred_proba.sum(axis=1, keepdims=True)
+            row_sums = np.where(row_sums > 0, row_sums, 1.0)
+            pred_proba = pred_proba / row_sums
+
+            # Add small epsilon to avoid zero probabilities
+            epsilon = 1e-8
+            pred_proba = pred_proba + epsilon
+            pred_proba = pred_proba / pred_proba.sum(axis=1, keepdims=True)
+
+            propensities[original_test_idx] = pred_proba
 
         # Handle samples not assigned to any fold (shouldn't happen with TimeSeriesSplit but be safe)
         unassigned_mask = fold_indices == -1
@@ -465,7 +463,7 @@ def fit_propensity_timecal(
     except Exception as e:
         if isinstance(e, (DataValidationError, InsufficientDataError, PropensityScoreError, ConvergenceError)):
             raise
-        raise PropensityScoreError(f"Error fitting propensity model: {str(e)}") from e
+        raise PropensityScoreError(f"Error fitting propensity model: {e!s}") from e
 
 
 def fit_outcome_crossfit(
@@ -510,18 +508,18 @@ def fit_outcome_crossfit(
         # Validate inputs
         validate_numpy_array(X_obs, "X_obs", min_size=1)
         validate_finite_values(X_obs, "X_obs")
-        
+
         validate_numpy_array(Y, "Y", min_size=1)
         validate_finite_values(Y, "Y")
-        
+
         validate_positive_integer(n_splits)
         validate_random_state(random_state)
-        
+
         if len(X_obs) != len(Y):
             raise DataValidationError(
                 f"X_obs length {len(X_obs)} doesn't match Y length {len(Y)}"
             )
-        
+
         n_samples = X_obs.shape[0]
         if n_samples < n_splits * 2:
             raise InsufficientDataError(
@@ -548,7 +546,7 @@ def fit_outcome_crossfit(
                 test_est = est_factory()
                 validate_sklearn_estimator(test_est, "estimator", ["fit", "predict"])
             except Exception as e:
-                raise ModelValidationError(f"Invalid estimator factory: {str(e)}") from e
+                raise ModelValidationError(f"Invalid estimator factory: {e!s}") from e
         else:
             validate_string_choice(estimator, "estimator", ["hgb", "ridge", "rf"])
             raise ValueError(f"Unknown estimator: {estimator}")
@@ -570,19 +568,19 @@ def fit_outcome_crossfit(
                 validate_finite_values(pred, f"predictions_fold_{fold_idx}")
                 predictions[test_idx] = pred
                 models_info.append((model, train_idx, test_idx))
-                
+
             except Exception as e:
-                raise OutcomeModelError(f"Error in fold {fold_idx}: {str(e)}") from e
+                raise OutcomeModelError(f"Error in fold {fold_idx}: {e!s}") from e
 
         # Validate output
         validate_finite_values(predictions, "predictions")
-        
+
         return predictions, models_info
 
     except Exception as e:
         if isinstance(e, (DataValidationError, InsufficientDataError, OutcomeModelError, ModelValidationError)):
             raise
-        raise OutcomeModelError(f"Error fitting outcome model: {str(e)}") from e
+        raise OutcomeModelError(f"Error fitting outcome model: {e!s}") from e
 
 
 def induce_policy_from_sklearn(
@@ -624,22 +622,22 @@ def induce_policy_from_sklearn(
     try:
         # Validate inputs
         validate_sklearn_estimator(model, "model", ["predict"])
-        
+
         validate_numpy_array(X_base, "X_base", min_size=1)
         validate_finite_values(X_base, "X_base")
-        
+
         if not ops_all:
             raise DataValidationError("ops_all cannot be empty")
-        
+
         validate_numpy_array(elig, "elig", min_size=1)
         if not np.all(np.isin(elig, [0, 1])):
             raise DataValidationError("Eligibility matrix must contain only 0s and 1s")
-        
+
         if len(X_base) != len(elig):
             raise DataValidationError(
                 f"X_base length {len(X_base)} doesn't match elig length {len(elig)}"
             )
-        
+
         if elig.shape[1] != len(ops_all):
             raise DataValidationError(
                 f"elig width {elig.shape[1]} doesn't match ops_all length {len(ops_all)}"
@@ -675,26 +673,26 @@ def induce_policy_from_sklearn(
                     if np.any(pred_times_array < 0):
                         logger.warning(f"Negative predictions for sample {i}, using absolute values")
                         pred_times_array = np.abs(pred_times_array)
-                    
+
                     policy_probs[i, eligible_ops] = 1.0 / (pred_times_array + 1e-8)
                     policy_probs[i] /= policy_probs[i].sum()
                 else:
                     # No eligible operators - uniform distribution
                     policy_probs[i] = 1.0 / n_ops
-                    
+
             except Exception as e:
-                raise PolicyInductionError(f"Error inducing policy for sample {i}: {str(e)}") from e
+                raise PolicyInductionError(f"Error inducing policy for sample {i}: {e!s}") from e
 
         # Validate output
         validate_probabilities(policy_probs, "policy_probs")
-        
+
         result: np.ndarray = np.array(policy_probs, dtype=np.float64)
         return result
 
     except Exception as e:
         if isinstance(e, (DataValidationError, PolicyInductionError, ModelValidationError)):
             raise
-        raise PolicyInductionError(f"Error inducing policy: {str(e)}") from e
+        raise PolicyInductionError(f"Error inducing policy: {e!s}") from e
 
 
 def dr_value_with_clip(

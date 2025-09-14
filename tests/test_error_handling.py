@@ -10,8 +10,17 @@ from skdr_eval.exceptions import (
     DataValidationError,
     InsufficientDataError,
     ModelValidationError,
-    PolicyInductionError,
-    PropensityScoreError,
+)
+from skdr_eval.validation import (
+    validate_dataframe,
+    validate_finite_values,
+    validate_numpy_array,
+    validate_parameter_range,
+    validate_positive_integer,
+    validate_positive_values,
+    validate_probabilities,
+    validate_random_state,
+    validate_string_choice,
 )
 
 
@@ -126,18 +135,6 @@ def test_induce_policy_from_sklearn_validation():
 
 def test_validation_utilities():
     """Test validation utility functions."""
-    from skdr_eval.validation import (
-        validate_dataframe,
-        validate_numpy_array,
-        validate_probabilities,
-        validate_positive_values,
-        validate_finite_values,
-        validate_parameter_range,
-        validate_string_choice,
-        validate_positive_integer,
-        validate_random_state,
-    )
-
     # Test DataFrame validation
     with pytest.raises(DataValidationError):
         validate_dataframe("not_a_dataframe", "test")
