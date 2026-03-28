@@ -33,6 +33,7 @@ from .exceptions import (
 from .pairwise import PairwiseDesign
 from .synth import make_pairwise_synth, make_synth_logs
 from .visualization import (
+    PropensityDiagnostics,
     create_dashboard,
     plot_calibration_curve,
     plot_diagnostics_summary,
@@ -66,6 +67,7 @@ __all__ = [
     "PairwiseDesign",
     "PairwiseEvaluationError",
     "PolicyInductionError",
+    "PropensityDiagnostics",
     "PropensityScoreError",
     "SkdrEvalError",
     "VersionError",

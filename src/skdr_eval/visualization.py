@@ -1,29 +1,46 @@
 """Visualization tools for skdr-eval library."""
 
 import logging
-from typing import Dict, List, Optional, Tuple, Union
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import seaborn as sns
-from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
 from .exceptions import DataValidationError, InsufficientDataError
 
 logger = logging.getLogger("skdr_eval")
 
+_MIN_SAMPLES = 10
+
 # Set default style
 plt.style.use("default")
 sns.set_palette("husl")
 
 
+@dataclass
+class PropensityDiagnostics:
+    """Structured container for propensity score diagnostic results."""
+
+    overlap_ratio: float = 0.0
+    balance_ratio: float = 0.0
+    calibration_score: float = 0.0
+    discrimination_score: float = 0.0
+    log_loss_score: float = 0.0
+    statistics: dict[str, float] = field(default_factory=dict)
+    balance_stats: dict[str, Any] = field(default_factory=dict)
+    calibration_curve: list[tuple[float, float]] = field(default_factory=list)
+    roc_curve: list[tuple[float, float]] = field(default_factory=list)
+    quantiles: dict[str, float] = field(default_factory=dict)
+
+
 def plot_propensity_distribution(
     propensities: np.ndarray,
     actions: np.ndarray,
-    action_names: Optional[List[str]] = None,
-    figsize: Tuple[int, int] = (12, 8),
+    action_names: Optional[list[str]] = None,
+    figsize: tuple[int, int] = (12, 8),
     save_path: Optional[str] = None,
 ) -> Figure:
     """Plot propensity score distributions by action.
@@ -51,7 +68,7 @@ def plot_propensity_distribution(
             f"Propensities length {len(propensities)} doesn't match actions length {len(actions)}"
         )
 
-    if len(propensities) < 10:
+    if len(propensities) < _MIN_SAMPLES:
         raise InsufficientDataError("Need at least 10 samples for visualization")
 
     n_actions = propensities.shape[1]
@@ -90,7 +107,7 @@ def plot_propensity_distribution(
             action_props = propensities[action_mask, action]
             box_data.append(action_props)
             box_labels.append(action_names[action])
-    
+
     if box_data:
         ax2.boxplot(box_data, labels=box_labels)
         ax2.set_ylabel("Propensity Score")
@@ -121,9 +138,11 @@ def plot_propensity_distribution(
     ax4 = axes[1, 1]
     # Sample a subset for heatmap if too many samples
     n_samples_heatmap = min(100, len(propensities))
-    sample_indices = np.random.choice(len(propensities), n_samples_heatmap, replace=False)
+    sample_indices = np.random.choice(
+        len(propensities), n_samples_heatmap, replace=False
+    )
     heatmap_data = propensities[sample_indices]
-    
+
     im = ax4.imshow(heatmap_data.T, aspect="auto", cmap="viridis")
     ax4.set_xlabel("Sample Index")
     ax4.set_ylabel("Action")
@@ -142,8 +161,8 @@ def plot_propensity_distribution(
 
 
 def plot_dr_results(
-    results: Dict[str, Dict[str, float]],
-    figsize: Tuple[int, int] = (12, 8),
+    results: dict[str, dict[str, float]],
+    figsize: tuple[int, int] = (12, 8),
     save_path: Optional[str] = None,
 ) -> Figure:
     """Plot DR/SNDR evaluation results.
@@ -238,8 +257,8 @@ def plot_dr_results(
 
 
 def plot_calibration_curve(
-    calibration_curve: List[Tuple[float, float]],
-    figsize: Tuple[int, int] = (8, 6),
+    calibration_curve: list[tuple[float, float]],
+    figsize: tuple[int, int] = (8, 6),
     save_path: Optional[str] = None,
 ) -> Figure:
     """Plot propensity score calibration curve.
@@ -262,14 +281,21 @@ def plot_calibration_curve(
         raise DataValidationError("Calibration curve data cannot be empty")
 
     fig, ax = plt.subplots(figsize=figsize)
-    
+
     bin_centers, bin_means = zip(*calibration_curve)
     bin_centers = np.array(bin_centers)
     bin_means = np.array(bin_means)
 
     # Plot calibration curve
-    ax.plot(bin_centers, bin_means, "o-", label="Calibration Curve", linewidth=2, markersize=6)
-    
+    ax.plot(
+        bin_centers,
+        bin_means,
+        "o-",
+        label="Calibration Curve",
+        linewidth=2,
+        markersize=6,
+    )
+
     # Plot perfect calibration line
     ax.plot([0, 1], [0, 1], "k--", label="Perfect Calibration", alpha=0.7)
 
@@ -291,8 +317,8 @@ def plot_calibration_curve(
 
 
 def plot_roc_curve(
-    roc_curve: List[Tuple[float, float]],
-    figsize: Tuple[int, int] = (8, 6),
+    roc_curve: list[tuple[float, float]],
+    figsize: tuple[int, int] = (8, 6),
     save_path: Optional[str] = None,
 ) -> Figure:
     """Plot ROC curve for propensity score discrimination.
@@ -315,14 +341,14 @@ def plot_roc_curve(
         raise DataValidationError("ROC curve data cannot be empty")
 
     fig, ax = plt.subplots(figsize=figsize)
-    
+
     fpr, tpr = zip(*roc_curve)
     fpr = np.array(fpr)
     tpr = np.array(tpr)
 
     # Plot ROC curve
     ax.plot(fpr, tpr, "b-", label="ROC Curve", linewidth=2)
-    
+
     # Plot random classifier line
     ax.plot([0, 1], [0, 1], "k--", label="Random Classifier", alpha=0.7)
 
@@ -344,8 +370,8 @@ def plot_roc_curve(
 
 
 def plot_diagnostics_summary(
-    diagnostics: "PropensityDiagnostics",
-    figsize: Tuple[int, int] = (15, 10),
+    diagnostics: PropensityDiagnostics,
+    figsize: tuple[int, int] = (15, 10),
     save_path: Optional[str] = None,
 ) -> Figure:
     """Plot comprehensive diagnostics summary.
@@ -377,26 +403,36 @@ def plot_diagnostics_summary(
     ]
     score_names = ["Overlap", "Balance", "Calibration", "Discrimination"]
     colors = ["skyblue", "lightgreen", "orange", "pink"]
-    
+
     bars = ax1.bar(score_names, scores, color=colors, alpha=0.7)
     ax1.set_ylabel("Score")
     ax1.set_title("Summary Scores")
     ax1.set_ylim(0, 1)
     ax1.tick_params(axis="x", rotation=45)
-    
+
     # Add value labels on bars
     for bar, score in zip(bars, scores):
         height = bar.get_height()
-        ax1.text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                f'{score:.3f}', ha='center', va='bottom')
+        ax1.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            height + 0.01,
+            f"{score:.3f}",
+            ha="center",
+            va="bottom",
+        )
 
     # Plot 2: Log loss
     ax2 = axes[0, 1]
     ax2.bar(["Log Loss"], [diagnostics.log_loss_score], color="red", alpha=0.7)
     ax2.set_ylabel("Log Loss")
     ax2.set_title("Log Loss Score")
-    ax2.text(0, diagnostics.log_loss_score + 0.01, f'{diagnostics.log_loss_score:.3f}',
-             ha='center', va='bottom')
+    ax2.text(
+        0,
+        diagnostics.log_loss_score + 0.01,
+        f"{diagnostics.log_loss_score:.3f}",
+        ha="center",
+        va="bottom",
+    )
 
     # Plot 3: Propensity score statistics
     ax3 = axes[0, 2]
@@ -463,7 +499,9 @@ def plot_diagnostics_summary(
 
     ax8 = axes[2, 1]
     if balance_stats:
-        mean_scores = [v for k, v in balance_stats.items() if k.endswith("_mean_pscore")]
+        mean_scores = [
+            v for k, v in balance_stats.items() if k.endswith("_mean_pscore")
+        ]
         action_names = [f"Action {i}" for i in range(len(mean_scores))]
         ax8.bar(action_names, mean_scores, alpha=0.7, color="lightblue")
     ax8.set_ylabel("Mean Propensity Score")
@@ -491,10 +529,10 @@ def plot_diagnostics_summary(
 def create_dashboard(
     propensities: np.ndarray,
     actions: np.ndarray,
-    results: Optional[Dict[str, Dict[str, float]]] = None,
-    diagnostics: Optional["PropensityDiagnostics"] = None,
-    action_names: Optional[List[str]] = None,
-    figsize: Tuple[int, int] = (20, 15),
+    results: Optional[dict[str, dict[str, float]]] = None,
+    diagnostics: Optional[PropensityDiagnostics] = None,
+    action_names: Optional[list[str]] = None,
+    figsize: tuple[int, int] = (20, 15),
     save_path: Optional[str] = None,
 ) -> Figure:
     """Create a comprehensive dashboard with all visualizations.
@@ -526,7 +564,7 @@ def create_dashboard(
             f"Propensities length {len(propensities)} doesn't match actions length {len(actions)}"
         )
 
-    if len(propensities) < 10:
+    if len(propensities) < _MIN_SAMPLES:
         raise InsufficientDataError("Need at least 10 samples for dashboard")
 
     fig = plt.figure(figsize=figsize)
@@ -540,12 +578,18 @@ def create_dashboard(
     n_actions = propensities.shape[1]
     if action_names is None:
         action_names = [f"Action {i}" for i in range(n_actions)]
-    
+
     for action in range(n_actions):
         action_mask = actions == action
         if action_mask.sum() > 0:
             action_props = propensities[action_mask, action]
-            ax1.hist(action_props, bins=20, alpha=0.7, label=action_names[action], density=True)
+            ax1.hist(
+                action_props,
+                bins=20,
+                alpha=0.7,
+                label=action_names[action],
+                density=True,
+            )
     ax1.set_xlabel("Propensity Score")
     ax1.set_ylabel("Density")
     ax1.set_title("Propensity Score Distributions")
@@ -567,13 +611,25 @@ def create_dashboard(
         ax2.set_title("Diagnostic Scores")
         ax2.set_ylim(0, 1)
         ax2.tick_params(axis="x", rotation=45)
-        
+
         for bar, score in zip(bars, scores):
             height = bar.get_height()
-            ax2.text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                    f'{score:.3f}', ha='center', va='bottom')
+            ax2.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                height + 0.01,
+                f"{score:.3f}",
+                ha="center",
+                va="bottom",
+            )
     else:
-        ax2.text(0.5, 0.5, "No diagnostics available", ha='center', va='center', transform=ax2.transAxes)
+        ax2.text(
+            0.5,
+            0.5,
+            "No diagnostics available",
+            ha="center",
+            va="center",
+            transform=ax2.transAxes,
+        )
         ax2.set_title("Diagnostic Scores")
 
     # Plot 3: DR results (if available)
@@ -582,7 +638,7 @@ def create_dashboard(
         models = list(results.keys())
         dr_values = [results[model].get("V_hat", 0) for model in models]
         dr_errors = [results[model].get("SE_if", 0) for model in models]
-        
+
         x_pos = np.arange(len(models))
         ax3.bar(x_pos, dr_values, yerr=dr_errors, capsize=5, alpha=0.7)
         ax3.set_xlabel("Model")
@@ -592,7 +648,14 @@ def create_dashboard(
         ax3.set_xticklabels(models, rotation=45)
         ax3.grid(True, alpha=0.3)
     else:
-        ax3.text(0.5, 0.5, "No results available", ha='center', va='center', transform=ax3.transAxes)
+        ax3.text(
+            0.5,
+            0.5,
+            "No results available",
+            ha="center",
+            va="center",
+            transform=ax3.transAxes,
+        )
         ax3.set_title("DR Results")
 
     # Plot 4: Calibration curve (if diagnostics available)
@@ -607,7 +670,14 @@ def create_dashboard(
         ax4.legend()
         ax4.grid(True, alpha=0.3)
     else:
-        ax4.text(0.5, 0.5, "No calibration data", ha='center', va='center', transform=ax4.transAxes)
+        ax4.text(
+            0.5,
+            0.5,
+            "No calibration data",
+            ha="center",
+            va="center",
+            transform=ax4.transAxes,
+        )
         ax4.set_title("Calibration Curve")
 
     # Plot 5: ROC curve (if diagnostics available)
@@ -622,15 +692,19 @@ def create_dashboard(
         ax5.legend()
         ax5.grid(True, alpha=0.3)
     else:
-        ax5.text(0.5, 0.5, "No ROC data", ha='center', va='center', transform=ax5.transAxes)
+        ax5.text(
+            0.5, 0.5, "No ROC data", ha="center", va="center", transform=ax5.transAxes
+        )
         ax5.set_title("ROC Curve")
 
     # Plot 6: Propensity score heatmap
     ax6 = fig.add_subplot(gs[2, 2:])
     n_samples_heatmap = min(100, len(propensities))
-    sample_indices = np.random.choice(len(propensities), n_samples_heatmap, replace=False)
+    sample_indices = np.random.choice(
+        len(propensities), n_samples_heatmap, replace=False
+    )
     heatmap_data = propensities[sample_indices]
-    
+
     im = ax6.imshow(heatmap_data.T, aspect="auto", cmap="viridis")
     ax6.set_xlabel("Sample Index")
     ax6.set_ylabel("Action")
@@ -643,14 +717,23 @@ def create_dashboard(
     ax7 = fig.add_subplot(gs[3, :2])
     if diagnostics and diagnostics.balance_stats:
         balance_stats = diagnostics.balance_stats
-        mean_scores = [v for k, v in balance_stats.items() if k.endswith("_mean_pscore")]
+        mean_scores = [
+            v for k, v in balance_stats.items() if k.endswith("_mean_pscore")
+        ]
         action_names_short = [f"Action {i}" for i in range(len(mean_scores))]
         ax7.bar(action_names_short, mean_scores, alpha=0.7, color="lightblue")
         ax7.set_ylabel("Mean Propensity Score")
         ax7.set_title("Mean Propensity by Action")
         ax7.tick_params(axis="x", rotation=45)
     else:
-        ax7.text(0.5, 0.5, "No balance data", ha='center', va='center', transform=ax7.transAxes)
+        ax7.text(
+            0.5,
+            0.5,
+            "No balance data",
+            ha="center",
+            va="center",
+            transform=ax7.transAxes,
+        )
         ax7.set_title("Balance Statistics")
 
     # Plot 8: Summary statistics
@@ -670,7 +753,14 @@ def create_dashboard(
         ax8.set_title("Propensity Score Statistics")
         ax8.tick_params(axis="x", rotation=45)
     else:
-        ax8.text(0.5, 0.5, "No statistics available", ha='center', va='center', transform=ax8.transAxes)
+        ax8.text(
+            0.5,
+            0.5,
+            "No statistics available",
+            ha="center",
+            va="center",
+            transform=ax8.transAxes,
+        )
         ax8.set_title("Summary Statistics")
 
     if save_path:
