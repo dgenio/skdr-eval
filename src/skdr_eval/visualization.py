@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
+import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib.figure import Figure
 
 from .exceptions import DataValidationError, InsufficientDataError
