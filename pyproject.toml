@@ -52,6 +52,8 @@ dev = [
     "build",
     "twine",
     "pre-commit",
+    "matplotlib",
+    "seaborn",
 ]
 examples = [
     "jupyter",
