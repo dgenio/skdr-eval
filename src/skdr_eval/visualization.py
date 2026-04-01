@@ -6,7 +6,6 @@ from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
 from matplotlib.figure import Figure
 
 from .exceptions import DataValidationError, InsufficientDataError
@@ -14,10 +13,6 @@ from .exceptions import DataValidationError, InsufficientDataError
 logger = logging.getLogger("skdr_eval")
 
 _MIN_SAMPLES = 10
-
-# Set default style
-plt.style.use("default")
-sns.set_palette("husl")
 
 
 @dataclass
@@ -74,6 +69,10 @@ def plot_propensity_distribution(
     n_actions = propensities.shape[1]
     if action_names is None:
         action_names = [f"Action {i}" for i in range(n_actions)]
+    elif len(action_names) < n_actions:
+        raise DataValidationError(
+            f"Expected at least {n_actions} action names, but got {len(action_names)}"
+        )
 
     fig, axes = plt.subplots(2, 2, figsize=figsize)
     fig.suptitle("Propensity Score Distributions", fontsize=16, fontweight="bold")
@@ -154,7 +153,7 @@ def plot_propensity_distribution(
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
         logger.info(f"Plot saved to {save_path}")
 
     return fig
@@ -250,7 +249,7 @@ def plot_dr_results(
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
         logger.info(f"Plot saved to {save_path}")
 
     return fig
@@ -310,7 +309,7 @@ def plot_calibration_curve(
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
         logger.info(f"Plot saved to {save_path}")
 
     return fig
@@ -363,7 +362,7 @@ def plot_roc_curve(
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
         logger.info(f"Plot saved to {save_path}")
 
     return fig
@@ -490,8 +489,12 @@ def plot_diagnostics_summary(
     ax7 = axes[2, 0]
     balance_stats = diagnostics.balance_stats
     if balance_stats:
-        action_counts = [v for k, v in balance_stats.items() if k.endswith("_count")]
-        action_names = [f"Action {i}" for i in range(len(action_counts))]
+        sorted_counts = sorted(
+            ((k, v) for k, v in balance_stats.items() if k.endswith("_count")),
+            key=lambda kv: int(kv[0].split("_")[1]),
+        )
+        action_counts = [v for _, v in sorted_counts]
+        action_names = [f"Action {k.split('_')[1]}" for k, _ in sorted_counts]
         ax7.bar(action_names, action_counts, alpha=0.7)
     ax7.set_ylabel("Count")
     ax7.set_title("Action Counts")
@@ -499,10 +502,12 @@ def plot_diagnostics_summary(
 
     ax8 = axes[2, 1]
     if balance_stats:
-        mean_scores = [
-            v for k, v in balance_stats.items() if k.endswith("_mean_pscore")
-        ]
-        action_names = [f"Action {i}" for i in range(len(mean_scores))]
+        sorted_means = sorted(
+            ((k, v) for k, v in balance_stats.items() if k.endswith("_mean_pscore")),
+            key=lambda kv: int(kv[0].split("_")[1]),
+        )
+        mean_scores = [v for _, v in sorted_means]
+        action_names = [f"Action {k.split('_')[1]}" for k, _ in sorted_means]
         ax8.bar(action_names, mean_scores, alpha=0.7, color="lightblue")
     ax8.set_ylabel("Mean Propensity Score")
     ax8.set_title("Mean Propensity by Action")
@@ -510,8 +515,12 @@ def plot_diagnostics_summary(
 
     ax9 = axes[2, 2]
     if balance_stats:
-        std_scores = [v for k, v in balance_stats.items() if k.endswith("_std_pscore")]
-        action_names = [f"Action {i}" for i in range(len(std_scores))]
+        sorted_stds = sorted(
+            ((k, v) for k, v in balance_stats.items() if k.endswith("_std_pscore")),
+            key=lambda kv: int(kv[0].split("_")[1]),
+        )
+        std_scores = [v for _, v in sorted_stds]
+        action_names = [f"Action {k.split('_')[1]}" for k, _ in sorted_stds]
         ax9.bar(action_names, std_scores, alpha=0.7, color="lightgreen")
     ax9.set_ylabel("Std Propensity Score")
     ax9.set_title("Std Propensity by Action")
@@ -520,7 +529,7 @@ def plot_diagnostics_summary(
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
         logger.info(f"Plot saved to {save_path}")
 
     return fig
@@ -717,10 +726,12 @@ def create_dashboard(
     ax7 = fig.add_subplot(gs[3, :2])
     if diagnostics and diagnostics.balance_stats:
         balance_stats = diagnostics.balance_stats
-        mean_scores = [
-            v for k, v in balance_stats.items() if k.endswith("_mean_pscore")
-        ]
-        action_names_short = [f"Action {i}" for i in range(len(mean_scores))]
+        sorted_means = sorted(
+            ((k, v) for k, v in balance_stats.items() if k.endswith("_mean_pscore")),
+            key=lambda kv: int(kv[0].split("_")[1]),
+        )
+        mean_scores = [v for _, v in sorted_means]
+        action_names_short = [f"Action {k.split('_')[1]}" for k, _ in sorted_means]
         ax7.bar(action_names_short, mean_scores, alpha=0.7, color="lightblue")
         ax7.set_ylabel("Mean Propensity Score")
         ax7.set_title("Mean Propensity by Action")
@@ -764,7 +775,7 @@ def create_dashboard(
         ax8.set_title("Summary Statistics")
 
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
         logger.info(f"Dashboard saved to {save_path}")
 
     return fig

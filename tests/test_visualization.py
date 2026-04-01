@@ -15,7 +15,7 @@ from skdr_eval.visualization import (
 )
 
 
-def test_plot_propensity_distribution():
+def test_plot_propensity_distribution(tmp_path):
     """Test propensity distribution plotting."""
     n_samples = 100
     n_actions = 3
@@ -35,12 +35,12 @@ def test_plot_propensity_distribution():
 
     # Test with save path
     fig = plot_propensity_distribution(
-        propensities, actions, save_path="/tmp/test_plot.png"
+        propensities, actions, save_path=str(tmp_path / "test_plot.png")
     )
     assert fig is not None
 
 
-def test_plot_dr_results():
+def test_plot_dr_results(tmp_path):
     """Test DR results plotting."""
     # Create test results
     results = {
@@ -53,11 +53,11 @@ def test_plot_dr_results():
     assert fig is not None
 
     # Test with save path
-    fig = plot_dr_results(results, save_path="/tmp/test_dr_plot.png")
+    fig = plot_dr_results(results, save_path=str(tmp_path / "test_dr_plot.png"))
     assert fig is not None
 
 
-def test_plot_calibration_curve():
+def test_plot_calibration_curve(tmp_path):
     """Test calibration curve plotting."""
     # Create test calibration curve
     calibration_curve = [
@@ -72,11 +72,13 @@ def test_plot_calibration_curve():
     assert fig is not None
 
     # Test with save path
-    fig = plot_calibration_curve(calibration_curve, save_path="/tmp/test_cal_plot.png")
+    fig = plot_calibration_curve(
+        calibration_curve, save_path=str(tmp_path / "test_cal_plot.png")
+    )
     assert fig is not None
 
 
-def test_plot_roc_curve():
+def test_plot_roc_curve(tmp_path):
     """Test ROC curve plotting."""
     # Create test ROC curve
     roc_curve = [
@@ -93,11 +95,11 @@ def test_plot_roc_curve():
     assert fig is not None
 
     # Test with save path
-    fig = plot_roc_curve(roc_curve, save_path="/tmp/test_roc_plot.png")
+    fig = plot_roc_curve(roc_curve, save_path=str(tmp_path / "test_roc_plot.png"))
     assert fig is not None
 
 
-def test_plot_diagnostics_summary():
+def test_plot_diagnostics_summary(tmp_path):
     """Test diagnostics summary plotting."""
     # Create test diagnostics
     diagnostics = PropensityDiagnostics(
@@ -130,11 +132,13 @@ def test_plot_diagnostics_summary():
     assert fig is not None
 
     # Test with save path
-    fig = plot_diagnostics_summary(diagnostics, save_path="/tmp/test_diag_plot.png")
+    fig = plot_diagnostics_summary(
+        diagnostics, save_path=str(tmp_path / "test_diag_plot.png")
+    )
     assert fig is not None
 
 
-def test_create_dashboard():
+def test_create_dashboard(tmp_path):
     """Test dashboard creation."""
     n_samples = 100
     n_actions = 3
@@ -183,7 +187,9 @@ def test_create_dashboard():
     assert fig is not None
 
     # Test with save path
-    fig = create_dashboard(propensities, actions, save_path="/tmp/test_dashboard.png")
+    fig = create_dashboard(
+        propensities, actions, save_path=str(tmp_path / "test_dashboard.png")
+    )
     assert fig is not None
 
 

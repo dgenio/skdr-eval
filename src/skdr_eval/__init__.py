@@ -32,15 +32,21 @@ from .exceptions import (
 )
 from .pairwise import PairwiseDesign
 from .synth import make_pairwise_synth, make_synth_logs
-from .visualization import (
-    PropensityDiagnostics,
-    create_dashboard,
-    plot_calibration_curve,
-    plot_diagnostics_summary,
-    plot_dr_results,
-    plot_propensity_distribution,
-    plot_roc_curve,
-)
+
+try:
+    from .visualization import (
+        PropensityDiagnostics,
+        create_dashboard,
+        plot_calibration_curve,
+        plot_diagnostics_summary,
+        plot_dr_results,
+        plot_propensity_distribution,
+        plot_roc_curve,
+    )
+
+    HAS_VISUALIZATION = True
+except ImportError:
+    HAS_VISUALIZATION = False
 
 # Version is set by setuptools-scm
 __version__: str = "unknown"
