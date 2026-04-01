@@ -116,6 +116,7 @@ report, detailed = skdr_eval.evaluate_pairwise_models(
     metric_col="service_time",
     task_type="regression",
     direction="min",
+    strategy="auto",
     n_splits=3,
     random_state=42,
 )
@@ -156,19 +157,35 @@ Evaluate sklearn models using DR and SNDR estimators.
 Evaluate models using pairwise (client-operator) evaluation with autoscaling.
 
 **Parameters:**
+
+*Required:*
 - `logs_df`: Pairwise decision log DataFrame
 - `op_daily_df`: Daily operator availability DataFrame
 - `models`: Dict of model name to fitted sklearn estimator
 - `metric_col`: Target metric column name
 - `task_type`: Type of prediction task (`"regression"` or `"binary"`)
-- `direction`: Whether to minimize or maximize metric (`"min"` or `"max"`)
+- `direction`: Whether to minimize or maximize the metric (`"min"` or `"max"`)
+
+*Optional:*
+- `n_splits`: Number of time-series cross-validation splits (default: 3)
 - `strategy`: Policy induction strategy (`"auto"`, `"direct"`, `"stream"`, or `"stream_topk"`; default: `"auto"`)
-- `n_splits`: Number of time-series splits (default: 3)
-- `random_state`: Random seed for reproducibility
+- `propensity`: Propensity estimation method (`"auto"`, `"condlogit"`, or `"multinomial"`; default: `"auto"`). `"auto"` lets `skdr-eval` choose an appropriate method based on the evaluation setup.
+- `topk`: Top-K operators for `stream_topk` strategy (default: 20)
+- `neg_per_pos`: Negative samples per positive for conditional logit (default: 5)
+- `chunk_pairs`: Chunk size for streaming pair generation (default: 2,000,000)
+- `min_ess_frac`: Minimum ESS fraction for clipping threshold selection (default: 0.02)
+- `clip_grid`: Tuple of clipping thresholds (default: `(2, 5, 10, 20, 50, float("inf"))`)
+- `ci_bootstrap`: Whether to compute bootstrap confidence intervals (default: False)
+- `alpha`: Significance level for confidence intervals (default: 0.05)
+- `outcome_estimator`: Outcome model (depends on `task_type`): for `"regression"`: `"hgb"`, `"ridge"`, `"rf"`; for `"binary"`: `"hgb"`, `"logistic"`; or a callable (default: `"hgb"`)
+- `day_col`: Day column name (default: `"arrival_day"`)
+- `client_id_col`: Client ID column name (default: `"client_id"`)
+- `operator_id_col`: Operator ID column name (default: `"operator_id"`)
+- `elig_col`: Eligibility mask column name (default: `"elig_mask"`)
+- `random_state`: Random seed for reproducibility (default: 0)
 
 **Returns:**
-- `report`: DataFrame with per-model evaluation metrics (`V_hat`, `ESS`, `match_rate`, etc.)
-- `detailed`: Dict mapping model name to a dict of estimator name (e.g. `"DR"`, `"SNDR"`) to `DRResult` objects
+- `tuple[pd.DataFrame, dict[str, dict[str, DRResult]]]`: A summary report DataFrame and detailed results per model and estimator
 
 #### `make_pairwise_synth(n_days=14, n_clients_day=2000, n_ops=200, **kwargs)`
 Generate synthetic pairwise (client-operator) data for evaluation.
