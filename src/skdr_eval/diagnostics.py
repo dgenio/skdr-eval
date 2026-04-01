@@ -2,7 +2,6 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
 
 import numpy as np
 from sklearn.metrics import log_loss, roc_auc_score, roc_curve
@@ -10,6 +9,15 @@ from sklearn.metrics import log_loss, roc_auc_score, roc_curve
 from .exceptions import DataValidationError, InsufficientDataError
 
 logger = logging.getLogger("skdr_eval")
+
+# Minimum sample thresholds used across diagnostic functions
+_MIN_SAMPLES_SMALL = 5       # statistics, log loss, balance stats
+_MIN_SAMPLES_MEDIUM = 10     # overlap and balance checking
+_MIN_SAMPLES_LARGE = 20      # calibration, discrimination, comprehensive
+_MIN_ACTION_COUNT = 2        # min samples in an action group (basic metrics)
+_MIN_ACTION_COUNT_DISC = 5   # min samples in a group for discrimination
+_MIN_UNIQUE_LABELS = 2       # min unique binary labels for AUC
+_ZERO_VARIANCE_TOL = 1e-10   # tolerance for zero-variance equality check
 
 
 @dataclass
@@ -21,10 +29,10 @@ class PropensityDiagnostics:
     calibration_score: float
     discrimination_score: float
     log_loss_score: float
-    statistics: Dict[str, float]
-    balance_stats: Dict[str, float]
-    calibration_curve: List[Tuple[float, float]]
-    roc_curve: List[Tuple[float, float]]
+    statistics: dict[str, float]
+    balance_stats: dict[str, float]
+    calibration_curve: list[tuple[float, float]]
+    roc_curve: list[tuple[float, float]]
 
 
 def check_propensity_overlap(propensities: np.ndarray, actions: np.ndarray) -> float:
@@ -47,7 +55,7 @@ def check_propensity_overlap(propensities: np.ndarray, actions: np.ndarray) -> f
             f"Propensities length {len(propensities)} doesn't match actions length {len(actions)}"
         )
 
-    if len(propensities) < 10:
+    if len(propensities) < _MIN_SAMPLES_MEDIUM:
         raise InsufficientDataError("Need at least 10 samples for overlap analysis")
 
     n_actions = propensities.shape[1]
@@ -55,7 +63,7 @@ def check_propensity_overlap(propensities: np.ndarray, actions: np.ndarray) -> f
 
     for action in range(n_actions):
         action_mask = actions == action
-        if action_mask.sum() < 2:
+        if action_mask.sum() < _MIN_ACTION_COUNT:
             continue
 
         action_props = propensities[action_mask, action]
@@ -101,7 +109,7 @@ def check_propensity_balance(propensities: np.ndarray, actions: np.ndarray) -> f
             f"Propensities length {len(propensities)} doesn't match actions length {len(actions)}"
         )
 
-    if len(propensities) < 10:
+    if len(propensities) < _MIN_SAMPLES_MEDIUM:
         raise InsufficientDataError("Need at least 10 samples for balance analysis")
 
     n_actions = propensities.shape[1]
@@ -109,7 +117,7 @@ def check_propensity_balance(propensities: np.ndarray, actions: np.ndarray) -> f
 
     for action in range(n_actions):
         action_mask = actions == action
-        if action_mask.sum() < 2:
+        if action_mask.sum() < _MIN_ACTION_COUNT:
             continue
 
         action_props = propensities[action_mask, action]
@@ -127,7 +135,7 @@ def check_propensity_balance(propensities: np.ndarray, actions: np.ndarray) -> f
             balance = max(0.0, 1.0 - smd)
         else:
             # Both groups have zero variance: balance depends on whether means match.
-            balance = 1.0 if abs(float(action_props.mean()) - float(other_props.mean())) < 1e-10 else 0.0
+            balance = 1.0 if abs(float(action_props.mean()) - float(other_props.mean())) < _ZERO_VARIANCE_TOL else 0.0
         balance_scores.append(balance)
 
     return np.mean(balance_scores) if balance_scores else 0.0
@@ -135,7 +143,7 @@ def check_propensity_balance(propensities: np.ndarray, actions: np.ndarray) -> f
 
 def assess_propensity_calibration(
     propensities: np.ndarray, actions: np.ndarray, n_bins: int = 10
-) -> Tuple[float, List[Tuple[float, float]]]:
+) -> tuple[float, list[tuple[float, float]]]:
     """Assess propensity score calibration via reliability curve.
 
     Parameters
@@ -160,7 +168,7 @@ def assess_propensity_calibration(
             f"Propensities length {len(propensities)} doesn't match actions length {len(actions)}"
         )
 
-    if len(propensities) < 20:
+    if len(propensities) < _MIN_SAMPLES_LARGE:
         raise InsufficientDataError("Need at least 20 samples for calibration analysis")
 
     n_actions = propensities.shape[1]
@@ -203,7 +211,7 @@ def assess_propensity_calibration(
 
 def assess_propensity_discrimination(
     propensities: np.ndarray, actions: np.ndarray
-) -> Tuple[float, List[Tuple[float, float]]]:
+) -> tuple[float, list[tuple[float, float]]]:
     """Assess propensity score discrimination.
 
     Parameters
@@ -225,7 +233,7 @@ def assess_propensity_discrimination(
             f"Propensities length {len(propensities)} doesn't match actions length {len(actions)}"
         )
 
-    if len(propensities) < 20:
+    if len(propensities) < _MIN_SAMPLES_LARGE:
         raise InsufficientDataError("Need at least 20 samples for discrimination analysis")
 
     n_actions = propensities.shape[1]
@@ -234,14 +242,14 @@ def assess_propensity_discrimination(
 
     for action in range(n_actions):
         action_mask = actions == action
-        if action_mask.sum() < 5:
+        if action_mask.sum() < _MIN_ACTION_COUNT_DISC:
             continue
 
         # Create binary labels for this action
         y_true = action_mask.astype(int)
         y_scores = propensities[:, action]
 
-        if len(np.unique(y_true)) < 2:
+        if len(np.unique(y_true)) < _MIN_UNIQUE_LABELS:
             continue
 
         try:
@@ -261,7 +269,7 @@ def assess_propensity_discrimination(
     return avg_auc, first_roc
 
 
-def compute_propensity_statistics(propensities: np.ndarray, actions: np.ndarray) -> Dict[str, float]:
+def compute_propensity_statistics(propensities: np.ndarray, actions: np.ndarray) -> dict[str, float]:
     """Compute comprehensive propensity score statistics.
 
     Parameters
@@ -281,7 +289,7 @@ def compute_propensity_statistics(propensities: np.ndarray, actions: np.ndarray)
             f"Propensities length {len(propensities)} doesn't match actions length {len(actions)}"
         )
 
-    if len(propensities) < 5:
+    if len(propensities) < _MIN_SAMPLES_SMALL:
         raise InsufficientDataError("Need at least 5 samples for statistics")
 
     # Get propensity scores for observed actions
@@ -303,7 +311,7 @@ def compute_propensity_statistics(propensities: np.ndarray, actions: np.ndarray)
     return stats
 
 
-def compute_balance_statistics(propensities: np.ndarray, actions: np.ndarray) -> Dict[str, float]:
+def compute_balance_statistics(propensities: np.ndarray, actions: np.ndarray) -> dict[str, float]:
     """Compute balance statistics for each action.
 
     Parameters
@@ -323,7 +331,7 @@ def compute_balance_statistics(propensities: np.ndarray, actions: np.ndarray) ->
             f"Propensities length {len(propensities)} doesn't match actions length {len(actions)}"
         )
 
-    if len(propensities) < 5:
+    if len(propensities) < _MIN_SAMPLES_SMALL:
         raise InsufficientDataError("Need at least 5 samples for balance statistics")
 
     n_actions = propensities.shape[1]
@@ -360,7 +368,7 @@ def compute_propensity_log_loss(propensities: np.ndarray, actions: np.ndarray) -
             f"Propensities length {len(propensities)} doesn't match actions length {len(actions)}"
         )
 
-    if len(propensities) < 5:
+    if len(propensities) < _MIN_SAMPLES_SMALL:
         raise InsufficientDataError("Need at least 5 samples for log loss")
 
     # Create one-hot encoded labels
@@ -393,7 +401,7 @@ def comprehensive_propensity_diagnostics(
             f"Propensities length {len(propensities)} doesn't match actions length {len(actions)}"
         )
 
-    if len(propensities) < 20:
+    if len(propensities) < _MIN_SAMPLES_LARGE:
         raise InsufficientDataError("Need at least 20 samples for comprehensive diagnostics")
 
     # Run all diagnostics

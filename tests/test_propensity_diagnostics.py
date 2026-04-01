@@ -1,7 +1,6 @@
 """Test propensity score diagnostics functionality."""
 
 import numpy as np
-import pandas as pd
 import pytest
 
 import skdr_eval
@@ -138,7 +137,7 @@ def test_propensity_statistics():
         assert isinstance(stats[stat], float)
 
     # Check quantiles
-    quantile_stats = [k for k in stats.keys() if k.startswith("pscore_q")]
+    quantile_stats = [k for k in stats if k.startswith("pscore_q")]
     assert len(quantile_stats) > 0
 
     # Check logical relationships
