@@ -550,7 +550,7 @@ def fit_outcome_crossfit(
             "rf": lambda: RandomForestRegressor(random_state=random_state),
         }
 
-        if estimator in estimator_factories:
+        if isinstance(estimator, str) and estimator in estimator_factories:
             est_factory = estimator_factories[estimator]
         elif callable(estimator):
             est_factory = estimator
