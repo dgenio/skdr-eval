@@ -86,7 +86,7 @@ def check_propensity_overlap(propensities: np.ndarray, actions: np.ndarray) -> f
         overlap = float(np.sum(np.minimum(p, q)))
         overlap_scores.append(overlap)
 
-    return np.mean(overlap_scores) if overlap_scores else 0.0
+    return float(np.mean(overlap_scores)) if overlap_scores else 0.0
 
 
 def check_propensity_balance(propensities: np.ndarray, actions: np.ndarray) -> float:
@@ -147,7 +147,7 @@ def check_propensity_balance(propensities: np.ndarray, actions: np.ndarray) -> f
             )
         balance_scores.append(balance)
 
-    return np.mean(balance_scores) if balance_scores else 0.0
+    return float(np.mean(balance_scores)) if balance_scores else 0.0
 
 
 def assess_propensity_calibration(
@@ -280,7 +280,7 @@ def assess_propensity_discrimination(
             continue
 
     # Return average AUC and first ROC curve
-    avg_auc = np.mean(discrimination_scores) if discrimination_scores else 0.0
+    avg_auc = float(np.mean(discrimination_scores)) if discrimination_scores else 0.0
     first_roc = roc_curves[0] if roc_curves else []
 
     return avg_auc, first_roc
