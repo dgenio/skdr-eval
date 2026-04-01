@@ -1132,7 +1132,7 @@ def estimate_propensity_pairwise(
 
             # Fit multinomial model
             model = LogisticRegression(
-                multi_class="multinomial", random_state=random_state, max_iter=1000
+                random_state=random_state, max_iter=1000
             )
             try:
                 model.fit(X_train, y_train)
