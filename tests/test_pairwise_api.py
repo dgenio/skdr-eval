@@ -172,6 +172,41 @@ def test_pairwise_autoscale_strategy():
     assert len(report_direct) > 0
 
 
+def test_pairwise_propensity_auto():
+    """Test that propensity='auto' runs end-to-end without crashing."""
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=2, n_clients_day=80, n_ops=8, seed=42, binary=False
+    )
+
+    models = {
+        "ridge": Ridge(random_state=42),
+    }
+
+    feature_cols = [col for col in logs_df.columns if col.startswith(("cli_", "op_"))]
+    X = logs_df[feature_cols].values
+    y = logs_df["service_time"].values
+    models["ridge"].fit(X, y)
+
+    report, detailed_results = evaluate_pairwise_models(
+        logs_df=logs_df,
+        op_daily_df=op_daily_df,
+        models=models,
+        metric_col="service_time",
+        task_type="regression",
+        direction="min",
+        n_splits=2,
+        strategy="direct",
+        propensity="auto",
+        random_state=42,
+    )
+
+    assert isinstance(report, pd.DataFrame)
+    assert len(report) > 0
+    assert "ridge" in detailed_results
+    assert report["V_hat"].notna().all()
+    assert np.isfinite(report["V_hat"]).all()
+
+
 def test_pairwise_design_creation():
     """Test PairwiseDesign creation and statistics."""
 
