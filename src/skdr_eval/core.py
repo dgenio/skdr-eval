@@ -750,6 +750,9 @@ def evaluate_sklearn_models(
     detailed_results : Dict[str, Dict[str, DRResult]]
         Detailed results for each model and estimator.
     """
+    if not models:
+        raise ValueError("models dict must not be empty")
+
     # Build design
     design = build_design(logs)
 

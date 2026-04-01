@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 from sklearn.ensemble import RandomForestRegressor
 
 import skdr_eval
@@ -193,3 +194,17 @@ def test_evaluate_sklearn_models_signature():
     assert "SNDR" in detailed_results["rf"]
     assert isinstance(detailed_results["rf"]["DR"], skdr_eval.DRResult)
     assert isinstance(detailed_results["rf"]["SNDR"], skdr_eval.DRResult)
+
+
+def test_evaluate_sklearn_models_empty_models_raises():
+    """Test that evaluate_sklearn_models raises ValueError for an empty models dict."""
+    logs, _, _ = skdr_eval.make_synth_logs(n=100, n_ops=3, seed=4)
+
+    with pytest.raises(ValueError, match="models dict must not be empty"):
+        skdr_eval.evaluate_sklearn_models(
+            logs=logs,
+            models={},
+            fit_models=True,
+            n_splits=2,
+            random_state=42,
+        )
