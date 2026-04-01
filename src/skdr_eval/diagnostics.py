@@ -2,10 +2,10 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple
 
 import numpy as np
-from sklearn.metrics import log_loss, roc_auc_score
+from sklearn.metrics import log_loss, roc_auc_score, roc_curve
 
 from .exceptions import DataValidationError, InsufficientDataError
 
@@ -64,11 +64,18 @@ def check_propensity_overlap(propensities: np.ndarray, actions: np.ndarray) -> f
         if len(other_props) == 0:
             continue
 
-        # Compute overlap as the proportion of other actions that fall within
-        # the range of this action's propensity scores
-        min_prop = action_props.min()
-        max_prop = action_props.max()
-        overlap = np.mean((other_props >= min_prop) & (other_props <= max_prop))
+        # Distributional overlap coefficient: Σ min(p_i, q_i) over a shared histogram.
+        # Returns 0 when distributions are disjoint, 1 when identical.
+        n_hist_bins = 20
+        hist_a, _ = np.histogram(action_props, bins=n_hist_bins, range=(0.0, 1.0))
+        hist_b, _ = np.histogram(other_props, bins=n_hist_bins, range=(0.0, 1.0))
+        total_a = hist_a.sum()
+        total_b = hist_b.sum()
+        if total_a == 0 or total_b == 0:
+            continue
+        p = hist_a / total_a
+        q = hist_b / total_b
+        overlap = float(np.sum(np.minimum(p, q)))
         overlap_scores.append(overlap)
 
     return np.mean(overlap_scores) if overlap_scores else 0.0
@@ -111,10 +118,16 @@ def check_propensity_balance(propensities: np.ndarray, actions: np.ndarray) -> f
         if len(other_props) == 0:
             continue
 
-        # Compute balance as 1 - normalized difference in means
-        mean_diff = abs(action_props.mean() - other_props.mean())
-        max_diff = max(action_props.mean(), other_props.mean())
-        balance = 1.0 - (mean_diff / max_diff) if max_diff > 0 else 1.0
+        # Standardized Mean Difference (SMD): industry-standard causal-inference
+        # balance measure. SMD=0 → perfect balance; higher → worse.
+        # balance = max(0, 1 - SMD) so 1 = perfect, 0 = completely unbalanced.
+        pooled_std = float(((action_props.std() ** 2 + other_props.std() ** 2) / 2) ** 0.5)
+        if pooled_std > 0:
+            smd = abs(float(action_props.mean()) - float(other_props.mean())) / pooled_std
+            balance = max(0.0, 1.0 - smd)
+        else:
+            # Both groups have zero variance: balance depends on whether means match.
+            balance = 1.0 if abs(float(action_props.mean()) - float(other_props.mean())) < 1e-10 else 0.0
         balance_scores.append(balance)
 
     return np.mean(balance_scores) if balance_scores else 0.0
@@ -123,7 +136,7 @@ def check_propensity_balance(propensities: np.ndarray, actions: np.ndarray) -> f
 def assess_propensity_calibration(
     propensities: np.ndarray, actions: np.ndarray, n_bins: int = 10
 ) -> Tuple[float, List[Tuple[float, float]]]:
-    """Assess propensity score calibration.
+    """Assess propensity score calibration via reliability curve.
 
     Parameters
     ----------
@@ -132,14 +145,15 @@ def assess_propensity_calibration(
     actions : np.ndarray
         Action indices (n_samples,).
     n_bins : int, default=10
-        Number of bins for calibration curve.
+        Number of bins for the reliability curve.
 
     Returns
     -------
     float
-        Calibration score (0-1, higher is better).
+        Calibration score (0-1, higher is better; 1 - mean absolute error).
     List[Tuple[float, float]]
-        Calibration curve (bin_centers, bin_means).
+        Reliability curve as a list of exactly n_bins (mean_predicted, actual_fraction)
+        tuples. Empty bins use (bin_center, 0.0).
     """
     if len(propensities) != len(actions):
         raise DataValidationError(
@@ -154,37 +168,34 @@ def assess_propensity_calibration(
     calibration_curves = []
 
     for action in range(n_actions):
-        action_mask = actions == action
-        if action_mask.sum() < 5:
-            continue
+        action_binary = (actions == action).astype(float)
+        action_probs = propensities[:, action]  # predicted P(A=action|X) for ALL samples
 
-        action_props = propensities[action_mask, action]
-        if len(action_props) < 5:
-            continue
-
-        # Create bins
+        # Bin all samples by their predicted probability and compare to actual
+        # action frequency per bin (reliability / calibration diagram).
         bin_edges = np.linspace(0, 1, n_bins + 1)
-        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-        bin_means = []
+        bin_center_arr = (bin_edges[:-1] + bin_edges[1:]) / 2
+        bin_points = []
 
         for i in range(n_bins):
-            bin_mask = (action_props >= bin_edges[i]) & (action_props < bin_edges[i + 1])
-            if i == n_bins - 1:  # Include the last edge
-                bin_mask = (action_props >= bin_edges[i]) & (action_props <= bin_edges[i + 1])
+            if i == n_bins - 1:
+                bin_mask = (action_probs >= bin_edges[i]) & (action_probs <= bin_edges[i + 1])
+            else:
+                bin_mask = (action_probs >= bin_edges[i]) & (action_probs < bin_edges[i + 1])
 
             if bin_mask.sum() > 0:
-                bin_means.append(action_props[bin_mask].mean())
+                mean_predicted = float(action_probs[bin_mask].mean())
+                actual_fraction = float(action_binary[bin_mask].mean())
             else:
-                bin_means.append(0.0)
+                mean_predicted = float(bin_center_arr[i])
+                actual_fraction = 0.0
+            bin_points.append((mean_predicted, actual_fraction))
 
-        # Compute calibration score as 1 - mean absolute error
-        mae = np.mean(np.abs(np.array(bin_means) - bin_centers))
-        calibration_score = 1.0 - mae
-        calibration_scores.append(calibration_score)
-        calibration_curves.append(list(zip(bin_centers, bin_means)))
+        mae = float(np.mean([abs(pred - act) for pred, act in bin_points]))
+        calibration_scores.append(max(0.0, 1.0 - mae))
+        calibration_curves.append(bin_points)
 
-    # Return average calibration score and first curve
-    avg_score = np.mean(calibration_scores) if calibration_scores else 0.0
+    avg_score = float(np.mean(calibration_scores)) if calibration_scores else 0.0
     first_curve = calibration_curves[0] if calibration_curves else []
 
     return avg_score, first_curve
@@ -238,7 +249,6 @@ def assess_propensity_discrimination(
             discrimination_scores.append(auc)
 
             # Compute ROC curve
-            from sklearn.metrics import roc_curve
             fpr, tpr, _ = roc_curve(y_true, y_scores)
             roc_curves.append(list(zip(fpr, tpr)))
         except ValueError:
@@ -467,6 +477,18 @@ def _generate_text_report(diagnostics: PropensityDiagnostics) -> str:
             report.append(f"  {q:2d}th percentile: {stats[f'pscore_q{q}']:.4f}")
     report.append("")
 
+    # Per-action balance statistics
+    report.append("PER-ACTION BALANCE STATISTICS:")
+    balance_stats = diagnostics.balance_stats
+    action_idx = 0
+    while f"action_{action_idx}_count" in balance_stats:
+        count = int(balance_stats[f"action_{action_idx}_count"])
+        mean_ps = balance_stats[f"action_{action_idx}_mean_pscore"]
+        std_ps = balance_stats[f"action_{action_idx}_std_pscore"]
+        report.append(f"  Action {action_idx}: count={count}, mean={mean_ps:.4f}, std={std_ps:.4f}")
+        action_idx += 1
+    report.append("")
+
     return "\n".join(report)
 
 
@@ -501,4 +523,19 @@ def _generate_markdown_report(diagnostics: PropensityDiagnostics) -> str:
     report.append(f"| Median | {stats['median_pscore']:.4f} |")
     report.append("")
 
-    return "\n".join(report)
+    # Per-action balance statistics
+    report.append("## Per-Action Balance Statistics")
+    report.append("")
+    report.append("| Action | Count | Mean P-score | Std P-score |")
+    report.append("|--------|-------|--------------|-------------|")
+    balance_stats = diagnostics.balance_stats
+    action_idx = 0
+    while f"action_{action_idx}_count" in balance_stats:
+        count = int(balance_stats[f"action_{action_idx}_count"])
+        mean_ps = balance_stats[f"action_{action_idx}_mean_pscore"]
+        std_ps = balance_stats[f"action_{action_idx}_std_pscore"]
+        report.append(f"| {action_idx} | {count} | {mean_ps:.4f} | {std_ps:.4f} |")
+        action_idx += 1
+    report.append("")
+
+    return "\n".join(report) + "\n"

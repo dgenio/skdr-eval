@@ -42,9 +42,8 @@ def test_propensity_overlap():
         [0.025, 0.025, 0.95],
     ])
     extreme_propensities = np.tile(base_pattern, (n_samples // 3 + 1, 1))[:n_samples]
-    # Actions must match the extreme pattern so each action's propensity range
-    # is concentrated and doesn't overlap with others
-    extreme_actions = np.tile(np.arange(n_actions), n_samples // 3 + 1)[:n_samples]
+    # Derive actions from propensity structure: each sample takes its highest-prob action
+    extreme_actions = np.argmax(extreme_propensities, axis=1)
 
     poor_overlap = check_propensity_overlap(extreme_propensities, extreme_actions)
     assert poor_overlap < overlap_ratio  # Should have worse overlap
@@ -72,9 +71,8 @@ def test_propensity_balance():
         [0.005, 0.005, 0.99],
     ])
     extreme_propensities = np.tile(base_pattern, (n_samples // 3 + 1, 1))[:n_samples]
-    # Actions must match the extreme pattern so the mean propensity for each
-    # action group is maximally different from other groups
-    extreme_actions = np.tile(np.arange(n_actions), n_samples // 3 + 1)[:n_samples]
+    # Derive actions from propensity structure: each sample takes its highest-prob action
+    extreme_actions = np.argmax(extreme_propensities, axis=1)
 
     poor_balance = check_propensity_balance(extreme_propensities, extreme_actions)
     assert poor_balance < balance_ratio  # Should have worse balance
@@ -96,8 +94,9 @@ def test_propensity_calibration():
 
     assert 0 <= calibration_score <= 1
     assert isinstance(calibration_score, float)
-    # calibration_curve is a list of (bin_center, bin_mean) tuples; at most n_bins points
-    assert len(calibration_curve) <= 5
+    # calibration_curve is List[Tuple[mean_predicted, actual_fraction]], one tuple per bin
+    assert len(calibration_curve) == 5
+    assert all(len(pt) == 2 for pt in calibration_curve)
 
 
 def test_propensity_discrimination():

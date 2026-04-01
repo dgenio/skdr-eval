@@ -21,7 +21,11 @@ from .choice import (
     fit_conditional_logit_with_sampling,
     predict_proba_condlogit,
 )
-from .diagnostics import PropensityDiagnostics
+from .diagnostics import (
+    PropensityDiagnostics,
+    comprehensive_propensity_diagnostics,
+    generate_propensity_report,
+)
 from .exceptions import (
     ConvergenceError,
     DataValidationError,
@@ -1833,8 +1837,6 @@ def evaluate_propensity_diagnostics(
     InsufficientDataError
         If there's insufficient data for evaluation
     """
-    from .diagnostics import comprehensive_propensity_diagnostics, generate_propensity_report
-
     # Run comprehensive diagnostics
     diagnostics = comprehensive_propensity_diagnostics(propensities, actions)
 
