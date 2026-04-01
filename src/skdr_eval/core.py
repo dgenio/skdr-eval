@@ -1448,9 +1448,7 @@ def estimate_propensity_pairwise(
             y_train = np.array([actions[i] for i in train_idx])
 
             # Fit multinomial model
-            model = LogisticRegression(
-                multi_class="multinomial", random_state=random_state, max_iter=1000
-            )
+            model = LogisticRegression(random_state=random_state, max_iter=1000)
             try:
                 model.fit(X_train, y_train)
 
