@@ -11,13 +11,13 @@ from .exceptions import DataValidationError, InsufficientDataError
 logger = logging.getLogger("skdr_eval")
 
 # Minimum sample thresholds used across diagnostic functions
-_MIN_SAMPLES_SMALL = 5       # statistics, log loss, balance stats
-_MIN_SAMPLES_MEDIUM = 10     # overlap and balance checking
-_MIN_SAMPLES_LARGE = 20      # calibration, discrimination, comprehensive
-_MIN_ACTION_COUNT = 2        # min samples in an action group (basic metrics)
-_MIN_ACTION_COUNT_DISC = 5   # min samples in a group for discrimination
-_MIN_UNIQUE_LABELS = 2       # min unique binary labels for AUC
-_ZERO_VARIANCE_TOL = 1e-10   # tolerance for zero-variance equality check
+_MIN_SAMPLES_SMALL = 5  # statistics, log loss, balance stats
+_MIN_SAMPLES_MEDIUM = 10  # overlap and balance checking
+_MIN_SAMPLES_LARGE = 20  # calibration, discrimination, comprehensive
+_MIN_ACTION_COUNT = 2  # min samples in an action group (basic metrics)
+_MIN_ACTION_COUNT_DISC = 5  # min samples in a group for discrimination
+_MIN_UNIQUE_LABELS = 2  # min unique binary labels for AUC
+_ZERO_VARIANCE_TOL = 1e-10  # tolerance for zero-variance equality check
 
 
 @dataclass
@@ -129,13 +129,22 @@ def check_propensity_balance(propensities: np.ndarray, actions: np.ndarray) -> f
         # Standardized Mean Difference (SMD): industry-standard causal-inference
         # balance measure. SMD=0 → perfect balance; higher → worse.
         # balance = max(0, 1 - SMD) so 1 = perfect, 0 = completely unbalanced.
-        pooled_std = float(((action_props.std() ** 2 + other_props.std() ** 2) / 2) ** 0.5)
+        pooled_std = float(
+            ((action_props.std() ** 2 + other_props.std() ** 2) / 2) ** 0.5
+        )
         if pooled_std > 0:
-            smd = abs(float(action_props.mean()) - float(other_props.mean())) / pooled_std
+            smd = (
+                abs(float(action_props.mean()) - float(other_props.mean())) / pooled_std
+            )
             balance = max(0.0, 1.0 - smd)
         else:
             # Both groups have zero variance: balance depends on whether means match.
-            balance = 1.0 if abs(float(action_props.mean()) - float(other_props.mean())) < _ZERO_VARIANCE_TOL else 0.0
+            balance = (
+                1.0
+                if abs(float(action_props.mean()) - float(other_props.mean()))
+                < _ZERO_VARIANCE_TOL
+                else 0.0
+            )
         balance_scores.append(balance)
 
     return np.mean(balance_scores) if balance_scores else 0.0
@@ -177,7 +186,9 @@ def assess_propensity_calibration(
 
     for action in range(n_actions):
         action_binary = (actions == action).astype(float)
-        action_probs = propensities[:, action]  # predicted P(A=action|X) for ALL samples
+        action_probs = propensities[
+            :, action
+        ]  # predicted P(A=action|X) for ALL samples
 
         # Bin all samples by their predicted probability and compare to actual
         # action frequency per bin (reliability / calibration diagram).
@@ -187,9 +198,13 @@ def assess_propensity_calibration(
 
         for i in range(n_bins):
             if i == n_bins - 1:
-                bin_mask = (action_probs >= bin_edges[i]) & (action_probs <= bin_edges[i + 1])
+                bin_mask = (action_probs >= bin_edges[i]) & (
+                    action_probs <= bin_edges[i + 1]
+                )
             else:
-                bin_mask = (action_probs >= bin_edges[i]) & (action_probs < bin_edges[i + 1])
+                bin_mask = (action_probs >= bin_edges[i]) & (
+                    action_probs < bin_edges[i + 1]
+                )
 
             if bin_mask.sum() > 0:
                 mean_predicted = float(action_probs[bin_mask].mean())
@@ -234,7 +249,9 @@ def assess_propensity_discrimination(
         )
 
     if len(propensities) < _MIN_SAMPLES_LARGE:
-        raise InsufficientDataError("Need at least 20 samples for discrimination analysis")
+        raise InsufficientDataError(
+            "Need at least 20 samples for discrimination analysis"
+        )
 
     n_actions = propensities.shape[1]
     discrimination_scores = []
@@ -269,7 +286,9 @@ def assess_propensity_discrimination(
     return avg_auc, first_roc
 
 
-def compute_propensity_statistics(propensities: np.ndarray, actions: np.ndarray) -> dict[str, float]:
+def compute_propensity_statistics(
+    propensities: np.ndarray, actions: np.ndarray
+) -> dict[str, float]:
     """Compute comprehensive propensity score statistics.
 
     Parameters
@@ -311,7 +330,9 @@ def compute_propensity_statistics(propensities: np.ndarray, actions: np.ndarray)
     return stats
 
 
-def compute_balance_statistics(propensities: np.ndarray, actions: np.ndarray) -> dict[str, float]:
+def compute_balance_statistics(
+    propensities: np.ndarray, actions: np.ndarray
+) -> dict[str, float]:
     """Compute balance statistics for each action.
 
     Parameters
@@ -342,8 +363,12 @@ def compute_balance_statistics(propensities: np.ndarray, actions: np.ndarray) ->
         action_props = propensities[action_mask, action]
 
         balance_stats[f"action_{action}_count"] = float(action_mask.sum())
-        balance_stats[f"action_{action}_mean_pscore"] = float(action_props.mean()) if len(action_props) > 0 else 0.0
-        balance_stats[f"action_{action}_std_pscore"] = float(action_props.std()) if len(action_props) > 0 else 0.0
+        balance_stats[f"action_{action}_mean_pscore"] = (
+            float(action_props.mean()) if len(action_props) > 0 else 0.0
+        )
+        balance_stats[f"action_{action}_std_pscore"] = (
+            float(action_props.std()) if len(action_props) > 0 else 0.0
+        )
 
     return balance_stats
 
@@ -402,13 +427,19 @@ def comprehensive_propensity_diagnostics(
         )
 
     if len(propensities) < _MIN_SAMPLES_LARGE:
-        raise InsufficientDataError("Need at least 20 samples for comprehensive diagnostics")
+        raise InsufficientDataError(
+            "Need at least 20 samples for comprehensive diagnostics"
+        )
 
     # Run all diagnostics
     overlap_ratio = check_propensity_overlap(propensities, actions)
     balance_ratio = check_propensity_balance(propensities, actions)
-    calibration_score, calibration_curve = assess_propensity_calibration(propensities, actions, n_bins)
-    discrimination_score, roc_curve = assess_propensity_discrimination(propensities, actions)
+    calibration_score, calibration_curve = assess_propensity_calibration(
+        propensities, actions, n_bins
+    )
+    discrimination_score, roc_curve = assess_propensity_discrimination(
+        propensities, actions
+    )
     log_loss_score = compute_propensity_log_loss(propensities, actions)
     statistics = compute_propensity_statistics(propensities, actions)
     balance_stats = compute_balance_statistics(propensities, actions)
@@ -493,7 +524,9 @@ def _generate_text_report(diagnostics: PropensityDiagnostics) -> str:
         count = int(balance_stats[f"action_{action_idx}_count"])
         mean_ps = balance_stats[f"action_{action_idx}_mean_pscore"]
         std_ps = balance_stats[f"action_{action_idx}_std_pscore"]
-        report.append(f"  Action {action_idx}: count={count}, mean={mean_ps:.4f}, std={std_ps:.4f}")
+        report.append(
+            f"  Action {action_idx}: count={count}, mean={mean_ps:.4f}, std={std_ps:.4f}"
+        )
         action_idx += 1
     report.append("")
 

@@ -35,11 +35,13 @@ def test_propensity_overlap():
 
     # Test with poor overlap (extreme propensity scores)
     # Create a base pattern and repeat it to get exactly n_samples rows
-    base_pattern = np.array([
-        [0.95, 0.025, 0.025],
-        [0.025, 0.95, 0.025],
-        [0.025, 0.025, 0.95],
-    ])
+    base_pattern = np.array(
+        [
+            [0.95, 0.025, 0.025],
+            [0.025, 0.95, 0.025],
+            [0.025, 0.025, 0.95],
+        ]
+    )
     extreme_propensities = np.tile(base_pattern, (n_samples // 3 + 1, 1))[:n_samples]
     # Derive actions from propensity structure: each sample takes its highest-prob action
     extreme_actions = np.argmax(extreme_propensities, axis=1)
@@ -64,11 +66,13 @@ def test_propensity_balance():
 
     # Test with extreme scores
     # Create a base pattern and repeat it to get exactly n_samples rows
-    base_pattern = np.array([
-        [0.99, 0.005, 0.005],
-        [0.005, 0.99, 0.005],
-        [0.005, 0.005, 0.99],
-    ])
+    base_pattern = np.array(
+        [
+            [0.99, 0.005, 0.005],
+            [0.005, 0.99, 0.005],
+            [0.005, 0.005, 0.99],
+        ]
+    )
     extreme_propensities = np.tile(base_pattern, (n_samples // 3 + 1, 1))[:n_samples]
     # Derive actions from propensity structure: each sample takes its highest-prob action
     extreme_actions = np.argmax(extreme_propensities, axis=1)
@@ -131,7 +135,13 @@ def test_propensity_statistics():
     stats = compute_propensity_statistics(propensities, actions)
 
     # Check required statistics
-    required_stats = ["min_pscore", "max_pscore", "mean_pscore", "std_pscore", "median_pscore"]
+    required_stats = [
+        "min_pscore",
+        "max_pscore",
+        "mean_pscore",
+        "std_pscore",
+        "median_pscore",
+    ]
     for stat in required_stats:
         assert stat in stats
         assert isinstance(stats[stat], float)
@@ -216,7 +226,12 @@ def test_comprehensive_diagnostics():
     assert 0 <= diagnostics.calibration_score <= 1
     assert 0 <= diagnostics.discrimination_score <= 1
     assert diagnostics.log_loss_score >= 0
-    assert 0 <= diagnostics.statistics["min_pscore"] <= diagnostics.statistics["max_pscore"] <= 1
+    assert (
+        0
+        <= diagnostics.statistics["min_pscore"]
+        <= diagnostics.statistics["max_pscore"]
+        <= 1
+    )
     assert diagnostics.statistics["std_pscore"] >= 0
 
 
