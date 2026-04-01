@@ -32,7 +32,6 @@ def test_propensity_multinomial_fallback():
     # Force multinomial method
     propensities = estimate_propensity_pairwise(
         design,
-        strategy="multinomial",
         method="multinomial",
         n_splits=2,
         random_state=42,
@@ -65,7 +64,7 @@ def test_propensity_auto_selection():
 
     # Test auto selection (should work with small data)
     propensities = estimate_propensity_pairwise(
-        design, strategy="auto", n_splits=2, random_state=42
+        design, method="auto", n_splits=2, random_state=42
     )
 
     assert propensities.shape[0] == len(logs_df)
@@ -121,7 +120,7 @@ def test_propensity_with_eligibility():
     design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
 
     propensities = estimate_propensity_pairwise(
-        design, strategy="multinomial", n_splits=2, random_state=42
+        design, method="condlogit", n_splits=2, random_state=42
     )
 
     # Check that ineligible operators have zero probability
@@ -147,7 +146,7 @@ def test_propensity_normalization():
     design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
 
     propensities = estimate_propensity_pairwise(
-        design, strategy="multinomial", n_splits=2, random_state=42
+        design, method="condlogit", n_splits=2, random_state=42
     )
 
     # Check normalization for each decision
@@ -209,10 +208,10 @@ def test_propensity_error_handling():
 
     design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
 
-    # Test with invalid strategy
+    # Test with invalid method
     with pytest.raises((ValueError, KeyError)):
         estimate_propensity_pairwise(
-            design, strategy="invalid_strategy", random_state=42
+            design, method="invalid_method", random_state=42
         )
 
 
@@ -233,7 +232,7 @@ def test_large_dataset_fallback():
         }
 
         propensities = estimate_propensity_pairwise(
-            design, strategy="auto", n_splits=2, random_state=42
+            design, method="auto", n_splits=2, random_state=42
         )
 
         # Should still work (fallback to multinomial)
