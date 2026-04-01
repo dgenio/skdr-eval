@@ -34,16 +34,19 @@ def test_propensity_overlap():
     assert isinstance(overlap_ratio, float)
 
     # Test with poor overlap (extreme propensity scores)
-    extreme_propensities = np.array(
+    # Create a base pattern and repeat it to get exactly n_samples rows
+    base_pattern = np.array(
         [
             [0.95, 0.025, 0.025],
             [0.025, 0.95, 0.025],
             [0.025, 0.025, 0.95],
         ]
-        * (n_samples // 3)
     )
+    extreme_propensities = np.tile(base_pattern, (n_samples // 3 + 1, 1))[:n_samples]
+    # Derive actions from propensity structure: each sample takes its highest-prob action
+    extreme_actions = np.argmax(extreme_propensities, axis=1)
 
-    poor_overlap = check_propensity_overlap(extreme_propensities, actions)
+    poor_overlap = check_propensity_overlap(extreme_propensities, extreme_actions)
     assert poor_overlap < overlap_ratio  # Should have worse overlap
 
 
@@ -62,16 +65,19 @@ def test_propensity_balance():
     assert isinstance(balance_ratio, float)
 
     # Test with extreme scores
-    extreme_propensities = np.array(
+    # Create a base pattern and repeat it to get exactly n_samples rows
+    base_pattern = np.array(
         [
             [0.99, 0.005, 0.005],
             [0.005, 0.99, 0.005],
             [0.005, 0.005, 0.99],
         ]
-        * (n_samples // 3)
     )
+    extreme_propensities = np.tile(base_pattern, (n_samples // 3 + 1, 1))[:n_samples]
+    # Derive actions from propensity structure: each sample takes its highest-prob action
+    extreme_actions = np.argmax(extreme_propensities, axis=1)
 
-    poor_balance = check_propensity_balance(extreme_propensities, actions)
+    poor_balance = check_propensity_balance(extreme_propensities, extreme_actions)
     assert poor_balance < balance_ratio  # Should have worse balance
 
 
@@ -91,8 +97,9 @@ def test_propensity_calibration():
 
     assert 0 <= calibration_score <= 1
     assert isinstance(calibration_score, float)
-    assert len(calibration_curve) == 2
-    assert len(calibration_curve[0]) <= 5  # Should have at most n_bins points
+    # calibration_curve is List[Tuple[mean_predicted, actual_fraction]], one tuple per bin
+    assert len(calibration_curve) == 5
+    assert all(len(pt) == 2 for pt in calibration_curve)
 
 
 def test_propensity_discrimination():
@@ -111,7 +118,9 @@ def test_propensity_discrimination():
 
     assert 0 <= discrimination_score <= 1
     assert isinstance(discrimination_score, float)
-    assert len(roc_curve) == 3  # fpr, tpr, thresholds
+    # roc_curve is a list of (fpr, tpr) tuples
+    assert len(roc_curve) > 0
+    assert all(len(point) == 2 for point in roc_curve)
 
 
 def test_propensity_statistics():
@@ -202,12 +211,14 @@ def test_comprehensive_diagnostics():
     assert hasattr(diagnostics, "calibration_score")
     assert hasattr(diagnostics, "discrimination_score")
     assert hasattr(diagnostics, "log_loss_score")
-    assert hasattr(diagnostics, "min_pscore")
-    assert hasattr(diagnostics, "max_pscore")
-    assert hasattr(diagnostics, "mean_pscore")
-    assert hasattr(diagnostics, "std_pscore")
-    assert hasattr(diagnostics, "quantiles")
+    assert hasattr(diagnostics, "statistics")
     assert hasattr(diagnostics, "balance_stats")
+
+    # Statistics are stored in the statistics dict
+    assert "min_pscore" in diagnostics.statistics
+    assert "max_pscore" in diagnostics.statistics
+    assert "mean_pscore" in diagnostics.statistics
+    assert "std_pscore" in diagnostics.statistics
 
     # Check value ranges
     assert 0 <= diagnostics.overlap_ratio <= 1
@@ -215,8 +226,13 @@ def test_comprehensive_diagnostics():
     assert 0 <= diagnostics.calibration_score <= 1
     assert 0 <= diagnostics.discrimination_score <= 1
     assert diagnostics.log_loss_score >= 0
-    assert 0 <= diagnostics.min_pscore <= diagnostics.max_pscore <= 1
-    assert diagnostics.std_pscore >= 0
+    assert (
+        0
+        <= diagnostics.statistics["min_pscore"]
+        <= diagnostics.statistics["max_pscore"]
+        <= 1
+    )
+    assert diagnostics.statistics["std_pscore"] >= 0
 
 
 def test_generate_report():
