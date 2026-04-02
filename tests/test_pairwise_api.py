@@ -172,8 +172,12 @@ def test_pairwise_autoscale_strategy():
     assert len(report_direct) > 0
 
 
-def test_pairwise_propensity_auto():
+def test_pairwise_propensity_auto(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test that propensity='auto' runs end-to-end without crashing."""
+    # Force the multinomial path so the test is deterministic across
+    # environments regardless of whether SciPy is installed.
+    monkeypatch.setattr("skdr_eval.core.SCIPY_AVAILABLE", False)
+
     logs_df, op_daily_df = make_pairwise_synth(
         n_days=2, n_clients_day=80, n_ops=8, seed=42, binary=False
     )
