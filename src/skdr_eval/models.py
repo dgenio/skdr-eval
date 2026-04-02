@@ -1,21 +1,20 @@
 """Extended model support for skdr-eval library."""
 
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import numpy as np
-from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
+from sklearn.base import BaseEstimator
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.model_selection import cross_val_score
-
-from .exceptions import DataValidationError, ModelValidationError
 
 logger = logging.getLogger("skdr_eval")
 
 # Optional imports for advanced models
 try:
     import xgboost as xgb
+
     XGBOOST_AVAILABLE = True
 except ImportError:
     XGBOOST_AVAILABLE = False
@@ -23,13 +22,18 @@ except ImportError:
 
 try:
     import lightgbm as lgb
+
     LIGHTGBM_AVAILABLE = True
 except ImportError:
     LIGHTGBM_AVAILABLE = False
     logger.warning("LightGBM not available. Install with: pip install lightgbm")
 
 try:
-    from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
+    from sklearn.ensemble import (
+        HistGradientBoostingClassifier,
+        HistGradientBoostingRegressor,
+    )
+
     HIST_GRADIENT_AVAILABLE = True
 except ImportError:
     HIST_GRADIENT_AVAILABLE = False
@@ -41,9 +45,7 @@ class ModelFactory:
 
     @staticmethod
     def create_classifier(
-        model_type: str,
-        random_state: Optional[int] = None,
-        **kwargs
+        model_type: str, random_state: Optional[int] = None, **kwargs
     ) -> BaseEstimator:
         """Create a classifier instance.
 
@@ -76,9 +78,7 @@ class ModelFactory:
 
     @staticmethod
     def create_regressor(
-        model_type: str,
-        random_state: Optional[int] = None,
-        **kwargs
+        model_type: str, random_state: Optional[int] = None, **kwargs
     ) -> BaseEstimator:
         """Create a regressor instance.
 
@@ -133,10 +133,7 @@ class ModelFactory:
             classifiers.append("lightgbm")
             regressors.append("lightgbm")
 
-        return {
-            "classifiers": classifiers,
-            "regressors": regressors
-        }
+        return {"classifiers": classifiers, "regressors": regressors}
 
     @staticmethod
     def get_default_params(model_type: str, task_type: str) -> Dict[str, Any]:
@@ -215,10 +212,10 @@ class ModelEvaluator:
             Cross-validation results.
         """
         if len(X) != len(y):
-            raise DataValidationError("X and y must have the same length")
+            raise ValueError("X and y must have the same length")
 
         if len(X) < cv:
-            raise DataValidationError(f"Need at least {cv} samples for {cv}-fold CV")
+            raise ValueError(f"Need at least {cv} samples for {cv}-fold CV")
 
         # Determine scoring metric if not provided
         if scoring is None:
@@ -228,15 +225,13 @@ class ModelEvaluator:
                 scoring = "neg_mean_squared_error"
 
         # Perform cross-validation
-        scores = cross_val_score(
-            model, X, y, cv=cv, scoring=scoring, random_state=random_state
-        )
+        scores = cross_val_score(model, X, y, cv=cv, scoring=scoring)
 
         return {
             "mean_score": float(np.mean(scores)),
             "std_score": float(np.std(scores)),
             "scores": scores.tolist(),
-            "scoring": scoring
+            "scoring": scoring,
         }
 
     @staticmethod
@@ -271,9 +266,9 @@ class ModelEvaluator:
             Performance metrics.
         """
         if len(X_train) != len(y_train):
-            raise DataValidationError("X_train and y_train must have the same length")
+            raise ValueError("X_train and y_train must have the same length")
         if len(X_test) != len(y_test):
-            raise DataValidationError("X_test and y_test must have the same length")
+            raise ValueError("X_test and y_test must have the same length")
 
         # Fit model
         model.fit(X_train, y_train)
@@ -286,16 +281,33 @@ class ModelEvaluator:
 
         if task_type == "classification":
             # Classification metrics
-            from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+            from sklearn.metrics import (
+                accuracy_score,
+                f1_score,
+                precision_score,
+                recall_score,
+            )
 
             results["train_accuracy"] = float(accuracy_score(y_train, y_train_pred))
             results["test_accuracy"] = float(accuracy_score(y_test, y_test_pred))
-            results["train_precision"] = float(precision_score(y_train, y_train_pred, average="weighted"))
-            results["test_precision"] = float(precision_score(y_test, y_test_pred, average="weighted"))
-            results["train_recall"] = float(recall_score(y_train, y_train_pred, average="weighted"))
-            results["test_recall"] = float(recall_score(y_test, y_test_pred, average="weighted"))
-            results["train_f1"] = float(f1_score(y_train, y_train_pred, average="weighted"))
-            results["test_f1"] = float(f1_score(y_test, y_test_pred, average="weighted"))
+            results["train_precision"] = float(
+                precision_score(y_train, y_train_pred, average="weighted")
+            )
+            results["test_precision"] = float(
+                precision_score(y_test, y_test_pred, average="weighted")
+            )
+            results["train_recall"] = float(
+                recall_score(y_train, y_train_pred, average="weighted")
+            )
+            results["test_recall"] = float(
+                recall_score(y_test, y_test_pred, average="weighted")
+            )
+            results["train_f1"] = float(
+                f1_score(y_train, y_train_pred, average="weighted")
+            )
+            results["test_f1"] = float(
+                f1_score(y_test, y_test_pred, average="weighted")
+            )
 
             # Add probability-based metrics if available
             if hasattr(model, "predict_proba"):
@@ -312,13 +324,19 @@ class ModelEvaluator:
 
                 try:
                     if len(np.unique(y_test)) == 2:  # Binary classification
-                        results["test_roc_auc"] = float(roc_auc_score(y_test, y_test_proba[:, 1]))
+                        results["test_roc_auc"] = float(
+                            roc_auc_score(y_test, y_test_proba[:, 1])
+                        )
                 except ValueError:
                     pass  # Skip if ROC AUC can't be computed
 
         else:  # regression
             # Regression metrics
-            from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+            from sklearn.metrics import (
+                mean_absolute_error,
+                mean_squared_error,
+                r2_score,
+            )
 
             results["train_mse"] = float(mean_squared_error(y_train, y_train_pred))
             results["test_mse"] = float(mean_squared_error(y_test, y_test_pred))
@@ -373,7 +391,9 @@ class ModelSelector:
         from sklearn.model_selection import GridSearchCV
 
         if task_type == "classification":
-            model = ModelFactory.create_classifier(model_type, random_state=random_state)
+            model = ModelFactory.create_classifier(
+                model_type, random_state=random_state
+            )
         else:
             model = ModelFactory.create_regressor(model_type, random_state=random_state)
 
@@ -385,16 +405,14 @@ class ModelSelector:
                 scoring = "neg_mean_squared_error"
 
         # Perform grid search
-        grid_search = GridSearchCV(
-            model, param_grid, cv=cv, scoring=scoring, random_state=random_state
-        )
+        grid_search = GridSearchCV(model, param_grid, cv=cv, scoring=scoring)
         grid_search.fit(X, y)
 
         return {
             "best_params": grid_search.best_params_,
             "best_score": float(grid_search.best_score_),
             "best_estimator": grid_search.best_estimator_,
-            "cv_results": grid_search.cv_results_
+            "cv_results": grid_search.cv_results_,
         }
 
     @staticmethod
@@ -440,7 +458,9 @@ class ModelSelector:
         from sklearn.model_selection import RandomizedSearchCV
 
         if task_type == "classification":
-            model = ModelFactory.create_classifier(model_type, random_state=random_state)
+            model = ModelFactory.create_classifier(
+                model_type, random_state=random_state
+            )
         else:
             model = ModelFactory.create_regressor(model_type, random_state=random_state)
 
@@ -453,8 +473,12 @@ class ModelSelector:
 
         # Perform random search
         random_search = RandomizedSearchCV(
-            model, param_distributions, n_iter=n_iter, cv=cv, 
-            scoring=scoring, random_state=random_state
+            model,
+            param_distributions,
+            n_iter=n_iter,
+            cv=cv,
+            scoring=scoring,
+            random_state=random_state,
         )
         random_search.fit(X, y)
 
@@ -462,7 +486,7 @@ class ModelSelector:
             "best_params": random_search.best_params_,
             "best_score": float(random_search.best_score_),
             "best_estimator": random_search.best_estimator_,
-            "cv_results": random_search.cv_results_
+            "cv_results": random_search.cv_results_,
         }
 
 
@@ -523,7 +547,9 @@ def get_model_recommendations(
     elif problem_complexity == "low":
         # For low complexity, prefer simple models
         if task_type == "classification":
-            recommendations = ["logistic"] + [m for m in recommendations if m != "logistic"]
+            recommendations = ["logistic"] + [
+                m for m in recommendations if m != "logistic"
+            ]
         else:
             recommendations = ["ridge"] + [m for m in recommendations if m != "ridge"]
 
@@ -531,10 +557,7 @@ def get_model_recommendations(
 
 
 def create_model_ensemble(
-    model_types: List[str],
-    task_type: str,
-    random_state: Optional[int] = None,
-    **kwargs
+    model_types: List[str], task_type: str, random_state: Optional[int] = None, **kwargs
 ) -> BaseEstimator:
     """Create an ensemble of models.
 
@@ -559,14 +582,17 @@ def create_model_ensemble(
     if task_type == "classification":
         estimators = []
         for i, model_type in enumerate(model_types):
-            model = ModelFactory.create_classifier(model_type, random_state=random_state)
+            model = ModelFactory.create_classifier(
+                model_type, random_state=random_state
+            )
             estimators.append((f"{model_type}_{i}", model))
-        
+
+        kwargs.setdefault("voting", "soft")
         return VotingClassifier(estimators, **kwargs)
     else:
         estimators = []
         for i, model_type in enumerate(model_types):
             model = ModelFactory.create_regressor(model_type, random_state=random_state)
             estimators.append((f"{model_type}_{i}", model))
-        
+
         return VotingRegressor(estimators, **kwargs)
