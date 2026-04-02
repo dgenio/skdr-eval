@@ -15,6 +15,7 @@ from .core import (
     fit_propensity_timecal,
     induce_policy_from_sklearn,
 )
+from .diagnostics import PropensityDiagnostics
 from .exceptions import (
     BootstrapError,
     ConfigurationError,
@@ -34,6 +35,20 @@ from .exceptions import (
 from .pairwise import PairwiseDesign
 from .synth import make_pairwise_synth, make_synth_logs
 
+try:
+    from .visualization import (
+        create_dashboard,
+        plot_calibration_curve,
+        plot_diagnostics_summary,
+        plot_dr_results,
+        plot_propensity_distribution,
+        plot_roc_curve,
+    )
+
+    HAS_VISUALIZATION = True
+except ImportError:
+    HAS_VISUALIZATION = False
+
 # Version is set by setuptools-scm
 __version__: str = "unknown"
 
@@ -44,7 +59,7 @@ except ImportError:
     pass
 
 __all__ = [
-    # Exceptions
+    "HAS_VISUALIZATION",
     "BootstrapError",
     "ConfigurationError",
     "ConvergenceError",
@@ -59,12 +74,14 @@ __all__ = [
     "PairwiseDesign",
     "PairwiseEvaluationError",
     "PolicyInductionError",
+    "PropensityDiagnostics",
     "PropensityScoreError",
     "SkdrEvalError",
     "VersionError",
     "__version__",
     "block_bootstrap_ci",
     "build_design",
+    "create_dashboard",
     "dr_value_with_clip",
     "evaluate_pairwise_models",
     "evaluate_propensity_diagnostics",
@@ -74,4 +91,9 @@ __all__ = [
     "induce_policy_from_sklearn",
     "make_pairwise_synth",
     "make_synth_logs",
+    "plot_calibration_curve",
+    "plot_diagnostics_summary",
+    "plot_dr_results",
+    "plot_propensity_distribution",
+    "plot_roc_curve",
 ]

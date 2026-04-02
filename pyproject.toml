@@ -42,6 +42,9 @@ speed = [
     "pyarrow>=14",
     "polars>=0.20",
 ]
+viz = [
+    "matplotlib>=3.5",
+]
 dev = [
     "pytest",
     "pytest-cov",
@@ -52,6 +55,7 @@ dev = [
     "build",
     "twine",
     "pre-commit",
+    "matplotlib",
 ]
 examples = [
     "jupyter",
