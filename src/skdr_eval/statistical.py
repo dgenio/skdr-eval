@@ -2,10 +2,9 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple
 
 import numpy as np
-import pandas as pd
 from scipy import stats
 from scipy.stats import chi2, norm, t
 
@@ -61,11 +60,25 @@ def t_test(
     if not np.all(np.isfinite(sample1)) or not np.all(np.isfinite(sample2)):
         raise DataValidationError("Samples must contain only finite values")
 
+    n1, n2 = len(sample1), len(sample2)
+    var1, var2 = np.var(sample1, ddof=1), np.var(sample2, ddof=1)
+
     # Perform t-test
     if equal_var:
         statistic, p_value = stats.ttest_ind(sample1, sample2, equal_var=True)
     else:
         statistic, p_value = stats.ttest_ind(sample1, sample2, equal_var=False)
+
+    mean_diff = np.mean(sample1) - np.mean(sample2)
+    # Handle degenerate zero-variance cases where scipy can return NaN.
+    if not np.isfinite(statistic) or not np.isfinite(p_value):
+        if np.isclose(var1, 0.0) and np.isclose(var2, 0.0):
+            if np.isclose(mean_diff, 0.0):
+                statistic = 0.0
+                p_value = 1.0
+            else:
+                statistic = float(np.sign(mean_diff) * np.inf)
+                p_value = 0.0
 
     # Adjust p-value for one-sided tests
     if alternative == "less":
@@ -75,12 +88,12 @@ def t_test(
 
     # Calculate degrees of freedom
     if equal_var:
-        df = len(sample1) + len(sample2) - 2
+        df = n1 + n2 - 2
     else:
         # Welch's t-test degrees of freedom
-        var1, var2 = np.var(sample1, ddof=1), np.var(sample2, ddof=1)
-        n1, n2 = len(sample1), len(sample2)
-        df = (var1 / n1 + var2 / n2) ** 2 / ((var1 / n1) ** 2 / (n1 - 1) + (var2 / n2) ** 2 / (n2 - 1))
+        df = (var1 / n1 + var2 / n2) ** 2 / (
+            (var1 / n1) ** 2 / (n1 - 1) + (var2 / n2) ** 2 / (n2 - 1)
+        )
 
     # Calculate critical value
     if alternative == "two-sided":
@@ -89,11 +102,12 @@ def t_test(
         critical_value = t.ppf(1 - alpha, df)
 
     # Calculate confidence interval
-    mean_diff = np.mean(sample1) - np.mean(sample2)
-    se = np.sqrt(np.var(sample1, ddof=1) / len(sample1) + np.var(sample2, ddof=1) / len(sample2))
     if equal_var:
-        se = se * np.sqrt(1 / len(sample1) + 1 / len(sample2))
-    
+        pooled_var = (((n1 - 1) * var1) + ((n2 - 1) * var2)) / (n1 + n2 - 2)
+        se = np.sqrt(pooled_var * (1 / n1 + 1 / n2))
+    else:
+        se = np.sqrt(var1 / n1 + var2 / n2)
+
     if alternative == "two-sided":
         ci_lower = mean_diff - critical_value * se
         ci_upper = mean_diff + critical_value * se
@@ -105,10 +119,11 @@ def t_test(
         ci_upper = np.inf
 
     # Calculate effect size (Cohen's d)
-    pooled_std = np.sqrt(((len(sample1) - 1) * np.var(sample1, ddof=1) + 
-                          (len(sample2) - 1) * np.var(sample2, ddof=1)) / 
-                         (len(sample1) + len(sample2) - 2))
-    effect_size = (np.mean(sample1) - np.mean(sample2)) / pooled_std
+    pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+    if np.isclose(pooled_std, 0.0):
+        effect_size = 0.0 if np.isclose(mean_diff, 0.0) else float(np.sign(mean_diff) * np.inf)
+    else:
+        effect_size = mean_diff / pooled_std
 
     # Interpretation
     if p_value < alpha:
@@ -153,7 +168,9 @@ def mann_whitney_u_test(
         Test results.
     """
     if len(sample1) < 3 or len(sample2) < 3:
-        raise InsufficientDataError("Need at least 3 observations in each sample for Mann-Whitney U test")
+        raise InsufficientDataError(
+            "Need at least 3 observations in each sample for Mann-Whitney U test"
+        )
 
     if not np.all(np.isfinite(sample1)) or not np.all(np.isfinite(sample2)):
         raise DataValidationError("Samples must contain only finite values")
@@ -165,7 +182,7 @@ def mann_whitney_u_test(
     n1, n2 = len(sample1), len(sample2)
     mean_u = n1 * n2 / 2
     std_u = np.sqrt(n1 * n2 * (n1 + n2 + 1) / 12)
-    
+
     if alternative == "two-sided":
         critical_value = norm.ppf(1 - alpha / 2) * std_u + mean_u
     else:
@@ -173,7 +190,6 @@ def mann_whitney_u_test(
 
     # Calculate effect size (rank-biserial correlation)
     u1 = statistic
-    u2 = n1 * n2 - u1
     effect_size = 2 * (u1 / (n1 * n2)) - 1
 
     # Interpretation
@@ -215,6 +231,10 @@ def chi_square_test(
     StatisticalTest
         Test results.
     """
+    observed = np.asarray(observed, dtype=float)
+    if observed.ndim != 1:
+        raise DataValidationError("Observed frequencies must be a 1D array")
+
     if len(observed) < 2:
         raise InsufficientDataError("Need at least 2 categories for chi-square test")
 
@@ -225,24 +245,29 @@ def chi_square_test(
         # Goodness of fit test with uniform distribution
         expected = np.full_like(observed, np.sum(observed) / len(observed), dtype=float)
     else:
+        expected = np.asarray(expected, dtype=float)
+        if expected.ndim != 1:
+            raise DataValidationError("Expected frequencies must be a 1D array")
         if len(expected) != len(observed):
-            raise DataValidationError("Expected and observed arrays must have the same length")
+            raise DataValidationError(
+                "Expected and observed arrays must have the same length"
+            )
         if np.any(expected < 0):
             raise DataValidationError("Expected frequencies must be non-negative")
 
     # Calculate chi-square statistic
     chi2_stat = np.sum((observed - expected) ** 2 / expected)
-    
+
     # Calculate p-value
     df = len(observed) - 1
     p_value = 1 - chi2.cdf(chi2_stat, df)
-    
+
     # Calculate critical value
     critical_value = chi2.ppf(1 - alpha, df)
 
     # Calculate effect size (Cramér's V)
     n = np.sum(observed)
-    effect_size = np.sqrt(chi2_stat / (n * (min(observed.shape) - 1)))
+    effect_size = np.sqrt(chi2_stat / (n * (len(observed) - 1)))
 
     # Interpretation
     if p_value < alpha:
@@ -392,7 +417,9 @@ def bootstrap_confidence_interval(
         ci_upper = np.percentile(bootstrap_stats, 100 * (1 - alpha / 2))
     elif method == "basic":
         original_stat = statistic_func(data)
-        ci_lower = 2 * original_stat - np.percentile(bootstrap_stats, 100 * (1 - alpha / 2))
+        ci_lower = 2 * original_stat - np.percentile(
+            bootstrap_stats, 100 * (1 - alpha / 2)
+        )
         ci_upper = 2 * original_stat - np.percentile(bootstrap_stats, 100 * alpha / 2)
     else:
         raise ValueError(f"Unknown bootstrap method: {method}")
@@ -440,14 +467,14 @@ def permutation_test(
         raise DataValidationError("Need at least 100 permutations")
 
     rng = np.random.RandomState(random_state)
-    
+
     # Calculate observed statistic
     observed_stat = statistic_func(sample1, sample2)
-    
+
     # Combine samples
     combined = np.concatenate([sample1, sample2])
-    n1, n2 = len(sample1), len(sample2)
-    
+    n1 = len(sample1)
+
     # Perform permutations
     permuted_stats = []
     for _ in range(n_permutations):
@@ -457,18 +484,18 @@ def permutation_test(
         perm_sample2 = shuffled[n1:]
         perm_stat = statistic_func(perm_sample1, perm_sample2)
         permuted_stats.append(perm_stat)
-    
+
     permuted_stats = np.array(permuted_stats)
-    
+
     # Calculate p-value
     p_value = np.mean(np.abs(permuted_stats) >= np.abs(observed_stat))
-    
+
     # Calculate critical value
     critical_value = np.percentile(np.abs(permuted_stats), 100 * (1 - alpha))
-    
+
     # Calculate effect size
     effect_size = observed_stat / np.std(combined)
-    
+
     # Interpretation
     if p_value < alpha:
         interpretation = f"Reject H0 at α={alpha} (p={p_value:.4f})"
@@ -591,10 +618,10 @@ def power_analysis(
 
     # Calculate critical value
     critical_value = t.ppf(1 - alpha / 2, df)
-    
+
     # Calculate power
     power = 1 - t.cdf(critical_value, df, ncp) + t.cdf(-critical_value, df, ncp)
-    
+
     return min(max(power, 0), 1)  # Ensure power is between 0 and 1
 
 
@@ -633,14 +660,14 @@ def sample_size_calculation(
 
     # Use binary search to find required sample size
     n_min, n_max = 2, 10000
-    
+
     while n_max - n_min > 1:
         n_mid = (n_min + n_max) // 2
         calculated_power = power_analysis(effect_size, n_mid, alpha, test_type)
-        
+
         if calculated_power < power:
             n_min = n_mid
         else:
             n_max = n_mid
-    
+
     return n_max
