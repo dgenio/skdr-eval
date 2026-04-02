@@ -15,6 +15,7 @@ from .core import (
     fit_propensity_timecal,
     induce_policy_from_sklearn,
 )
+from .diagnostics import PropensityDiagnostics
 from .exceptions import (
     BootstrapError,
     ConfigurationError,
@@ -36,7 +37,6 @@ from .synth import make_pairwise_synth, make_synth_logs
 
 try:
     from .visualization import (
-        PropensityDiagnostics,
         create_dashboard,
         plot_calibration_curve,
         plot_diagnostics_summary,
@@ -59,7 +59,7 @@ except ImportError:
     pass
 
 __all__ = [
-    # Exceptions
+    "HAS_VISUALIZATION",
     "BootstrapError",
     "ConfigurationError",
     "ConvergenceError",

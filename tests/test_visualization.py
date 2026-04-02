@@ -3,9 +3,10 @@
 import numpy as np
 import pytest
 
+import skdr_eval
+from skdr_eval.diagnostics import PropensityDiagnostics
 from skdr_eval.exceptions import DataValidationError, InsufficientDataError
 from skdr_eval.visualization import (
-    PropensityDiagnostics,
     create_dashboard,
     plot_calibration_curve,
     plot_diagnostics_summary,
@@ -220,6 +221,34 @@ def test_error_handling():
     # Test with empty ROC curve
     with pytest.raises(DataValidationError):
         plot_roc_curve([])
+
+
+def test_evaluate_propensity_diagnostics_pipeline():
+    """Integration test: evaluate_propensity_diagnostics output feeds all plot functions.
+
+    This guards against the PropensityDiagnostics class mismatch where plot functions
+    received a diagnostics object from the real evaluation API and raised AttributeError.
+    """
+    np.random.seed(42)
+    n_samples = 100
+    n_actions = 3
+
+    propensities = np.random.dirichlet([1, 1, 1], size=n_samples)
+    actions = np.random.choice(n_actions, size=n_samples)
+
+    # Run the real evaluation API — this returns diagnostics.PropensityDiagnostics
+    diag, report = skdr_eval.evaluate_propensity_diagnostics(propensities, actions)
+
+    # Verify type consistency
+    assert isinstance(diag, PropensityDiagnostics)
+    assert isinstance(report, str)
+
+    # Each downstream plotting function must accept the live diagnostics object
+    fig = plot_diagnostics_summary(diag)
+    assert fig is not None
+
+    fig = create_dashboard(propensities, actions, diagnostics=diag)
+    assert fig is not None
 
 
 if __name__ == "__main__":

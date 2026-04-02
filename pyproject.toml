@@ -44,7 +44,6 @@ speed = [
 ]
 viz = [
     "matplotlib>=3.5",
-    "seaborn>=0.12",
 ]
 dev = [
     "pytest",
@@ -57,7 +56,6 @@ dev = [
     "twine",
     "pre-commit",
     "matplotlib",
-    "seaborn",
 ]
 examples = [
     "jupyter",

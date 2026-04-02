@@ -1,7 +1,7 @@
 """Propensity score diagnostics for skdr-eval library."""
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from sklearn.metrics import log_loss, roc_auc_score, roc_curve
@@ -33,6 +33,7 @@ class PropensityDiagnostics:
     balance_stats: dict[str, float]
     calibration_curve: list[tuple[float, float]]
     roc_curve: list[tuple[float, float]]
+    quantiles: dict[str, float] = field(default_factory=dict)
 
 
 def check_propensity_overlap(propensities: np.ndarray, actions: np.ndarray) -> float:

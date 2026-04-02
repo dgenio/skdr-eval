@@ -1,34 +1,27 @@
 """Visualization tools for skdr-eval library."""
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 
+from .diagnostics import PropensityDiagnostics
 from .exceptions import DataValidationError, InsufficientDataError
 
 logger = logging.getLogger("skdr_eval")
 
 _MIN_SAMPLES = 10
 
-
-@dataclass
-class PropensityDiagnostics:
-    """Structured container for propensity score diagnostic results."""
-
-    overlap_ratio: float = 0.0
-    balance_ratio: float = 0.0
-    calibration_score: float = 0.0
-    discrimination_score: float = 0.0
-    log_loss_score: float = 0.0
-    statistics: dict[str, float] = field(default_factory=dict)
-    balance_stats: dict[str, Any] = field(default_factory=dict)
-    calibration_curve: list[tuple[float, float]] = field(default_factory=list)
-    roc_curve: list[tuple[float, float]] = field(default_factory=list)
-    quantiles: dict[str, float] = field(default_factory=dict)
+__all__ = [
+    "create_dashboard",
+    "plot_calibration_curve",
+    "plot_diagnostics_summary",
+    "plot_dr_results",
+    "plot_propensity_distribution",
+    "plot_roc_curve",
+]
 
 
 def plot_propensity_distribution(
@@ -108,7 +101,7 @@ def plot_propensity_distribution(
             box_labels.append(action_names[action])
 
     if box_data:
-        ax2.boxplot(box_data, labels=box_labels)
+        ax2.boxplot(box_data, tick_labels=box_labels)
         ax2.set_ylabel("Propensity Score")
         ax2.set_title("Box Plot by Action")
         ax2.tick_params(axis="x", rotation=45)
@@ -473,9 +466,9 @@ def plot_diagnostics_summary(
     ax5.legend()
     ax5.grid(True, alpha=0.3)
 
-    # Plot 6: Quantiles
+    # Plot 6: Quantiles (from diagnostics.statistics, if populated)
     ax6 = axes[1, 2]
-    quantiles = diagnostics.quantiles
+    quantiles = getattr(diagnostics, "quantiles", {})
     if quantiles:
         q_names = list(quantiles.keys())
         q_values = list(quantiles.values())
@@ -489,6 +482,7 @@ def plot_diagnostics_summary(
     ax7 = axes[2, 0]
     balance_stats = diagnostics.balance_stats
     if balance_stats:
+        # Keys follow 'action_N_{stat}' format produced by diagnostics.balance_stats
         sorted_counts = sorted(
             ((k, v) for k, v in balance_stats.items() if k.endswith("_count")),
             key=lambda kv: int(kv[0].split("_")[1]),
