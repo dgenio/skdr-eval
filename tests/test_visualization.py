@@ -1,0 +1,255 @@
+"""Tests for visualization module."""
+
+import numpy as np
+import pytest
+
+import skdr_eval
+from skdr_eval.diagnostics import PropensityDiagnostics
+from skdr_eval.exceptions import DataValidationError, InsufficientDataError
+from skdr_eval.visualization import (
+    create_dashboard,
+    plot_calibration_curve,
+    plot_diagnostics_summary,
+    plot_dr_results,
+    plot_propensity_distribution,
+    plot_roc_curve,
+)
+
+
+def test_plot_propensity_distribution(tmp_path):
+    """Test propensity distribution plotting."""
+    n_samples = 100
+    n_actions = 3
+
+    # Create test data
+    propensities = np.random.dirichlet([1, 1, 1], size=n_samples)
+    actions = np.random.choice(n_actions, size=n_samples)
+
+    # Test basic plotting
+    fig = plot_propensity_distribution(propensities, actions)
+    assert fig is not None
+
+    # Test with action names
+    action_names = ["Action A", "Action B", "Action C"]
+    fig = plot_propensity_distribution(propensities, actions, action_names=action_names)
+    assert fig is not None
+
+    # Test with save path
+    fig = plot_propensity_distribution(
+        propensities, actions, save_path=str(tmp_path / "test_plot.png")
+    )
+    assert fig is not None
+
+
+def test_plot_dr_results(tmp_path):
+    """Test DR results plotting."""
+    # Create test results
+    results = {
+        "Model1": {"V_hat": 0.5, "SE_if": 0.1, "ESS": 50, "clip": 5},
+        "Model2": {"V_hat": 0.6, "SE_if": 0.12, "ESS": 45, "clip": 10},
+        "Model3": {"V_hat": 0.55, "SE_if": 0.11, "ESS": 48, "clip": 7},
+    }
+
+    fig = plot_dr_results(results)
+    assert fig is not None
+
+    # Test with save path
+    fig = plot_dr_results(results, save_path=str(tmp_path / "test_dr_plot.png"))
+    assert fig is not None
+
+
+def test_plot_calibration_curve(tmp_path):
+    """Test calibration curve plotting."""
+    # Create test calibration curve
+    calibration_curve = [
+        (0.1, 0.12),
+        (0.3, 0.28),
+        (0.5, 0.52),
+        (0.7, 0.68),
+        (0.9, 0.88),
+    ]
+
+    fig = plot_calibration_curve(calibration_curve)
+    assert fig is not None
+
+    # Test with save path
+    fig = plot_calibration_curve(
+        calibration_curve, save_path=str(tmp_path / "test_cal_plot.png")
+    )
+    assert fig is not None
+
+
+def test_plot_roc_curve(tmp_path):
+    """Test ROC curve plotting."""
+    # Create test ROC curve
+    roc_curve = [
+        (0.0, 0.0),
+        (0.1, 0.3),
+        (0.2, 0.5),
+        (0.3, 0.7),
+        (0.4, 0.8),
+        (0.5, 0.85),
+        (1.0, 1.0),
+    ]
+
+    fig = plot_roc_curve(roc_curve)
+    assert fig is not None
+
+    # Test with save path
+    fig = plot_roc_curve(roc_curve, save_path=str(tmp_path / "test_roc_plot.png"))
+    assert fig is not None
+
+
+def test_plot_diagnostics_summary(tmp_path):
+    """Test diagnostics summary plotting."""
+    # Create test diagnostics
+    diagnostics = PropensityDiagnostics(
+        overlap_ratio=0.8,
+        balance_ratio=0.7,
+        calibration_score=0.9,
+        discrimination_score=0.85,
+        log_loss_score=0.3,
+        statistics={
+            "min_pscore": 0.01,
+            "max_pscore": 0.99,
+            "mean_pscore": 0.5,
+            "std_pscore": 0.2,
+            "median_pscore": 0.48,
+        },
+        balance_stats={
+            "action_0_count": 30,
+            "action_0_mean_pscore": 0.4,
+            "action_0_std_pscore": 0.15,
+            "action_1_count": 35,
+            "action_1_mean_pscore": 0.6,
+            "action_1_std_pscore": 0.18,
+        },
+        calibration_curve=[(0.2, 0.22), (0.4, 0.38), (0.6, 0.62), (0.8, 0.78)],
+        roc_curve=[(0.0, 0.0), (0.2, 0.4), (0.4, 0.7), (0.6, 0.85), (1.0, 1.0)],
+        quantiles={"pscore_q25": 0.3, "pscore_q75": 0.7},
+    )
+
+    fig = plot_diagnostics_summary(diagnostics)
+    assert fig is not None
+
+    # Test with save path
+    fig = plot_diagnostics_summary(
+        diagnostics, save_path=str(tmp_path / "test_diag_plot.png")
+    )
+    assert fig is not None
+
+
+def test_create_dashboard(tmp_path):
+    """Test dashboard creation."""
+    n_samples = 100
+    n_actions = 3
+
+    # Create test data
+    propensities = np.random.dirichlet([1, 1, 1], size=n_samples)
+    actions = np.random.choice(n_actions, size=n_samples)
+
+    # Test basic dashboard
+    fig = create_dashboard(propensities, actions)
+    assert fig is not None
+
+    # Test with results
+    results = {
+        "Model1": {"V_hat": 0.5, "SE_if": 0.1, "ESS": 50, "clip": 5},
+        "Model2": {"V_hat": 0.6, "SE_if": 0.12, "ESS": 45, "clip": 10},
+    }
+    fig = create_dashboard(propensities, actions, results=results)
+    assert fig is not None
+
+    # Test with diagnostics
+    diagnostics = PropensityDiagnostics(
+        overlap_ratio=0.8,
+        balance_ratio=0.7,
+        calibration_score=0.9,
+        discrimination_score=0.85,
+        log_loss_score=0.3,
+        statistics={
+            "min_pscore": 0.01,
+            "max_pscore": 0.99,
+            "mean_pscore": 0.5,
+            "std_pscore": 0.2,
+            "median_pscore": 0.48,
+        },
+        balance_stats={
+            "action_0_count": 30,
+            "action_0_mean_pscore": 0.4,
+            "action_0_std_pscore": 0.15,
+        },
+        calibration_curve=[(0.2, 0.22), (0.4, 0.38), (0.6, 0.62), (0.8, 0.78)],
+        roc_curve=[(0.0, 0.0), (0.2, 0.4), (0.4, 0.7), (0.6, 0.85), (1.0, 1.0)],
+        quantiles={"pscore_q25": 0.3, "pscore_q75": 0.7},
+    )
+
+    fig = create_dashboard(propensities, actions, diagnostics=diagnostics)
+    assert fig is not None
+
+    # Test with save path
+    fig = create_dashboard(
+        propensities, actions, save_path=str(tmp_path / "test_dashboard.png")
+    )
+    assert fig is not None
+
+
+def test_error_handling():
+    """Test error handling in visualization functions."""
+    # Test with mismatched lengths
+    propensities = np.random.rand(10, 3)
+    actions = np.array([0, 1, 2])  # Wrong length
+
+    with pytest.raises(DataValidationError):
+        plot_propensity_distribution(propensities, actions)
+
+    # Test with insufficient data
+    small_propensities = np.random.rand(5, 3)
+    small_actions = np.array([0, 1, 0, 1, 0])
+
+    with pytest.raises(InsufficientDataError):
+        plot_propensity_distribution(small_propensities, small_actions)
+
+    # Test with empty results
+    with pytest.raises(DataValidationError):
+        plot_dr_results({})
+
+    # Test with empty calibration curve
+    with pytest.raises(DataValidationError):
+        plot_calibration_curve([])
+
+    # Test with empty ROC curve
+    with pytest.raises(DataValidationError):
+        plot_roc_curve([])
+
+
+def test_evaluate_propensity_diagnostics_pipeline():
+    """Integration test: evaluate_propensity_diagnostics output feeds all plot functions.
+
+    This guards against the PropensityDiagnostics class mismatch where plot functions
+    received a diagnostics object from the real evaluation API and raised AttributeError.
+    """
+    np.random.seed(42)
+    n_samples = 100
+    n_actions = 3
+
+    propensities = np.random.dirichlet([1, 1, 1], size=n_samples)
+    actions = np.random.choice(n_actions, size=n_samples)
+
+    # Run the real evaluation API — this returns diagnostics.PropensityDiagnostics
+    diag, report = skdr_eval.evaluate_propensity_diagnostics(propensities, actions)
+
+    # Verify type consistency
+    assert isinstance(diag, PropensityDiagnostics)
+    assert isinstance(report, str)
+
+    # Each downstream plotting function must accept the live diagnostics object
+    fig = plot_diagnostics_summary(diag)
+    assert fig is not None
+
+    fig = create_dashboard(propensities, actions, diagnostics=diag)
+    assert fig is not None
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])
