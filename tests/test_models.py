@@ -1,9 +1,18 @@
 """Tests for models module."""
 
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 
+from skdr_eval.exceptions import (
+    ConfigurationError,
+    DataValidationError,
+    ModelValidationError,
+)
 from skdr_eval.models import (
+    _ADVANCED_MODEL_FEATURE_THRESHOLD,
+    _ADVANCED_MODEL_SAMPLE_THRESHOLD,
     ModelEvaluator,
     ModelFactory,
     ModelSelector,
@@ -14,36 +23,30 @@ from skdr_eval.models import (
 
 def test_model_factory_classifier():
     """Test ModelFactory for creating classifiers."""
-    # Test logistic regression
     model = ModelFactory.create_classifier("logistic", random_state=42)
     assert hasattr(model, "fit")
     assert hasattr(model, "predict")
     assert hasattr(model, "predict_proba")
 
-    # Test random forest
     model = ModelFactory.create_classifier("random_forest", random_state=42)
     assert hasattr(model, "fit")
     assert hasattr(model, "predict")
     assert hasattr(model, "predict_proba")
 
-    # Test with custom parameters
     model = ModelFactory.create_classifier("logistic", random_state=42, C=0.1)
     assert model.C == 0.1
 
 
 def test_model_factory_regressor():
     """Test ModelFactory for creating regressors."""
-    # Test ridge regression
     model = ModelFactory.create_regressor("ridge", random_state=42)
     assert hasattr(model, "fit")
     assert hasattr(model, "predict")
 
-    # Test random forest
     model = ModelFactory.create_regressor("random_forest", random_state=42)
     assert hasattr(model, "fit")
     assert hasattr(model, "predict")
 
-    # Test with custom parameters
     model = ModelFactory.create_regressor("ridge", random_state=42, alpha=0.1)
     assert model.alpha == 0.1
 
@@ -58,31 +61,54 @@ def test_model_factory_available_models():
     assert "ridge" in available["regressors"]
     assert "random_forest" in available["classifiers"]
     assert "random_forest" in available["regressors"]
+    assert "hist_gradient" in available["classifiers"]
+    assert "hist_gradient" in available["regressors"]
 
 
 def test_model_factory_default_params():
     """Test getting default parameters."""
-    # Test classification
     params = ModelFactory.get_default_params("logistic", "classification")
     assert "max_iter" in params
     assert "C" in params
 
-    # Test regression
     params = ModelFactory.get_default_params("ridge", "regression")
     assert "alpha" in params
 
 
+def test_model_factory_default_params_unknown_raises():
+    """get_default_params raises ConfigurationError for unknown inputs."""
+    with pytest.raises(ConfigurationError):
+        ModelFactory.get_default_params("logisitc", "classification")  # typo
+
+    with pytest.raises(ConfigurationError):
+        ModelFactory.get_default_params("logistic", "invalid_task")
+
+
+def test_model_factory_optional_dep_importerror():
+    """create_classifier/regressor raises ImportError when optional dep absent."""
+    with patch("skdr_eval.models.XGBOOST_AVAILABLE", False):
+        with pytest.raises(ImportError, match="pip install xgboost"):
+            ModelFactory.create_classifier("xgboost")
+
+        with pytest.raises(ImportError, match="pip install xgboost"):
+            ModelFactory.create_regressor("xgboost")
+
+    with patch("skdr_eval.models.LIGHTGBM_AVAILABLE", False):
+        with pytest.raises(ImportError, match="pip install lightgbm"):
+            ModelFactory.create_classifier("lightgbm")
+
+        with pytest.raises(ImportError, match="pip install lightgbm"):
+            ModelFactory.create_regressor("lightgbm")
+
+
 def test_model_evaluator_cross_validate():
     """Test cross-validation functionality."""
-    # Create test data
     np.random.seed(42)
     X = np.random.randn(100, 5)
     y = np.random.randint(0, 2, 100)
 
-    # Create model
     model = ModelFactory.create_classifier("logistic", random_state=42)
 
-    # Test cross-validation
     results = ModelEvaluator.cross_validate_model(model, X, y, cv=5, random_state=42)
 
     assert "mean_score" in results
@@ -91,62 +117,103 @@ def test_model_evaluator_cross_validate():
     assert "scoring" in results
     assert len(results["scores"]) == 5
     assert 0 <= results["mean_score"] <= 1
+    assert results["scoring"] == "accuracy"
+
+
+def test_model_evaluator_cross_validate_regressor_scoring():
+    """cross_validate_model defaults to neg_mean_squared_error for regressors."""
+    np.random.seed(42)
+    X = np.random.randn(100, 5)
+    y = np.random.randn(100)
+
+    model = ModelFactory.create_regressor("ridge", random_state=42)
+    results = ModelEvaluator.cross_validate_model(model, X, y, cv=3, random_state=42)
+
+    assert results["scoring"] == "neg_mean_squared_error"
+    assert len(results["scores"]) == 3
+
+
+def test_model_evaluator_cross_validate_random_state_reproducible():
+    """random_state produces identical fold splits across calls."""
+    np.random.seed(0)
+    X = np.random.randn(100, 5)
+    y = np.random.randint(0, 2, 100)
+
+    model = ModelFactory.create_classifier("logistic", random_state=42)
+    r1 = ModelEvaluator.cross_validate_model(model, X, y, cv=5, random_state=7)
+    r2 = ModelEvaluator.cross_validate_model(model, X, y, cv=5, random_state=7)
+    assert r1["scores"] == r2["scores"]
+
+    r3 = ModelEvaluator.cross_validate_model(model, X, y, cv=5, random_state=99)
+    # Different seed should (almost always) produce different fold order
+    assert r1["scores"] != r3["scores"]
 
 
 def test_model_evaluator_performance():
     """Test model performance evaluation."""
-    # Create test data
     np.random.seed(42)
     X_train = np.random.randn(80, 5)
     y_train = np.random.randint(0, 2, 80)
     X_test = np.random.randn(20, 5)
     y_test = np.random.randint(0, 2, 20)
 
-    # Create model
     model = ModelFactory.create_classifier("logistic", random_state=42)
-
-    # Test performance evaluation
     results = ModelEvaluator.evaluate_model_performance(
         model, X_train, y_train, X_test, y_test, task_type="classification"
     )
 
-    assert "train_accuracy" in results
-    assert "test_accuracy" in results
-    assert "train_precision" in results
-    assert "test_precision" in results
-    assert "train_recall" in results
-    assert "test_recall" in results
-    assert "train_f1" in results
-    assert "test_f1" in results
+    for key in (
+        "train_accuracy",
+        "test_accuracy",
+        "train_precision",
+        "test_precision",
+        "train_recall",
+        "test_recall",
+        "train_f1",
+        "test_f1",
+    ):
+        assert key in results
 
-    # Test regression
+    # Regression branch
     y_train_reg = np.random.randn(80)
     y_test_reg = np.random.randn(20)
-
     model_reg = ModelFactory.create_regressor("ridge", random_state=42)
     results_reg = ModelEvaluator.evaluate_model_performance(
         model_reg, X_train, y_train_reg, X_test, y_test_reg, task_type="regression"
     )
 
-    assert "train_mse" in results_reg
-    assert "test_mse" in results_reg
-    assert "train_mae" in results_reg
-    assert "test_mae" in results_reg
-    assert "train_r2" in results_reg
-    assert "test_r2" in results_reg
+    for key in (
+        "train_mse",
+        "test_mse",
+        "train_mae",
+        "test_mae",
+        "train_r2",
+        "test_r2",
+    ):
+        assert key in results_reg
+
+
+def test_model_evaluator_performance_invalid_task_type():
+    """evaluate_model_performance raises ConfigurationError for invalid task_type."""
+    np.random.seed(42)
+    X = np.random.randn(20, 5)
+    y = np.random.randint(0, 2, 20)
+    model = ModelFactory.create_classifier("logistic", random_state=42)
+    model.fit(X, y)
+
+    with pytest.raises(ConfigurationError):
+        ModelEvaluator.evaluate_model_performance(
+            model, X, y, X, y, task_type="invalid"
+        )
 
 
 def test_model_selector_grid_search():
     """Test grid search functionality."""
-    # Create test data
     np.random.seed(42)
     X = np.random.randn(100, 5)
     y = np.random.randint(0, 2, 100)
 
-    # Define parameter grid
     param_grid = {"C": [0.1, 1.0, 10.0], "max_iter": [100, 1000]}
-
-    # Test grid search
     results = ModelSelector.grid_search(
         "logistic", param_grid, X, y, task_type="classification", cv=3, random_state=42
     )
@@ -161,15 +228,11 @@ def test_model_selector_grid_search():
 
 def test_model_selector_random_search():
     """Test random search functionality."""
-    # Create test data
     np.random.seed(42)
     X = np.random.randn(100, 5)
     y = np.random.randint(0, 2, 100)
 
-    # Define parameter distributions
     param_distributions = {"C": [0.1, 1.0, 10.0], "max_iter": [100, 1000]}
-
-    # Test random search
     results = ModelSelector.random_search(
         "logistic",
         param_distributions,
@@ -188,29 +251,42 @@ def test_model_selector_random_search():
 
 
 def test_get_model_recommendations():
-    """Test model recommendations."""
-    # Test classification recommendations
+    """Test model recommendations for basic cases."""
     recs = get_model_recommendations("classification", 1000, 10, "medium")
     assert "logistic" in recs
     assert "random_forest" in recs
 
-    # Test regression recommendations
     recs = get_model_recommendations("regression", 1000, 10, "medium")
     assert "ridge" in recs
     assert "random_forest" in recs
 
-    # Test high complexity
     recs = get_model_recommendations("classification", 1000, 10, "high")
     assert "random_forest" in recs
 
-    # Test low complexity
     recs = get_model_recommendations("classification", 100, 5, "low")
-    assert "logistic" in recs
+    assert recs[0] == "logistic"
+
+    recs = get_model_recommendations("regression", 100, 5, "low")
+    assert recs[0] == "ridge"
+
+
+def test_get_model_recommendations_advanced_models():
+    """n_samples > 1000 and n_features > 10 triggers hist_gradient inclusion."""
+    recs = get_model_recommendations("classification", 2000, 15, "medium")
+    assert "hist_gradient" in recs
+
+    # Boundary: n_samples exactly at threshold should NOT trigger advanced models
+    recs_boundary = get_model_recommendations(
+        "classification",
+        _ADVANCED_MODEL_SAMPLE_THRESHOLD,
+        _ADVANCED_MODEL_FEATURE_THRESHOLD + 1,
+        "medium",
+    )
+    assert "hist_gradient" not in recs_boundary
 
 
 def test_create_model_ensemble():
     """Test model ensemble creation."""
-    # Test classification ensemble
     ensemble = create_model_ensemble(
         ["logistic", "random_forest"], "classification", random_state=42
     )
@@ -218,7 +294,6 @@ def test_create_model_ensemble():
     assert hasattr(ensemble, "predict")
     assert hasattr(ensemble, "predict_proba")
 
-    # Test regression ensemble
     ensemble = create_model_ensemble(
         ["ridge", "random_forest"], "regression", random_state=42
     )
@@ -228,61 +303,52 @@ def test_create_model_ensemble():
 
 def test_error_handling():
     """Test error handling in model functions."""
-    # Test with invalid model type
-    with pytest.raises(ValueError):
+    with pytest.raises(ModelValidationError):
         ModelFactory.create_classifier("invalid_model")
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ModelValidationError):
         ModelFactory.create_regressor("invalid_model")
 
-    # Test with mismatched data lengths
+    # Mismatched data lengths
     X = np.random.randn(100, 5)
-    y = np.random.randint(0, 2, 50)  # Wrong length
-
+    y = np.random.randint(0, 2, 50)
     model = ModelFactory.create_classifier("logistic")
 
-    with pytest.raises(ValueError):  # Should raise DataValidationError
+    with pytest.raises(DataValidationError):
         ModelEvaluator.cross_validate_model(model, X, y)
 
-    # Test with insufficient data for CV
+    # Insufficient data for CV
     X_small = np.random.randn(3, 5)
     y_small = np.random.randint(0, 2, 3)
 
-    with pytest.raises(ValueError):  # Should raise DataValidationError
+    with pytest.raises(DataValidationError):
         ModelEvaluator.cross_validate_model(model, X_small, y_small, cv=5)
 
-    # Test with invalid task type
-    with pytest.raises(ValueError):
+    # Invalid task type / complexity
+    with pytest.raises(ConfigurationError):
         get_model_recommendations("invalid_task", 100, 10, "medium")
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ConfigurationError):
         get_model_recommendations("classification", 100, 10, "invalid_complexity")
 
 
 def test_integration():
     """Test integration of model components."""
-    # Create test data
     np.random.seed(42)
     X = np.random.randn(200, 5)
     y = np.random.randint(0, 2, 200)
 
-    # Split data
     X_train, X_test = X[:150], X[150:]
     y_train, y_test = y[:150], y[150:]
 
-    # Get model recommendations
     recommendations = get_model_recommendations("classification", 200, 5, "medium")
 
-    # Create and evaluate models
-    for model_type in recommendations[:2]:  # Test first 2 recommendations
+    for model_type in recommendations[:2]:
         model = ModelFactory.create_classifier(model_type, random_state=42)
 
-        # Cross-validate
         cv_results = ModelEvaluator.cross_validate_model(
             model, X_train, y_train, cv=3, random_state=42
         )
-
-        # Evaluate performance
         perf_results = ModelEvaluator.evaluate_model_performance(
             model, X_train, y_train, X_test, y_test, task_type="classification"
         )

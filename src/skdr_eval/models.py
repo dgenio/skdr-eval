@@ -1,13 +1,39 @@
 """Extended model support for skdr-eval library."""
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import numpy as np
 from sklearn.base import BaseEstimator
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.ensemble import (
+    HistGradientBoostingClassifier,
+    HistGradientBoostingRegressor,
+    RandomForestClassifier,
+    RandomForestRegressor,
+    VotingClassifier,
+    VotingRegressor,
+)
 from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.model_selection import cross_val_score
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    log_loss,
+    mean_absolute_error,
+    mean_squared_error,
+    precision_score,
+    r2_score,
+    recall_score,
+    roc_auc_score,
+)
+from sklearn.model_selection import (
+    GridSearchCV,
+    KFold,
+    RandomizedSearchCV,
+    StratifiedKFold,
+    cross_val_score,
+)
+
+from .exceptions import ConfigurationError, DataValidationError, ModelValidationError
 
 logger = logging.getLogger("skdr_eval")
 
@@ -18,7 +44,7 @@ try:
     XGBOOST_AVAILABLE = True
 except ImportError:
     XGBOOST_AVAILABLE = False
-    logger.warning("XGBoost not available. Install with: pip install xgboost")
+    logger.debug("XGBoost not available. Install with: pip install xgboost")
 
 try:
     import lightgbm as lgb
@@ -26,18 +52,37 @@ try:
     LIGHTGBM_AVAILABLE = True
 except ImportError:
     LIGHTGBM_AVAILABLE = False
-    logger.warning("LightGBM not available. Install with: pip install lightgbm")
+    logger.debug("LightGBM not available. Install with: pip install lightgbm")
 
-try:
-    from sklearn.ensemble import (
-        HistGradientBoostingClassifier,
-        HistGradientBoostingRegressor,
-    )
+_BINARY_THRESHOLD = 2
+_ADVANCED_MODEL_SAMPLE_THRESHOLD = 1000
+_ADVANCED_MODEL_FEATURE_THRESHOLD = 10
 
-    HIST_GRADIENT_AVAILABLE = True
-except ImportError:
-    HIST_GRADIENT_AVAILABLE = False
-    logger.warning("HistGradientBoosting not available. Requires scikit-learn >= 0.21")
+# Default parameter lookup tables
+_DEFAULT_PARAMS: dict[str, dict[str, dict[str, Any]]] = {
+    "classification": {
+        "logistic": {"max_iter": 1000, "C": 1.0},
+        "random_forest": {
+            "n_estimators": 100,
+            "max_depth": None,
+            "min_samples_split": 2,
+        },
+        "hist_gradient": {"max_iter": 100, "learning_rate": 0.1},
+        "xgboost": {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 6},
+        "lightgbm": {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 6},
+    },
+    "regression": {
+        "ridge": {"alpha": 1.0},
+        "random_forest": {
+            "n_estimators": 100,
+            "max_depth": None,
+            "min_samples_split": 2,
+        },
+        "hist_gradient": {"max_iter": 100, "learning_rate": 0.1},
+        "xgboost": {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 6},
+        "lightgbm": {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 6},
+    },
+}
 
 
 class ModelFactory:
@@ -45,7 +90,7 @@ class ModelFactory:
 
     @staticmethod
     def create_classifier(
-        model_type: str, random_state: Optional[int] = None, **kwargs
+        model_type: str, random_state: Optional[int] = None, **kwargs: Any
     ) -> BaseEstimator:
         """Create a classifier instance.
 
@@ -67,18 +112,26 @@ class ModelFactory:
             return LogisticRegression(random_state=random_state, **kwargs)
         elif model_type == "random_forest":
             return RandomForestClassifier(random_state=random_state, **kwargs)
-        elif model_type == "hist_gradient" and HIST_GRADIENT_AVAILABLE:
+        elif model_type == "hist_gradient":
             return HistGradientBoostingClassifier(random_state=random_state, **kwargs)
-        elif model_type == "xgboost" and XGBOOST_AVAILABLE:
+        elif model_type == "xgboost":
+            if not XGBOOST_AVAILABLE:
+                raise ImportError(
+                    "XGBoost is not installed. Install it with: pip install xgboost"
+                )
             return xgb.XGBClassifier(random_state=random_state, **kwargs)
-        elif model_type == "lightgbm" and LIGHTGBM_AVAILABLE:
+        elif model_type == "lightgbm":
+            if not LIGHTGBM_AVAILABLE:
+                raise ImportError(
+                    "LightGBM is not installed. Install it with: pip install lightgbm"
+                )
             return lgb.LGBMClassifier(random_state=random_state, **kwargs)
         else:
-            raise ValueError(f"Unknown classifier type: {model_type}")
+            raise ModelValidationError(f"Unknown classifier type: {model_type}")
 
     @staticmethod
     def create_regressor(
-        model_type: str, random_state: Optional[int] = None, **kwargs
+        model_type: str, random_state: Optional[int] = None, **kwargs: Any
     ) -> BaseEstimator:
         """Create a regressor instance.
 
@@ -100,30 +153,34 @@ class ModelFactory:
             return Ridge(random_state=random_state, **kwargs)
         elif model_type == "random_forest":
             return RandomForestRegressor(random_state=random_state, **kwargs)
-        elif model_type == "hist_gradient" and HIST_GRADIENT_AVAILABLE:
+        elif model_type == "hist_gradient":
             return HistGradientBoostingRegressor(random_state=random_state, **kwargs)
-        elif model_type == "xgboost" and XGBOOST_AVAILABLE:
+        elif model_type == "xgboost":
+            if not XGBOOST_AVAILABLE:
+                raise ImportError(
+                    "XGBoost is not installed. Install it with: pip install xgboost"
+                )
             return xgb.XGBRegressor(random_state=random_state, **kwargs)
-        elif model_type == "lightgbm" and LIGHTGBM_AVAILABLE:
+        elif model_type == "lightgbm":
+            if not LIGHTGBM_AVAILABLE:
+                raise ImportError(
+                    "LightGBM is not installed. Install it with: pip install lightgbm"
+                )
             return lgb.LGBMRegressor(random_state=random_state, **kwargs)
         else:
-            raise ValueError(f"Unknown regressor type: {model_type}")
+            raise ModelValidationError(f"Unknown regressor type: {model_type}")
 
     @staticmethod
-    def get_available_models() -> Dict[str, List[str]]:
+    def get_available_models() -> dict[str, list[str]]:
         """Get list of available model types.
 
         Returns
         -------
-        Dict[str, List[str]]
+        dict[str, list[str]]
             Dictionary with 'classifiers' and 'regressors' keys.
         """
-        classifiers = ["logistic", "random_forest"]
-        regressors = ["ridge", "random_forest"]
-
-        if HIST_GRADIENT_AVAILABLE:
-            classifiers.append("hist_gradient")
-            regressors.append("hist_gradient")
+        classifiers = ["logistic", "random_forest", "hist_gradient"]
+        regressors = ["ridge", "random_forest", "hist_gradient"]
 
         if XGBOOST_AVAILABLE:
             classifiers.append("xgboost")
@@ -136,7 +193,7 @@ class ModelFactory:
         return {"classifiers": classifiers, "regressors": regressors}
 
     @staticmethod
-    def get_default_params(model_type: str, task_type: str) -> Dict[str, Any]:
+    def get_default_params(model_type: str, task_type: str) -> dict[str, Any]:
         """Get default parameters for a model type.
 
         Parameters
@@ -148,33 +205,25 @@ class ModelFactory:
 
         Returns
         -------
-        Dict[str, Any]
+        dict[str, Any]
             Default parameters.
-        """
-        if task_type == "classification":
-            if model_type == "logistic":
-                return {"max_iter": 1000, "C": 1.0}
-            elif model_type == "random_forest":
-                return {"n_estimators": 100, "max_depth": None, "min_samples_split": 2}
-            elif model_type == "hist_gradient":
-                return {"max_iter": 100, "learning_rate": 0.1}
-            elif model_type == "xgboost":
-                return {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 6}
-            elif model_type == "lightgbm":
-                return {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 6}
-        else:  # regression
-            if model_type == "ridge":
-                return {"alpha": 1.0}
-            elif model_type == "random_forest":
-                return {"n_estimators": 100, "max_depth": None, "min_samples_split": 2}
-            elif model_type == "hist_gradient":
-                return {"max_iter": 100, "learning_rate": 0.1}
-            elif model_type == "xgboost":
-                return {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 6}
-            elif model_type == "lightgbm":
-                return {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 6}
 
-        return {}
+        Raises
+        ------
+        ConfigurationError
+            If model_type or task_type is not recognised.
+        """
+        if task_type not in _DEFAULT_PARAMS:
+            raise ConfigurationError(
+                f"Unknown task_type '{task_type}'. "
+                "Must be 'classification' or 'regression'."
+            )
+        task_params = _DEFAULT_PARAMS[task_type]
+        if model_type not in task_params:
+            raise ConfigurationError(
+                f"Unknown model_type '{model_type}' for task '{task_type}'."
+            )
+        return dict(task_params[model_type])
 
 
 class ModelEvaluator:
@@ -188,7 +237,7 @@ class ModelEvaluator:
         cv: int = 5,
         scoring: Optional[str] = None,
         random_state: Optional[int] = None,
-    ) -> Dict[str, float]:
+    ) -> dict[str, Any]:
         """Perform cross-validation on a model.
 
         Parameters
@@ -204,28 +253,31 @@ class ModelEvaluator:
         scoring : str, optional
             Scoring metric. If None, uses default for task type.
         random_state : int, optional
-            Random seed.
+            Random seed for reproducible fold splits.
 
         Returns
         -------
-        Dict[str, float]
+        dict[str, Any]
             Cross-validation results.
         """
         if len(X) != len(y):
-            raise ValueError("X and y must have the same length")
+            raise DataValidationError("X and y must have the same length")
 
         if len(X) < cv:
-            raise ValueError(f"Need at least {cv} samples for {cv}-fold CV")
+            raise DataValidationError(f"Need at least {cv} samples for {cv}-fold CV")
 
-        # Determine scoring metric if not provided
+        is_classifier = hasattr(model, "predict_proba")
         if scoring is None:
-            if hasattr(model, "predict_proba"):  # Classifier
-                scoring = "accuracy"
-            else:  # Regressor
-                scoring = "neg_mean_squared_error"
+            scoring = "accuracy" if is_classifier else "neg_mean_squared_error"
 
-        # Perform cross-validation
-        scores = cross_val_score(model, X, y, cv=cv, scoring=scoring)
+        # Use a seeded splitter so random_state is honoured
+        splitter = (
+            StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
+            if is_classifier
+            else KFold(n_splits=cv, shuffle=True, random_state=random_state)
+        )
+
+        scores = cross_val_score(model, X, y, cv=splitter, scoring=scoring)
 
         return {
             "mean_score": float(np.mean(scores)),
@@ -242,7 +294,7 @@ class ModelEvaluator:
         X_test: np.ndarray,
         y_test: np.ndarray,
         task_type: str = "classification",
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Evaluate model performance on train and test sets.
 
         Parameters
@@ -262,32 +314,26 @@ class ModelEvaluator:
 
         Returns
         -------
-        Dict[str, float]
+        dict[str, float]
             Performance metrics.
         """
         if len(X_train) != len(y_train):
-            raise ValueError("X_train and y_train must have the same length")
+            raise DataValidationError("X_train and y_train must have the same length")
         if len(X_test) != len(y_test):
-            raise ValueError("X_test and y_test must have the same length")
+            raise DataValidationError("X_test and y_test must have the same length")
+        if task_type not in ("classification", "regression"):
+            raise ConfigurationError(
+                f"Unknown task_type '{task_type}'. "
+                "Must be 'classification' or 'regression'."
+            )
 
-        # Fit model
         model.fit(X_train, y_train)
-
-        # Get predictions
         y_train_pred = model.predict(X_train)
         y_test_pred = model.predict(X_test)
 
-        results = {}
+        results: dict[str, float] = {}
 
         if task_type == "classification":
-            # Classification metrics
-            from sklearn.metrics import (
-                accuracy_score,
-                f1_score,
-                precision_score,
-                recall_score,
-            )
-
             results["train_accuracy"] = float(accuracy_score(y_train, y_train_pred))
             results["test_accuracy"] = float(accuracy_score(y_test, y_test_pred))
             results["train_precision"] = float(
@@ -309,35 +355,25 @@ class ModelEvaluator:
                 f1_score(y_test, y_test_pred, average="weighted")
             )
 
-            # Add probability-based metrics if available
             if hasattr(model, "predict_proba"):
                 y_train_proba = model.predict_proba(X_train)
                 y_test_proba = model.predict_proba(X_test)
-
-                from sklearn.metrics import log_loss, roc_auc_score
 
                 try:
                     results["train_log_loss"] = float(log_loss(y_train, y_train_proba))
                     results["test_log_loss"] = float(log_loss(y_test, y_test_proba))
                 except ValueError:
-                    pass  # Skip if log loss can't be computed
+                    logger.debug("Could not compute log loss", exc_info=True)
 
                 try:
-                    if len(np.unique(y_test)) == 2:  # Binary classification
+                    if len(np.unique(y_test)) == _BINARY_THRESHOLD:
                         results["test_roc_auc"] = float(
                             roc_auc_score(y_test, y_test_proba[:, 1])
                         )
                 except ValueError:
-                    pass  # Skip if ROC AUC can't be computed
+                    logger.debug("Could not compute ROC AUC", exc_info=True)
 
-        else:  # regression
-            # Regression metrics
-            from sklearn.metrics import (
-                mean_absolute_error,
-                mean_squared_error,
-                r2_score,
-            )
-
+        else:
             results["train_mse"] = float(mean_squared_error(y_train, y_train_pred))
             results["test_mse"] = float(mean_squared_error(y_test, y_test_pred))
             results["train_mae"] = float(mean_absolute_error(y_train, y_train_pred))
@@ -354,21 +390,21 @@ class ModelSelector:
     @staticmethod
     def grid_search(
         model_type: str,
-        param_grid: Dict[str, List[Any]],
+        param_grid: dict[str, list[Any]],
         X: np.ndarray,
         y: np.ndarray,
         task_type: str = "classification",
         cv: int = 5,
         scoring: Optional[str] = None,
         random_state: Optional[int] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Perform grid search for hyperparameter tuning.
 
         Parameters
         ----------
         model_type : str
             Type of model to tune.
-        param_grid : Dict[str, List[Any]]
+        param_grid : dict[str, list[Any]]
             Parameter grid for search.
         X : np.ndarray
             Features.
@@ -385,11 +421,9 @@ class ModelSelector:
 
         Returns
         -------
-        Dict[str, Any]
+        dict[str, Any]
             Grid search results.
         """
-        from sklearn.model_selection import GridSearchCV
-
         if task_type == "classification":
             model = ModelFactory.create_classifier(
                 model_type, random_state=random_state
@@ -397,28 +431,27 @@ class ModelSelector:
         else:
             model = ModelFactory.create_regressor(model_type, random_state=random_state)
 
-        # Determine scoring metric if not provided
         if scoring is None:
-            if task_type == "classification":
-                scoring = "accuracy"
-            else:
-                scoring = "neg_mean_squared_error"
+            scoring = (
+                "accuracy"
+                if task_type == "classification"
+                else "neg_mean_squared_error"
+            )
 
-        # Perform grid search
-        grid_search = GridSearchCV(model, param_grid, cv=cv, scoring=scoring)
-        grid_search.fit(X, y)
+        gs = GridSearchCV(model, param_grid, cv=cv, scoring=scoring)
+        gs.fit(X, y)
 
         return {
-            "best_params": grid_search.best_params_,
-            "best_score": float(grid_search.best_score_),
-            "best_estimator": grid_search.best_estimator_,
-            "cv_results": grid_search.cv_results_,
+            "best_params": gs.best_params_,
+            "best_score": float(gs.best_score_),
+            "best_estimator": gs.best_estimator_,
+            "cv_results": gs.cv_results_,
         }
 
     @staticmethod
     def random_search(
         model_type: str,
-        param_distributions: Dict[str, Any],
+        param_distributions: dict[str, Any],
         X: np.ndarray,
         y: np.ndarray,
         task_type: str = "classification",
@@ -426,14 +459,14 @@ class ModelSelector:
         cv: int = 5,
         scoring: Optional[str] = None,
         random_state: Optional[int] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Perform random search for hyperparameter tuning.
 
         Parameters
         ----------
         model_type : str
             Type of model to tune.
-        param_distributions : Dict[str, Any]
+        param_distributions : dict[str, Any]
             Parameter distributions for search.
         X : np.ndarray
             Features.
@@ -452,11 +485,9 @@ class ModelSelector:
 
         Returns
         -------
-        Dict[str, Any]
+        dict[str, Any]
             Random search results.
         """
-        from sklearn.model_selection import RandomizedSearchCV
-
         if task_type == "classification":
             model = ModelFactory.create_classifier(
                 model_type, random_state=random_state
@@ -464,15 +495,14 @@ class ModelSelector:
         else:
             model = ModelFactory.create_regressor(model_type, random_state=random_state)
 
-        # Determine scoring metric if not provided
         if scoring is None:
-            if task_type == "classification":
-                scoring = "accuracy"
-            else:
-                scoring = "neg_mean_squared_error"
+            scoring = (
+                "accuracy"
+                if task_type == "classification"
+                else "neg_mean_squared_error"
+            )
 
-        # Perform random search
-        random_search = RandomizedSearchCV(
+        rs = RandomizedSearchCV(
             model,
             param_distributions,
             n_iter=n_iter,
@@ -480,13 +510,13 @@ class ModelSelector:
             scoring=scoring,
             random_state=random_state,
         )
-        random_search.fit(X, y)
+        rs.fit(X, y)
 
         return {
-            "best_params": random_search.best_params_,
-            "best_score": float(random_search.best_score_),
-            "best_estimator": random_search.best_estimator_,
-            "cv_results": random_search.cv_results_,
+            "best_params": rs.best_params_,
+            "best_score": float(rs.best_score_),
+            "best_estimator": rs.best_estimator_,
+            "cv_results": rs.cv_results_,
         }
 
 
@@ -495,7 +525,7 @@ def get_model_recommendations(
     n_samples: int,
     n_features: int,
     problem_complexity: str = "medium",
-) -> List[str]:
+) -> list[str]:
     """Get model recommendations based on problem characteristics.
 
     Parameters
@@ -511,59 +541,56 @@ def get_model_recommendations(
 
     Returns
     -------
-    List[str]
+    list[str]
         Recommended model types.
     """
-    if task_type not in ["classification", "regression"]:
-        raise ValueError("task_type must be 'classification' or 'regression'")
+    if task_type not in ("classification", "regression"):
+        raise ConfigurationError("task_type must be 'classification' or 'regression'")
 
-    if problem_complexity not in ["low", "medium", "high"]:
-        raise ValueError("problem_complexity must be 'low', 'medium', or 'high'")
+    if problem_complexity not in ("low", "medium", "high"):
+        raise ConfigurationError(
+            "problem_complexity must be 'low', 'medium', or 'high'"
+        )
 
-    recommendations = []
-
-    # Base recommendations
     if task_type == "classification":
-        recommendations.extend(["logistic", "random_forest"])
+        recommendations: list[str] = ["logistic", "random_forest"]
     else:
-        recommendations.extend(["ridge", "random_forest"])
+        recommendations = ["ridge", "random_forest"]
 
-    # Add advanced models based on problem characteristics
-    if n_samples > 1000 and n_features > 10:
-        if HIST_GRADIENT_AVAILABLE:
-            recommendations.append("hist_gradient")
+    # Add advanced models for large, high-dimensional datasets
+    if (
+        n_samples > _ADVANCED_MODEL_SAMPLE_THRESHOLD
+        and n_features > _ADVANCED_MODEL_FEATURE_THRESHOLD
+    ):
+        recommendations.append("hist_gradient")
         if XGBOOST_AVAILABLE:
             recommendations.append("xgboost")
         if LIGHTGBM_AVAILABLE:
             recommendations.append("lightgbm")
 
-    # Adjust based on problem complexity
     if problem_complexity == "high":
-        # For high complexity, prefer ensemble methods
         if "random_forest" not in recommendations:
             recommendations.append("random_forest")
         if XGBOOST_AVAILABLE and "xgboost" not in recommendations:
             recommendations.append("xgboost")
     elif problem_complexity == "low":
-        # For low complexity, prefer simple models
-        if task_type == "classification":
-            recommendations = ["logistic"] + [
-                m for m in recommendations if m != "logistic"
-            ]
-        else:
-            recommendations = ["ridge"] + [m for m in recommendations if m != "ridge"]
+        simple = "logistic" if task_type == "classification" else "ridge"
+        recommendations = [simple] + [m for m in recommendations if m != simple]
 
     return recommendations
 
 
 def create_model_ensemble(
-    model_types: List[str], task_type: str, random_state: Optional[int] = None, **kwargs
+    model_types: list[str],
+    task_type: str,
+    random_state: Optional[int] = None,
+    **kwargs: Any,
 ) -> BaseEstimator:
     """Create an ensemble of models.
 
     Parameters
     ----------
-    model_types : List[str]
+    model_types : list[str]
         List of model types to include in ensemble.
     task_type : str
         Task type ("classification" or "regression").
@@ -577,22 +604,16 @@ def create_model_ensemble(
     BaseEstimator
         Ensemble model.
     """
-    from sklearn.ensemble import VotingClassifier, VotingRegressor
-
     if task_type == "classification":
-        estimators = []
-        for i, model_type in enumerate(model_types):
-            model = ModelFactory.create_classifier(
-                model_type, random_state=random_state
-            )
-            estimators.append((f"{model_type}_{i}", model))
-
+        estimators = [
+            (f"{mt}_{i}", ModelFactory.create_classifier(mt, random_state=random_state))
+            for i, mt in enumerate(model_types)
+        ]
         kwargs.setdefault("voting", "soft")
         return VotingClassifier(estimators, **kwargs)
     else:
-        estimators = []
-        for i, model_type in enumerate(model_types):
-            model = ModelFactory.create_regressor(model_type, random_state=random_state)
-            estimators.append((f"{model_type}_{i}", model))
-
+        estimators = [
+            (f"{mt}_{i}", ModelFactory.create_regressor(mt, random_state=random_state))
+            for i, mt in enumerate(model_types)
+        ]
         return VotingRegressor(estimators, **kwargs)
