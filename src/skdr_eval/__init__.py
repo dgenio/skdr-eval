@@ -33,6 +33,18 @@ from .exceptions import (
     VersionError,
 )
 from .pairwise import PairwiseDesign
+from .statistical import (
+    StatisticalTest,
+    bootstrap_confidence_interval,
+    chi_square_test,
+    kolmogorov_smirnov_test,
+    mann_whitney_u_test,
+    multiple_comparison_correction,
+    permutation_test,
+    power_analysis,
+    sample_size_calculation,
+    t_test,
+)
 from .synth import make_pairwise_synth, make_synth_logs
 
 try:
@@ -77,10 +89,13 @@ __all__ = [
     "PropensityDiagnostics",
     "PropensityScoreError",
     "SkdrEvalError",
+    "StatisticalTest",
     "VersionError",
     "__version__",
     "block_bootstrap_ci",
+    "bootstrap_confidence_interval",
     "build_design",
+    "chi_square_test",
     "create_dashboard",
     "dr_value_with_clip",
     "evaluate_pairwise_models",
@@ -89,11 +104,18 @@ __all__ = [
     "fit_outcome_crossfit",
     "fit_propensity_timecal",
     "induce_policy_from_sklearn",
+    "kolmogorov_smirnov_test",
     "make_pairwise_synth",
     "make_synth_logs",
+    "mann_whitney_u_test",
+    "multiple_comparison_correction",
+    "permutation_test",
     "plot_calibration_curve",
     "plot_diagnostics_summary",
     "plot_dr_results",
     "plot_propensity_distribution",
     "plot_roc_curve",
+    "power_analysis",
+    "sample_size_calculation",
+    "t_test",
 ]
