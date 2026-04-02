@@ -32,6 +32,13 @@ from .exceptions import (
     SkdrEvalError,
     VersionError,
 )
+from .models import (
+    ModelEvaluator,
+    ModelFactory,
+    ModelSelector,
+    create_model_ensemble,
+    get_model_recommendations,
+)
 from .pairwise import PairwiseDesign
 from .statistical import (
     StatisticalTest,
@@ -81,6 +88,9 @@ __all__ = [
     "EstimationError",
     "InsufficientDataError",
     "MemoryError",
+    "ModelEvaluator",
+    "ModelFactory",
+    "ModelSelector",
     "ModelValidationError",
     "OutcomeModelError",
     "PairwiseDesign",
@@ -97,12 +107,14 @@ __all__ = [
     "build_design",
     "chi_square_test",
     "create_dashboard",
+    "create_model_ensemble",
     "dr_value_with_clip",
     "evaluate_pairwise_models",
     "evaluate_propensity_diagnostics",
     "evaluate_sklearn_models",
     "fit_outcome_crossfit",
     "fit_propensity_timecal",
+    "get_model_recommendations",
     "induce_policy_from_sklearn",
     "kolmogorov_smirnov_test",
     "make_pairwise_synth",
