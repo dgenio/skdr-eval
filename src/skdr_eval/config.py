@@ -367,7 +367,7 @@ class ConfigManager:
 
         return self._load_yaml(path)
 
-    def create_default_configs(self):
+    def create_default_configs(self) -> None:
         """Create default configuration files."""
         # Create default evaluation config
         eval_config = EvaluationConfig()
@@ -391,7 +391,7 @@ class ConfigManager:
 
         logger.info("Default configuration files created")
 
-    def _save_yaml(self, data: dict[str, Any], filename: Path):
+    def _save_yaml(self, data: dict[str, Any], filename: Path) -> None:
         """Save data to YAML file."""
         try:
             with filename.open("w") as f:
@@ -462,7 +462,7 @@ def load_config_from_file(filename: Union[str, Path]) -> dict[str, Any]:
         raise ConfigurationError(f"Unsupported file format: {filename.suffix}")
 
 
-def save_config_to_file(config: dict[str, Any], filename: Union[str, Path]):
+def save_config_to_file(config: dict[str, Any], filename: Union[str, Path]) -> None:
     """Save configuration to file.
 
     Parameters
@@ -503,7 +503,7 @@ def merge_configs(*configs: dict[str, Any]) -> dict[str, Any]:
     Dict[str, Any]
         Merged configuration.
     """
-    merged = {}
+    merged: dict[str, Any] = {}
 
     for config in configs:
         for key, value in config.items():
