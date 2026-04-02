@@ -1,0 +1,711 @@
+"""Statistical testing utilities for skdr-eval library."""
+
+import logging
+from dataclasses import dataclass
+from typing import Any, Callable, Optional, cast
+
+import numpy as np
+from scipy import stats
+from scipy.stats import chi2, norm, t
+
+from .exceptions import DataValidationError, InsufficientDataError
+
+logger = logging.getLogger("skdr_eval")
+
+# Minimum-sample thresholds used across statistical functions
+_MIN_SAMPLES_T = 2
+_MIN_SAMPLES_MW = 3
+_MIN_SAMPLES_KS = 5
+_MIN_SAMPLES_BOOTSTRAP = 2
+_MIN_BOOTSTRAP_REPS = 100
+_MIN_PERMUTATIONS = 100
+_MIN_CATEGORIES = 2
+_MIN_SAMPLE_SIZE = 2
+_MAX_SAMPLE_SEARCH = 10000
+
+
+@dataclass
+class StatisticalTest:
+    """Container for statistical test results."""
+
+    test_name: str
+    statistic: float
+    p_value: float
+    critical_value: float
+    degrees_of_freedom: Optional[int] = None
+    confidence_interval: Optional[tuple[float, float]] = None
+    effect_size: Optional[float] = None
+    interpretation: str = ""
+
+
+def t_test(
+    sample1: np.ndarray,
+    sample2: np.ndarray,
+    alternative: str = "two-sided",
+    alpha: float = 0.05,
+    equal_var: bool = True,
+) -> StatisticalTest:
+    """Perform t-test for comparing two samples.
+
+    Parameters
+    ----------
+    sample1 : np.ndarray
+        First sample.
+    sample2 : np.ndarray
+        Second sample.
+    alternative : str, default="two-sided"
+        Alternative hypothesis ("two-sided", "less", "greater").
+    alpha : float, default=0.05
+        Significance level.
+    equal_var : bool, default=True
+        Whether to assume equal variances.
+
+    Returns
+    -------
+    StatisticalTest
+        Test results.
+    """
+    if len(sample1) < _MIN_SAMPLES_T or len(sample2) < _MIN_SAMPLES_T:
+        raise InsufficientDataError("Need at least 2 observations in each sample")
+
+    if not np.all(np.isfinite(sample1)) or not np.all(np.isfinite(sample2)):
+        raise DataValidationError("Samples must contain only finite values")
+
+    n1, n2 = len(sample1), len(sample2)
+    var1, var2 = np.var(sample1, ddof=1), np.var(sample2, ddof=1)
+
+    # Perform t-test
+    if equal_var:
+        statistic, p_value = stats.ttest_ind(sample1, sample2, equal_var=True)
+    else:
+        statistic, p_value = stats.ttest_ind(sample1, sample2, equal_var=False)
+
+    mean_diff = np.mean(sample1) - np.mean(sample2)
+    # Handle degenerate zero-variance cases where scipy can return NaN.
+    if (
+        (not np.isfinite(statistic) or not np.isfinite(p_value))
+        and np.isclose(var1, 0.0)
+        and np.isclose(var2, 0.0)
+    ):
+        if np.isclose(mean_diff, 0.0):
+            statistic = 0.0
+            p_value = 1.0
+        else:
+            statistic = float(np.sign(mean_diff) * np.inf)
+            p_value = 0.0
+
+    # Adjust p-value for one-sided tests
+    if alternative == "less":
+        p_value = p_value / 2 if statistic < 0 else 1 - p_value / 2
+    elif alternative == "greater":
+        p_value = p_value / 2 if statistic > 0 else 1 - p_value / 2
+
+    # Calculate degrees of freedom
+    if equal_var:
+        df: float = float(n1 + n2 - 2)
+    else:
+        # Welch's t-test degrees of freedom
+        df = float(
+            (var1 / n1 + var2 / n2) ** 2
+            / ((var1 / n1) ** 2 / (n1 - 1) + (var2 / n2) ** 2 / (n2 - 1))
+        )
+
+    # Calculate critical value
+    if alternative == "two-sided":
+        critical_value = t.ppf(1 - alpha / 2, df)
+    else:
+        critical_value = t.ppf(1 - alpha, df)
+
+    # Calculate confidence interval
+    if equal_var:
+        pooled_var = (((n1 - 1) * var1) + ((n2 - 1) * var2)) / (n1 + n2 - 2)
+        se = np.sqrt(pooled_var * (1 / n1 + 1 / n2))
+    else:
+        se = np.sqrt(var1 / n1 + var2 / n2)
+
+    if alternative == "two-sided":
+        ci_lower = mean_diff - critical_value * se
+        ci_upper = mean_diff + critical_value * se
+    elif alternative == "less":
+        ci_lower = -np.inf
+        ci_upper = mean_diff + critical_value * se
+    else:  # greater
+        ci_lower = mean_diff - critical_value * se
+        ci_upper = np.inf
+
+    # Calculate effect size (Cohen's d)
+    pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+    if np.isclose(pooled_std, 0.0):
+        effect_size = (
+            0.0 if np.isclose(mean_diff, 0.0) else float(np.sign(mean_diff) * np.inf)
+        )
+    else:
+        effect_size = mean_diff / pooled_std
+
+    # Interpretation
+    if p_value < alpha:
+        interpretation = f"Reject H0 at alpha={alpha} (p={p_value:.4f})"
+    else:
+        interpretation = f"Fail to reject H0 at alpha={alpha} (p={p_value:.4f})"
+
+    return StatisticalTest(
+        test_name="t-test",
+        statistic=statistic,
+        p_value=p_value,
+        critical_value=critical_value,
+        degrees_of_freedom=int(df),
+        confidence_interval=(ci_lower, ci_upper),
+        effect_size=effect_size,
+        interpretation=interpretation,
+    )
+
+
+def mann_whitney_u_test(
+    sample1: np.ndarray,
+    sample2: np.ndarray,
+    alternative: str = "two-sided",
+    alpha: float = 0.05,
+) -> StatisticalTest:
+    """Perform Mann-Whitney U test (non-parametric alternative to t-test).
+
+    Parameters
+    ----------
+    sample1 : np.ndarray
+        First sample.
+    sample2 : np.ndarray
+        Second sample.
+    alternative : str, default="two-sided"
+        Alternative hypothesis ("two-sided", "less", "greater").
+    alpha : float, default=0.05
+        Significance level.
+
+    Returns
+    -------
+    StatisticalTest
+        Test results.
+    """
+    if len(sample1) < _MIN_SAMPLES_MW or len(sample2) < _MIN_SAMPLES_MW:
+        raise InsufficientDataError(
+            "Need at least 3 observations in each sample for Mann-Whitney U test"
+        )
+
+    if not np.all(np.isfinite(sample1)) or not np.all(np.isfinite(sample2)):
+        raise DataValidationError("Samples must contain only finite values")
+
+    # Perform Mann-Whitney U test
+    statistic, p_value = stats.mannwhitneyu(sample1, sample2, alternative=alternative)
+
+    # Calculate critical value (approximate)
+    n1, n2 = len(sample1), len(sample2)
+    mean_u = n1 * n2 / 2
+    std_u = np.sqrt(n1 * n2 * (n1 + n2 + 1) / 12)
+
+    if alternative == "two-sided":
+        critical_value = norm.ppf(1 - alpha / 2) * std_u + mean_u
+    else:
+        critical_value = norm.ppf(1 - alpha) * std_u + mean_u
+
+    # Calculate effect size (rank-biserial correlation)
+    u1 = statistic
+    effect_size = 2 * (u1 / (n1 * n2)) - 1
+
+    # Interpretation
+    if p_value < alpha:
+        interpretation = f"Reject H0 at alpha={alpha} (p={p_value:.4f})"
+    else:
+        interpretation = f"Fail to reject H0 at alpha={alpha} (p={p_value:.4f})"
+
+    return StatisticalTest(
+        test_name="Mann-Whitney U test",
+        statistic=statistic,
+        p_value=p_value,
+        critical_value=critical_value,
+        degrees_of_freedom=None,
+        confidence_interval=None,
+        effect_size=effect_size,
+        interpretation=interpretation,
+    )
+
+
+def chi_square_test(
+    observed: np.ndarray,
+    expected: Optional[np.ndarray] = None,
+    alpha: float = 0.05,
+) -> StatisticalTest:
+    """Perform chi-square test for goodness of fit or independence.
+
+    Parameters
+    ----------
+    observed : np.ndarray
+        Observed frequencies.
+    expected : np.ndarray, optional
+        Expected frequencies. If None, assumes uniform distribution.
+    alpha : float, default=0.05
+        Significance level.
+
+    Returns
+    -------
+    StatisticalTest
+        Test results.
+    """
+    observed = np.asarray(observed, dtype=float)
+    if observed.ndim != 1:
+        raise DataValidationError("Observed frequencies must be a 1D array")
+
+    if len(observed) < _MIN_CATEGORIES:
+        raise InsufficientDataError("Need at least 2 categories for chi-square test")
+
+    if np.any(observed < 0):
+        raise DataValidationError("Observed frequencies must be non-negative")
+
+    if expected is None:
+        # Goodness of fit test with uniform distribution
+        expected = np.full_like(observed, np.sum(observed) / len(observed), dtype=float)
+    else:
+        expected = np.asarray(expected, dtype=float)
+        if expected.ndim != 1:
+            raise DataValidationError("Expected frequencies must be a 1D array")
+        if len(expected) != len(observed):
+            raise DataValidationError(
+                "Expected and observed arrays must have the same length"
+            )
+        if np.any(expected < 0):
+            raise DataValidationError("Expected frequencies must be non-negative")
+
+    # Calculate chi-square statistic
+    chi2_stat: float = float(np.sum((observed - expected) ** 2 / expected))
+
+    # Calculate p-value
+    df = len(observed) - 1
+    p_value = 1 - chi2.cdf(chi2_stat, df)
+
+    # Calculate critical value
+    critical_value = chi2.ppf(1 - alpha, df)
+
+    # Calculate effect size (Cramér's V)
+    n: float = float(np.sum(observed))
+    effect_size = np.sqrt(chi2_stat / (n * (len(observed) - 1)))
+
+    # Interpretation
+    if p_value < alpha:
+        interpretation = f"Reject H0 at alpha={alpha} (p={p_value:.4f})"
+    else:
+        interpretation = f"Fail to reject H0 at alpha={alpha} (p={p_value:.4f})"
+
+    return StatisticalTest(
+        test_name="Chi-square test",
+        statistic=float(chi2_stat),
+        p_value=float(p_value),
+        critical_value=float(critical_value),
+        degrees_of_freedom=df,
+        confidence_interval=None,
+        effect_size=float(effect_size),
+        interpretation=interpretation,
+    )
+
+
+def kolmogorov_smirnov_test(
+    sample: np.ndarray,
+    distribution: str = "norm",
+    alpha: float = 0.05,
+    **kwargs: Any,
+) -> StatisticalTest:
+    """Perform Kolmogorov-Smirnov test for goodness of fit.
+
+    Parameters
+    ----------
+    sample : np.ndarray
+        Sample data.
+    distribution : str, default="norm"
+        Distribution to test against ("norm", "uniform", "expon").
+    alpha : float, default=0.05
+        Significance level.
+    **kwargs
+        Additional parameters for the distribution.
+
+    Returns
+    -------
+    StatisticalTest
+        Test results.
+    """
+    if len(sample) < _MIN_SAMPLES_KS:
+        raise InsufficientDataError("Need at least 5 observations for KS test")
+
+    if not np.all(np.isfinite(sample)):
+        raise DataValidationError("Sample must contain only finite values")
+
+    # Get distribution function
+    dist_func: Callable[[np.ndarray], np.ndarray]
+    if distribution == "norm":
+        loc = kwargs.get("loc", np.mean(sample))
+        scale = kwargs.get("scale", np.std(sample))
+
+        def _dist_norm(x: np.ndarray) -> np.ndarray:
+            return cast("np.ndarray", stats.norm.cdf(x, loc=loc, scale=scale))
+
+        dist_func = _dist_norm
+
+    elif distribution == "uniform":
+        loc = kwargs.get("loc", np.min(sample))
+        scale = kwargs.get("scale", np.max(sample) - np.min(sample))
+
+        def _dist_unif(x: np.ndarray) -> np.ndarray:
+            return cast("np.ndarray", stats.uniform.cdf(x, loc=loc, scale=scale))
+
+        dist_func = _dist_unif
+
+    elif distribution == "expon":
+        loc = kwargs.get("loc", 0)
+        scale = kwargs.get("scale", np.mean(sample))
+
+        def _dist_expon(x: np.ndarray) -> np.ndarray:
+            return cast("np.ndarray", stats.expon.cdf(x, loc=loc, scale=scale))
+
+        dist_func = _dist_expon
+
+    else:
+        raise ValueError(f"Unknown distribution: {distribution}")
+
+    # Perform KS test
+    ks_stat, p_value = stats.kstest(sample, dist_func)
+
+    # Calculate critical value
+    n = len(sample)
+    critical_value = np.sqrt(-0.5 * np.log(alpha / 2)) / np.sqrt(n)
+
+    # Calculate effect size (approximate)
+    effect_size = ks_stat * np.sqrt(n)
+
+    # Interpretation
+    if p_value < alpha:
+        interpretation = f"Reject H0 at alpha={alpha} (p={p_value:.4f})"
+    else:
+        interpretation = f"Fail to reject H0 at alpha={alpha} (p={p_value:.4f})"
+
+    return StatisticalTest(
+        test_name="Kolmogorov-Smirnov test",
+        statistic=ks_stat,
+        p_value=p_value,
+        critical_value=critical_value,
+        degrees_of_freedom=None,
+        confidence_interval=None,
+        effect_size=effect_size,
+        interpretation=interpretation,
+    )
+
+
+def bootstrap_confidence_interval(
+    data: np.ndarray,
+    statistic_func: Callable[[np.ndarray], float],
+    n_bootstrap: int = 1000,
+    alpha: float = 0.05,
+    method: str = "percentile",
+    random_state: Optional[int] = None,
+) -> tuple[float, float]:
+    """Calculate bootstrap confidence interval for a statistic.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Sample data.
+    statistic_func : callable
+        Function to calculate the statistic.
+    n_bootstrap : int, default=1000
+        Number of bootstrap samples.
+    alpha : float, default=0.05
+        Significance level.
+    method : str, default="percentile"
+        Bootstrap method ("percentile", "bca", "basic").
+    random_state : int, optional
+        Random seed.
+
+    Returns
+    -------
+    Tuple[float, float]
+        Confidence interval bounds.
+    """
+    if len(data) < _MIN_SAMPLES_BOOTSTRAP:
+        raise InsufficientDataError("Need at least 2 observations for bootstrap")
+
+    if not np.all(np.isfinite(data)):
+        raise DataValidationError("Data must contain only finite values")
+
+    if n_bootstrap < _MIN_BOOTSTRAP_REPS:
+        raise DataValidationError("Need at least 100 bootstrap samples")
+
+    rng = np.random.RandomState(random_state)
+    n = len(data)
+    bootstrap_stats_list: list[float] = []
+
+    for _ in range(n_bootstrap):
+        # Sample with replacement
+        bootstrap_sample = rng.choice(data, size=n, replace=True)
+        bootstrap_stat = statistic_func(bootstrap_sample)
+        bootstrap_stats_list.append(bootstrap_stat)
+
+    bootstrap_stats = np.array(bootstrap_stats_list)
+
+    if method == "percentile":
+        ci_lower = float(np.percentile(bootstrap_stats, 100 * alpha / 2))
+        ci_upper = float(np.percentile(bootstrap_stats, 100 * (1 - alpha / 2)))
+    elif method == "basic":
+        original_stat = statistic_func(data)
+        ci_lower = float(
+            2 * original_stat - np.percentile(bootstrap_stats, 100 * (1 - alpha / 2))
+        )
+        ci_upper = float(
+            2 * original_stat - np.percentile(bootstrap_stats, 100 * alpha / 2)
+        )
+    else:
+        raise ValueError(f"Unknown bootstrap method: {method}")
+
+    return ci_lower, ci_upper
+
+
+def _default_stat_func(x: np.ndarray, y: np.ndarray) -> float:
+    return float(np.mean(x) - np.mean(y))
+
+
+def permutation_test(
+    sample1: np.ndarray,
+    sample2: np.ndarray,
+    statistic_func: Callable[[np.ndarray, np.ndarray], float] = _default_stat_func,
+    n_permutations: int = 1000,
+    alpha: float = 0.05,
+    random_state: Optional[int] = None,
+) -> StatisticalTest:
+    """Perform permutation test for comparing two samples.
+
+    Parameters
+    ----------
+    sample1 : np.ndarray
+        First sample.
+    sample2 : np.ndarray
+        Second sample.
+    statistic_func : callable, default=lambda x, y: np.mean(x) - np.mean(y)
+        Function to calculate the test statistic.
+    n_permutations : int, default=1000
+        Number of permutations.
+    alpha : float, default=0.05
+        Significance level.
+    random_state : int, optional
+        Random seed.
+
+    Returns
+    -------
+    StatisticalTest
+        Test results.
+    """
+    if len(sample1) < _MIN_SAMPLES_T or len(sample2) < _MIN_SAMPLES_T:
+        raise InsufficientDataError("Need at least 2 observations in each sample")
+
+    if not np.all(np.isfinite(sample1)) or not np.all(np.isfinite(sample2)):
+        raise DataValidationError("Samples must contain only finite values")
+
+    if n_permutations < _MIN_PERMUTATIONS:
+        raise DataValidationError("Need at least 100 permutations")
+
+    rng = np.random.RandomState(random_state)
+
+    # Calculate observed statistic
+    observed_stat = statistic_func(sample1, sample2)
+
+    # Combine samples
+    combined = np.concatenate([sample1, sample2])
+    n1 = len(sample1)
+
+    # Perform permutations
+    permuted_stats_list: list[float] = []
+    for _ in range(n_permutations):
+        # Shuffle combined sample
+        shuffled = rng.permutation(combined)
+        perm_sample1 = shuffled[:n1]
+        perm_sample2 = shuffled[n1:]
+        perm_stat = statistic_func(perm_sample1, perm_sample2)
+        permuted_stats_list.append(perm_stat)
+
+    permuted_stats = np.array(permuted_stats_list)
+
+    # Calculate p-value
+    p_value = np.mean(np.abs(permuted_stats) >= np.abs(observed_stat))
+
+    # Calculate critical value
+    critical_value: float = float(
+        np.percentile(np.abs(permuted_stats), 100 * (1 - alpha))
+    )
+
+    # Calculate effect size
+    effect_size = observed_stat / np.std(combined)
+
+    # Interpretation
+    if p_value < alpha:
+        interpretation = f"Reject H0 at alpha={alpha} (p={p_value:.4f})"
+    else:
+        interpretation = f"Fail to reject H0 at alpha={alpha} (p={p_value:.4f})"
+
+    return StatisticalTest(
+        test_name="Permutation test",
+        statistic=float(observed_stat),
+        p_value=float(p_value),
+        critical_value=float(critical_value),
+        degrees_of_freedom=None,
+        confidence_interval=None,
+        effect_size=float(effect_size),
+        interpretation=interpretation,
+    )
+
+
+def multiple_comparison_correction(
+    p_values: list[float],
+    method: str = "bonferroni",
+) -> list[float]:
+    """Apply multiple comparison correction to p-values.
+
+    Parameters
+    ----------
+    p_values : list[float]
+        List of p-values to correct.
+    method : str, default="bonferroni"
+        Correction method ("bonferroni", "holm", "fdr_bh").
+
+    Returns
+    -------
+    list[float]
+        Corrected p-values.
+    """
+    if not p_values:
+        raise DataValidationError("P-values list cannot be empty")
+
+    if not all(0 <= p <= 1 for p in p_values):
+        raise DataValidationError("P-values must be between 0 and 1")
+
+    p_arr = np.array(p_values)
+    n = len(p_arr)
+
+    if method == "bonferroni":
+        corrected = p_arr * n
+        corrected = np.minimum(corrected, 1.0)
+    elif method == "holm":
+        # Holm-Bonferroni method
+        sorted_indices = np.argsort(p_arr)
+        corrected = np.zeros_like(p_arr)
+        for i, idx in enumerate(sorted_indices):
+            corrected[idx] = p_arr[idx] * (n - i)
+        corrected = np.minimum(corrected, 1.0)
+    elif method == "fdr_bh":
+        # Benjamini-Hochberg FDR correction
+        sorted_indices = np.argsort(p_arr)
+        sorted_p = p_arr[sorted_indices]
+        corrected = np.zeros_like(p_arr)
+        for i in range(n):
+            corrected[sorted_indices[i]] = sorted_p[i] * n / (i + 1)
+        corrected = np.minimum(corrected, 1.0)
+    else:
+        raise ValueError(f"Unknown correction method: {method}")
+
+    return list(corrected.tolist())
+
+
+def power_analysis(
+    effect_size: float,
+    n: int,
+    alpha: float = 0.05,
+    test_type: str = "two_sample_t",
+) -> float:
+    """Calculate statistical power for a given effect size and sample size.
+
+    Parameters
+    ----------
+    effect_size : float
+        Effect size (Cohen's d for t-tests).
+    n : int
+        Sample size per group.
+    alpha : float, default=0.05
+        Significance level.
+    test_type : str, default="two_sample_t"
+        Type of test ("two_sample_t", "one_sample_t", "paired_t").
+
+    Returns
+    -------
+    float
+        Statistical power (0-1).
+    """
+    if effect_size <= 0:
+        raise DataValidationError("Effect size must be positive")
+
+    if n < _MIN_SAMPLE_SIZE:
+        raise DataValidationError("Sample size must be at least 2")
+
+    if not 0 < alpha < 1:
+        raise DataValidationError("Alpha must be between 0 and 1")
+
+    if test_type == "two_sample_t":
+        # Two-sample t-test
+        df = 2 * n - 2
+        ncp = effect_size * np.sqrt(n / 2)  # Non-centrality parameter
+    elif test_type == "one_sample_t":
+        # One-sample t-test
+        df = n - 1
+        ncp = effect_size * np.sqrt(n)
+    elif test_type == "paired_t":
+        # Paired t-test
+        df = n - 1
+        ncp = effect_size * np.sqrt(n)
+    else:
+        raise ValueError(f"Unknown test type: {test_type}")
+
+    # Calculate critical value
+    critical_value = t.ppf(1 - alpha / 2, df)
+
+    # Calculate power
+    power = 1 - t.cdf(critical_value, df, ncp) + t.cdf(-critical_value, df, ncp)
+
+    return float(min(max(power, 0), 1))  # Ensure power is between 0 and 1
+
+
+def sample_size_calculation(
+    effect_size: float,
+    power: float = 0.8,
+    alpha: float = 0.05,
+    test_type: str = "two_sample_t",
+) -> int:
+    """Calculate required sample size for a given effect size and power.
+
+    Parameters
+    ----------
+    effect_size : float
+        Effect size (Cohen's d for t-tests).
+    power : float, default=0.8
+        Desired statistical power.
+    alpha : float, default=0.05
+        Significance level.
+    test_type : str, default="two_sample_t"
+        Type of test ("two_sample_t", "one_sample_t", "paired_t").
+
+    Returns
+    -------
+    int
+        Required sample size per group.
+    """
+    if effect_size <= 0:
+        raise DataValidationError("Effect size must be positive")
+
+    if not 0 < power < 1:
+        raise DataValidationError("Power must be between 0 and 1")
+
+    if not 0 < alpha < 1:
+        raise DataValidationError("Alpha must be between 0 and 1")
+
+    # Use binary search to find required sample size
+    n_min, n_max = _MIN_SAMPLE_SIZE, _MAX_SAMPLE_SEARCH
+
+    while n_max - n_min > 1:
+        n_mid = (n_min + n_max) // 2
+        calculated_power = power_analysis(effect_size, n_mid, alpha, test_type)
+
+        if calculated_power < power:
+            n_min = n_mid
+        else:
+            n_max = n_mid
+
+    return n_max

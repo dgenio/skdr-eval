@@ -260,12 +260,12 @@ class TestBootstrapIntegration:
 
         # Create logs with time-ordered data
         logs_data = {
-            "arrival_ts": pd.date_range("2024-01-01", periods=n, freq="1H"),
+            "arrival_ts": pd.date_range("2024-01-01", periods=n, freq="1h"),
             "cli_urgency": np.random.uniform(0, 1, n),
             "cli_complexity": np.random.exponential(1, n),
             "st_load": np.random.exponential(1, n),
             "st_time_of_day": np.sin(
-                2 * np.pi * pd.date_range("2024-01-01", periods=n, freq="1H").hour / 24
+                2 * np.pi * pd.date_range("2024-01-01", periods=n, freq="1h").hour / 24
             ),
             "op_A_elig": np.ones(n, dtype=bool),
             "op_B_elig": np.ones(n, dtype=bool),
