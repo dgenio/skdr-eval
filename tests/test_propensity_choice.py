@@ -22,7 +22,11 @@ except ImportError:
 
 
 def test_propensity_multinomial_fallback():
-    """Test that multinomial propensity works when scipy unavailable."""
+    """Test that multinomial propensity works when scipy unavailable.
+
+    Regression: multi_class="multinomial" was removed in sklearn 1.8.
+    This call must not raise TypeError on sklearn >= 1.8.
+    """
     logs_df, op_daily_df = make_pairwise_synth(
         n_days=2, n_clients_day=100, n_ops=10, seed=42
     )
