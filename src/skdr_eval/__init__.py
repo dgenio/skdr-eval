@@ -2,6 +2,17 @@
 
 import importlib
 
+from .config import (
+    ConfigManager,
+    EvaluationConfig,
+    ModelConfig,
+    VisualizationConfig,
+    get_default_config,
+    load_config_from_file,
+    merge_configs,
+    save_config_to_file,
+    validate_config,
+)
 from .core import (
     Design,
     DRResult,
@@ -14,17 +25,6 @@ from .core import (
     fit_outcome_crossfit,
     fit_propensity_timecal,
     induce_policy_from_sklearn,
-)
-from .config import (
-    ConfigManager,
-    EvaluationConfig,
-    ModelConfig,
-    VisualizationConfig,
-    get_default_config,
-    load_config_from_file,
-    merge_configs,
-    save_config_to_file,
-    validate_config,
 )
 from .diagnostics import PropensityDiagnostics
 from .exceptions import (
