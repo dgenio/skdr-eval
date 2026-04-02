@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 from scipy import stats
@@ -11,6 +11,17 @@ from scipy.stats import chi2, norm, t
 from .exceptions import DataValidationError, InsufficientDataError
 
 logger = logging.getLogger("skdr_eval")
+
+# Minimum-sample thresholds used across statistical functions
+_MIN_SAMPLES_T = 2
+_MIN_SAMPLES_MW = 3
+_MIN_SAMPLES_KS = 5
+_MIN_SAMPLES_BOOTSTRAP = 2
+_MIN_BOOTSTRAP_REPS = 100
+_MIN_PERMUTATIONS = 100
+_MIN_CATEGORIES = 2
+_MIN_SAMPLE_SIZE = 2
+_MAX_SAMPLE_SEARCH = 10000
 
 
 @dataclass
@@ -22,7 +33,7 @@ class StatisticalTest:
     p_value: float
     critical_value: float
     degrees_of_freedom: Optional[int] = None
-    confidence_interval: Optional[Tuple[float, float]] = None
+    confidence_interval: Optional[tuple[float, float]] = None
     effect_size: Optional[float] = None
     interpretation: str = ""
 
@@ -54,7 +65,7 @@ def t_test(
     StatisticalTest
         Test results.
     """
-    if len(sample1) < 2 or len(sample2) < 2:
+    if len(sample1) < _MIN_SAMPLES_T or len(sample2) < _MIN_SAMPLES_T:
         raise InsufficientDataError("Need at least 2 observations in each sample")
 
     if not np.all(np.isfinite(sample1)) or not np.all(np.isfinite(sample2)):
@@ -71,14 +82,17 @@ def t_test(
 
     mean_diff = np.mean(sample1) - np.mean(sample2)
     # Handle degenerate zero-variance cases where scipy can return NaN.
-    if not np.isfinite(statistic) or not np.isfinite(p_value):
-        if np.isclose(var1, 0.0) and np.isclose(var2, 0.0):
-            if np.isclose(mean_diff, 0.0):
-                statistic = 0.0
-                p_value = 1.0
-            else:
-                statistic = float(np.sign(mean_diff) * np.inf)
-                p_value = 0.0
+    if (
+        (not np.isfinite(statistic) or not np.isfinite(p_value))
+        and np.isclose(var1, 0.0)
+        and np.isclose(var2, 0.0)
+    ):
+        if np.isclose(mean_diff, 0.0):
+            statistic = 0.0
+            p_value = 1.0
+        else:
+            statistic = float(np.sign(mean_diff) * np.inf)
+            p_value = 0.0
 
     # Adjust p-value for one-sided tests
     if alternative == "less":
@@ -121,15 +135,17 @@ def t_test(
     # Calculate effect size (Cohen's d)
     pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
     if np.isclose(pooled_std, 0.0):
-        effect_size = 0.0 if np.isclose(mean_diff, 0.0) else float(np.sign(mean_diff) * np.inf)
+        effect_size = (
+            0.0 if np.isclose(mean_diff, 0.0) else float(np.sign(mean_diff) * np.inf)
+        )
     else:
         effect_size = mean_diff / pooled_std
 
     # Interpretation
     if p_value < alpha:
-        interpretation = f"Reject H0 at α={alpha} (p={p_value:.4f})"
+        interpretation = f"Reject H0 at alpha={alpha} (p={p_value:.4f})"
     else:
-        interpretation = f"Fail to reject H0 at α={alpha} (p={p_value:.4f})"
+        interpretation = f"Fail to reject H0 at alpha={alpha} (p={p_value:.4f})"
 
     return StatisticalTest(
         test_name="t-test",
@@ -167,7 +183,7 @@ def mann_whitney_u_test(
     StatisticalTest
         Test results.
     """
-    if len(sample1) < 3 or len(sample2) < 3:
+    if len(sample1) < _MIN_SAMPLES_MW or len(sample2) < _MIN_SAMPLES_MW:
         raise InsufficientDataError(
             "Need at least 3 observations in each sample for Mann-Whitney U test"
         )
@@ -194,9 +210,9 @@ def mann_whitney_u_test(
 
     # Interpretation
     if p_value < alpha:
-        interpretation = f"Reject H0 at α={alpha} (p={p_value:.4f})"
+        interpretation = f"Reject H0 at alpha={alpha} (p={p_value:.4f})"
     else:
-        interpretation = f"Fail to reject H0 at α={alpha} (p={p_value:.4f})"
+        interpretation = f"Fail to reject H0 at alpha={alpha} (p={p_value:.4f})"
 
     return StatisticalTest(
         test_name="Mann-Whitney U test",
@@ -235,7 +251,7 @@ def chi_square_test(
     if observed.ndim != 1:
         raise DataValidationError("Observed frequencies must be a 1D array")
 
-    if len(observed) < 2:
+    if len(observed) < _MIN_CATEGORIES:
         raise InsufficientDataError("Need at least 2 categories for chi-square test")
 
     if np.any(observed < 0):
@@ -271,9 +287,9 @@ def chi_square_test(
 
     # Interpretation
     if p_value < alpha:
-        interpretation = f"Reject H0 at α={alpha} (p={p_value:.4f})"
+        interpretation = f"Reject H0 at alpha={alpha} (p={p_value:.4f})"
     else:
-        interpretation = f"Fail to reject H0 at α={alpha} (p={p_value:.4f})"
+        interpretation = f"Fail to reject H0 at alpha={alpha} (p={p_value:.4f})"
 
     return StatisticalTest(
         test_name="Chi-square test",
@@ -311,7 +327,7 @@ def kolmogorov_smirnov_test(
     StatisticalTest
         Test results.
     """
-    if len(sample) < 5:
+    if len(sample) < _MIN_SAMPLES_KS:
         raise InsufficientDataError("Need at least 5 observations for KS test")
 
     if not np.all(np.isfinite(sample)):
@@ -321,15 +337,24 @@ def kolmogorov_smirnov_test(
     if distribution == "norm":
         loc = kwargs.get("loc", np.mean(sample))
         scale = kwargs.get("scale", np.std(sample))
-        dist_func = lambda x: stats.norm.cdf(x, loc=loc, scale=scale)
+
+        def dist_func(x: np.ndarray) -> np.ndarray:
+            return stats.norm.cdf(x, loc=loc, scale=scale)
+
     elif distribution == "uniform":
         loc = kwargs.get("loc", np.min(sample))
         scale = kwargs.get("scale", np.max(sample) - np.min(sample))
-        dist_func = lambda x: stats.uniform.cdf(x, loc=loc, scale=scale)
+
+        def dist_func(x: np.ndarray) -> np.ndarray:  # type: ignore[misc]
+            return stats.uniform.cdf(x, loc=loc, scale=scale)
+
     elif distribution == "expon":
         loc = kwargs.get("loc", 0)
         scale = kwargs.get("scale", np.mean(sample))
-        dist_func = lambda x: stats.expon.cdf(x, loc=loc, scale=scale)
+
+        def dist_func(x: np.ndarray) -> np.ndarray:  # type: ignore[misc]
+            return stats.expon.cdf(x, loc=loc, scale=scale)
+
     else:
         raise ValueError(f"Unknown distribution: {distribution}")
 
@@ -345,9 +370,9 @@ def kolmogorov_smirnov_test(
 
     # Interpretation
     if p_value < alpha:
-        interpretation = f"Reject H0 at α={alpha} (p={p_value:.4f})"
+        interpretation = f"Reject H0 at alpha={alpha} (p={p_value:.4f})"
     else:
-        interpretation = f"Fail to reject H0 at α={alpha} (p={p_value:.4f})"
+        interpretation = f"Fail to reject H0 at alpha={alpha} (p={p_value:.4f})"
 
     return StatisticalTest(
         test_name="Kolmogorov-Smirnov test",
@@ -368,7 +393,7 @@ def bootstrap_confidence_interval(
     alpha: float = 0.05,
     method: str = "percentile",
     random_state: Optional[int] = None,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Calculate bootstrap confidence interval for a statistic.
 
     Parameters
@@ -391,13 +416,13 @@ def bootstrap_confidence_interval(
     Tuple[float, float]
         Confidence interval bounds.
     """
-    if len(data) < 2:
+    if len(data) < _MIN_SAMPLES_BOOTSTRAP:
         raise InsufficientDataError("Need at least 2 observations for bootstrap")
 
     if not np.all(np.isfinite(data)):
         raise DataValidationError("Data must contain only finite values")
 
-    if n_bootstrap < 100:
+    if n_bootstrap < _MIN_BOOTSTRAP_REPS:
         raise DataValidationError("Need at least 100 bootstrap samples")
 
     rng = np.random.RandomState(random_state)
@@ -457,13 +482,13 @@ def permutation_test(
     StatisticalTest
         Test results.
     """
-    if len(sample1) < 2 or len(sample2) < 2:
+    if len(sample1) < _MIN_SAMPLES_T or len(sample2) < _MIN_SAMPLES_T:
         raise InsufficientDataError("Need at least 2 observations in each sample")
 
     if not np.all(np.isfinite(sample1)) or not np.all(np.isfinite(sample2)):
         raise DataValidationError("Samples must contain only finite values")
 
-    if n_permutations < 100:
+    if n_permutations < _MIN_PERMUTATIONS:
         raise DataValidationError("Need at least 100 permutations")
 
     rng = np.random.RandomState(random_state)
@@ -498,9 +523,9 @@ def permutation_test(
 
     # Interpretation
     if p_value < alpha:
-        interpretation = f"Reject H0 at α={alpha} (p={p_value:.4f})"
+        interpretation = f"Reject H0 at alpha={alpha} (p={p_value:.4f})"
     else:
-        interpretation = f"Fail to reject H0 at α={alpha} (p={p_value:.4f})"
+        interpretation = f"Fail to reject H0 at alpha={alpha} (p={p_value:.4f})"
 
     return StatisticalTest(
         test_name="Permutation test",
@@ -515,24 +540,21 @@ def permutation_test(
 
 
 def multiple_comparison_correction(
-    p_values: List[float],
+    p_values: list[float],
     method: str = "bonferroni",
-    alpha: float = 0.05,
-) -> List[float]:
+) -> list[float]:
     """Apply multiple comparison correction to p-values.
 
     Parameters
     ----------
-    p_values : List[float]
+    p_values : list[float]
         List of p-values to correct.
     method : str, default="bonferroni"
         Correction method ("bonferroni", "holm", "fdr_bh").
-    alpha : float, default=0.05
-        Significance level.
 
     Returns
     -------
-    List[float]
+    list[float]
         Corrected p-values.
     """
     if not p_values:
@@ -595,7 +617,7 @@ def power_analysis(
     if effect_size <= 0:
         raise DataValidationError("Effect size must be positive")
 
-    if n < 2:
+    if n < _MIN_SAMPLE_SIZE:
         raise DataValidationError("Sample size must be at least 2")
 
     if not 0 < alpha < 1:
@@ -659,7 +681,7 @@ def sample_size_calculation(
         raise DataValidationError("Alpha must be between 0 and 1")
 
     # Use binary search to find required sample size
-    n_min, n_max = 2, 10000
+    n_min, n_max = _MIN_SAMPLE_SIZE, _MAX_SAMPLE_SEARCH
 
     while n_max - n_min > 1:
         n_mid = (n_min + n_max) // 2
