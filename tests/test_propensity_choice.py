@@ -33,7 +33,6 @@ def test_propensity_multinomial_fallback():
     propensities = estimate_propensity_pairwise(
         design,
         strategy="multinomial",
-        method="multinomial",
         n_splits=2,
         random_state=42,
     )

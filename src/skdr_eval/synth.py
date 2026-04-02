@@ -69,7 +69,7 @@ def make_synth_logs(
     st_time_of_day = np.sin(2 * np.pi * arrival_ts.hour / 24)  # time of day effect
 
     # Generate eligibility (each request has 2-4 eligible operators)
-    eligibility = np.zeros((n, n_ops), dtype=bool)
+    eligibility: np.ndarray = np.zeros((n, n_ops), dtype=bool)
     for i in range(n):
         n_eligible = rng.randint(2, min(n_ops + 1, 5))
         eligible_ops = rng.choice(n_ops, size=n_eligible, replace=False)

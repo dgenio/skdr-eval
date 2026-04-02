@@ -1,6 +1,7 @@
 """Core implementation of DR and Stabilized DR for offline policy evaluation."""
 
 import logging
+import warnings
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, Protocol, Union
 
@@ -908,8 +909,8 @@ def _get_outcome_estimator(
 
 def estimate_propensity_pairwise(
     design: PairwiseDesign,
-    strategy: Literal["condlogit", "multinomial"] = "multinomial",
-    method: Literal["condlogit", "multinomial"] = "condlogit",
+    strategy: Literal["auto", "condlogit", "multinomial"] = "auto",
+    method: Literal["auto", "condlogit", "multinomial"] = "auto",
     neg_per_pos: int = 5,
     n_splits: int = 3,
     random_state: int = 0,
@@ -921,9 +922,10 @@ def estimate_propensity_pairwise(
     design : PairwiseDesign
         Pairwise design object
     strategy : Literal["auto", "condlogit", "multinomial"]
-        Strategy for propensity estimation
-    method : Literal["condlogit", "multinomial"]
-        Method to use (condlogit requires scipy)
+        Strategy for propensity estimation. "auto" selects "condlogit" when
+        SciPy is available, otherwise "multinomial".
+    method : Literal["auto", "condlogit", "multinomial"]
+        Optional explicit method override. "auto" uses strategy-based selection.
     neg_per_pos : int
         Negative samples per positive for conditional logit
     n_splits : int
@@ -942,18 +944,40 @@ def estimate_propensity_pairwise(
         raise ValueError(
             f"Unknown strategy: {strategy}. Must be 'auto', 'condlogit', or 'multinomial'"
         )
+    if method not in ["auto", "condlogit", "multinomial"]:
+        raise ValueError(
+            f"Unknown method: {method}. Must be 'auto', 'condlogit', or 'multinomial'"
+        )
+
+    if method != "auto":
+        warnings.warn(
+            "The 'method' parameter of estimate_propensity_pairwise is deprecated "
+            "and will be removed in a future version. Use 'strategy' instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    if strategy == "auto":
+        resolved_method = "condlogit" if SCIPY_AVAILABLE else "multinomial"
+    else:
+        resolved_method = strategy
+
+    if method != "auto":
+        if strategy not in ("auto", method):
+            logger.warning(
+                "Conflicting strategy/method values; using explicit method override"
+            )
+        resolved_method = method
 
     n_decisions = len(design.logs_df)
     max_ops = max(len(ops) for ops in design.ops_all_by_day.values())
     propensities: np.ndarray = np.zeros((n_decisions, max_ops), dtype=np.float64)
 
-    # Use the provided method directly since strategy is now constrained
-
-    if method == "condlogit" and not SCIPY_AVAILABLE:
+    if resolved_method == "condlogit" and not SCIPY_AVAILABLE:
         logger.warning("SciPy not available, falling back to multinomial")
-        method = "multinomial"
+        resolved_method = "multinomial"
 
-    if method == "condlogit":
+    if resolved_method == "condlogit":
         # Build pairwise training data with time-forward splits
         tscv = TimeSeriesSplit(n_splits=n_splits)
         days_sorted = sorted(design.ops_all_by_day.keys())
@@ -1131,9 +1155,7 @@ def estimate_propensity_pairwise(
             y_train = np.array([actions[i] for i in train_idx])
 
             # Fit multinomial model
-            model = LogisticRegression(
-                multi_class="multinomial", random_state=random_state, max_iter=1000
-            )
+            model = LogisticRegression(random_state=random_state, max_iter=1000)
             try:
                 model.fit(X_train, y_train)
 
@@ -1198,7 +1220,7 @@ def evaluate_pairwise_models(
     direction: Literal["min", "max"],
     n_splits: int = 3,
     strategy: Literal["auto", "direct", "stream", "stream_topk"] = "auto",
-    propensity: Literal["condlogit", "multinomial"] = "condlogit",
+    propensity: Literal["auto", "condlogit", "multinomial"] = "auto",
     topk: int = 20,
     neg_per_pos: int = 5,
     chunk_pairs: int = 2_000_000,
@@ -1298,7 +1320,11 @@ def evaluate_pairwise_models(
 
     # Estimate propensity scores
     propensities = estimate_propensity_pairwise(
-        design, propensity, propensity, neg_per_pos, n_splits, random_state
+        design=design,
+        strategy=propensity,
+        neg_per_pos=neg_per_pos,
+        n_splits=n_splits,
+        random_state=random_state,
     )
 
     # Fit outcome models with cross-fitting
