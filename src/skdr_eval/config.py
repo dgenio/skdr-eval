@@ -2,7 +2,7 @@
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -23,7 +23,9 @@ class EvaluationConfig:
     min_ess_frac: float = 0.02
 
     # Clipping parameters
-    clip_grid: list[float] = None
+    clip_grid: list[float] = field(
+        default_factory=lambda: [2, 5, 10, 20, 50, float("inf")]
+    )
 
     # Bootstrap parameters
     n_boot: int = 400
@@ -45,24 +47,15 @@ class EvaluationConfig:
     neg_per_pos: int = 5
     chunk_pairs: int = 2_000_000
 
-    # Visualization parameters
-    figsize: tuple = (12, 8)
-    dpi: int = 300
-    style: str = "default"
-
     # Logging parameters
     log_level: str = "INFO"
     log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Post-initialization validation and setup."""
-        if self.clip_grid is None:
-            self.clip_grid = [2, 5, 10, 20, 50, float("inf")]
-
-        # Validate parameters
         self._validate()
 
-    def _validate(self):
+    def _validate(self) -> None:
         """Validate configuration parameters."""
         if self.n_splits < 2:  # noqa: PLR2004
             raise ConfigurationError("n_splits must be at least 2")
@@ -88,9 +81,6 @@ class EvaluationConfig:
         if self.chunk_pairs < 1000:  # noqa: PLR2004
             raise ConfigurationError("chunk_pairs must be at least 1000")
 
-        if self.dpi < 72:  # noqa: PLR2004
-            raise ConfigurationError("dpi must be at least 72")
-
         valid_log_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
         if self.log_level.upper() not in valid_log_levels:
             raise ConfigurationError(f"log_level must be one of {valid_log_levels}")
@@ -105,7 +95,7 @@ class ModelConfig:
     task_type: str = "classification"
 
     # Hyperparameters
-    hyperparameters: dict[str, Any] = None
+    hyperparameters: dict[str, Any] = field(default_factory=dict)
 
     # Cross-validation parameters
     cv_folds: int = 5
@@ -119,14 +109,11 @@ class ModelConfig:
     test_size: float = 0.2
     stratify: bool = True
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Post-initialization validation and setup."""
-        if self.hyperparameters is None:
-            self.hyperparameters = {}
-
         self._validate()
 
-    def _validate(self):
+    def _validate(self) -> None:
         """Validate configuration parameters."""
         valid_task_types = ["classification", "regression"]
         if self.task_type not in valid_task_types:
@@ -147,7 +134,7 @@ class VisualizationConfig:
     """Configuration for visualization settings."""
 
     # Figure settings
-    figsize: tuple = (12, 8)
+    figsize: list[int] = field(default_factory=lambda: [12, 8])
     dpi: int = 300
     style: str = "default"
 
@@ -168,11 +155,11 @@ class VisualizationConfig:
     save_format: str = "png"
     save_dpi: int = 300
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Post-initialization validation and setup."""
         self._validate()
 
-    def _validate(self):
+    def _validate(self) -> None:
         """Validate configuration parameters."""
         if self.dpi < 72:  # noqa: PLR2004
             raise ConfigurationError("dpi must be at least 72")
@@ -217,8 +204,8 @@ class ConfigManager:
         self.global_config_file = self.config_dir / "global.yaml"
 
     def save_evaluation_config(
-        self, config: EvaluationConfig, filename: Optional[str] = None
-    ):
+        self, config: EvaluationConfig, filename: Union[str, Path, None] = None
+    ) -> None:
         """Save evaluation configuration to file.
 
         Parameters
@@ -228,14 +215,14 @@ class ConfigManager:
         filename : str, optional
             Custom filename. If None, uses default.
         """
-        filename = self.eval_config_file if filename is None else Path(filename)
+        path = self.eval_config_file if filename is None else Path(filename)
 
         config_dict = asdict(config)
-        self._save_yaml(config_dict, filename)
-        logger.info(f"Evaluation configuration saved to {filename}")
+        self._save_yaml(config_dict, path)
+        logger.info(f"Evaluation configuration saved to {path}")
 
     def load_evaluation_config(
-        self, filename: Optional[str] = None
+        self, filename: Union[str, Path, None] = None
     ) -> EvaluationConfig:
         """Load evaluation configuration from file.
 
@@ -249,16 +236,18 @@ class ConfigManager:
         EvaluationConfig
             Loaded configuration.
         """
-        filename = self.eval_config_file if filename is None else Path(filename)
+        path = self.eval_config_file if filename is None else Path(filename)
 
-        if not filename.exists():
-            logger.warning(f"Configuration file {filename} not found, using defaults")
+        if not path.exists():
+            logger.warning(f"Configuration file {path} not found, using defaults")
             return EvaluationConfig()
 
-        config_dict = self._load_yaml(filename)
+        config_dict = self._load_yaml(path)
         return EvaluationConfig(**config_dict)
 
-    def save_model_config(self, config: ModelConfig, filename: Optional[str] = None):
+    def save_model_config(
+        self, config: ModelConfig, filename: Union[str, Path, None] = None
+    ) -> None:
         """Save model configuration to file.
 
         Parameters
@@ -268,13 +257,13 @@ class ConfigManager:
         filename : str, optional
             Custom filename. If None, uses default.
         """
-        filename = self.model_config_file if filename is None else Path(filename)
+        path = self.model_config_file if filename is None else Path(filename)
 
         config_dict = asdict(config)
-        self._save_yaml(config_dict, filename)
-        logger.info(f"Model configuration saved to {filename}")
+        self._save_yaml(config_dict, path)
+        logger.info(f"Model configuration saved to {path}")
 
-    def load_model_config(self, filename: Optional[str] = None) -> ModelConfig:
+    def load_model_config(self, filename: Union[str, Path, None] = None) -> ModelConfig:
         """Load model configuration from file.
 
         Parameters
@@ -287,18 +276,18 @@ class ConfigManager:
         ModelConfig
             Loaded configuration.
         """
-        filename = self.model_config_file if filename is None else Path(filename)
+        path = self.model_config_file if filename is None else Path(filename)
 
-        if not filename.exists():
-            logger.warning(f"Configuration file {filename} not found, using defaults")
+        if not path.exists():
+            logger.warning(f"Configuration file {path} not found, using defaults")
             return ModelConfig()
 
-        config_dict = self._load_yaml(filename)
+        config_dict = self._load_yaml(path)
         return ModelConfig(**config_dict)
 
     def save_visualization_config(
-        self, config: VisualizationConfig, filename: Optional[str] = None
-    ):
+        self, config: VisualizationConfig, filename: Union[str, Path, None] = None
+    ) -> None:
         """Save visualization configuration to file.
 
         Parameters
@@ -308,14 +297,14 @@ class ConfigManager:
         filename : str, optional
             Custom filename. If None, uses default.
         """
-        filename = self.viz_config_file if filename is None else Path(filename)
+        path = self.viz_config_file if filename is None else Path(filename)
 
         config_dict = asdict(config)
-        self._save_yaml(config_dict, filename)
-        logger.info(f"Visualization configuration saved to {filename}")
+        self._save_yaml(config_dict, path)
+        logger.info(f"Visualization configuration saved to {path}")
 
     def load_visualization_config(
-        self, filename: Optional[str] = None
+        self, filename: Union[str, Path, None] = None
     ) -> VisualizationConfig:
         """Load visualization configuration from file.
 
@@ -329,18 +318,18 @@ class ConfigManager:
         VisualizationConfig
             Loaded configuration.
         """
-        filename = self.viz_config_file if filename is None else Path(filename)
+        path = self.viz_config_file if filename is None else Path(filename)
 
-        if not filename.exists():
-            logger.warning(f"Configuration file {filename} not found, using defaults")
+        if not path.exists():
+            logger.warning(f"Configuration file {path} not found, using defaults")
             return VisualizationConfig()
 
-        config_dict = self._load_yaml(filename)
+        config_dict = self._load_yaml(path)
         return VisualizationConfig(**config_dict)
 
     def save_global_config(
-        self, config: dict[str, Any], filename: Optional[str] = None
-    ):
+        self, config: dict[str, Any], filename: Union[str, Path, None] = None
+    ) -> None:
         """Save global configuration to file.
 
         Parameters
@@ -350,12 +339,14 @@ class ConfigManager:
         filename : str, optional
             Custom filename. If None, uses default.
         """
-        filename = self.global_config_file if filename is None else Path(filename)
+        path = self.global_config_file if filename is None else Path(filename)
 
-        self._save_yaml(config, filename)
-        logger.info(f"Global configuration saved to {filename}")
+        self._save_yaml(config, path)
+        logger.info(f"Global configuration saved to {path}")
 
-    def load_global_config(self, filename: Optional[str] = None) -> dict[str, Any]:
+    def load_global_config(
+        self, filename: Union[str, Path, None] = None
+    ) -> dict[str, Any]:
         """Load global configuration from file.
 
         Parameters
@@ -368,13 +359,13 @@ class ConfigManager:
         Dict[str, Any]
             Loaded configuration dictionary.
         """
-        filename = self.global_config_file if filename is None else Path(filename)
+        path = self.global_config_file if filename is None else Path(filename)
 
-        if not filename.exists():
-            logger.warning(f"Configuration file {filename} not found, using empty dict")
+        if not path.exists():
+            logger.warning(f"Configuration file {path} not found, using empty dict")
             return {}
 
-        return self._load_yaml(filename)
+        return self._load_yaml(path)
 
     def create_default_configs(self):
         """Create default configuration files."""
@@ -415,22 +406,6 @@ class ConfigManager:
                 return yaml.safe_load(f) or {}
         except Exception as e:
             raise ConfigurationError(f"Failed to load YAML file {filename}: {e}") from e
-
-    def _save_json(self, data: dict[str, Any], filename: Path):
-        """Save data to JSON file."""
-        try:
-            with filename.open("w") as f:
-                json.dump(data, f, indent=2)
-        except Exception as e:
-            raise ConfigurationError(f"Failed to save JSON file {filename}: {e}") from e
-
-    def _load_json(self, filename: Path) -> dict[str, Any]:
-        """Load data from JSON file."""
-        try:
-            with filename.open() as f:
-                return json.load(f) or {}
-        except Exception as e:
-            raise ConfigurationError(f"Failed to load JSON file {filename}: {e}") from e
 
 
 def get_default_config() -> dict[str, Any]:
@@ -571,6 +546,6 @@ def validate_config(config: dict[str, Any]) -> bool:
             VisualizationConfig(**config["visualization"])
 
         return True
-    except Exception as e:
-        logger.error(f"Configuration validation failed: {e}")
+    except (ConfigurationError, TypeError, ValueError) as e:
+        logger.error("Configuration validation failed: %s", e)
         return False
