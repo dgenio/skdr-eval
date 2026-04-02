@@ -1,6 +1,7 @@
 """Core implementation of DR and Stabilized DR for offline policy evaluation."""
 
 import logging
+import warnings
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, Protocol, Union
 
@@ -948,6 +949,14 @@ def estimate_propensity_pairwise(
             f"Unknown method: {method}. Must be 'auto', 'condlogit', or 'multinomial'"
         )
 
+    if method != "auto":
+        warnings.warn(
+            "The 'method' parameter of estimate_propensity_pairwise is deprecated "
+            "and will be removed in a future version. Use 'strategy' instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
     if strategy == "auto":
         resolved_method = "condlogit" if SCIPY_AVAILABLE else "multinomial"
     else:
@@ -1211,7 +1220,7 @@ def evaluate_pairwise_models(
     direction: Literal["min", "max"],
     n_splits: int = 3,
     strategy: Literal["auto", "direct", "stream", "stream_topk"] = "auto",
-    propensity: Literal["auto", "condlogit", "multinomial"] = "condlogit",
+    propensity: Literal["auto", "condlogit", "multinomial"] = "auto",
     topk: int = 20,
     neg_per_pos: int = 5,
     chunk_pairs: int = 2_000_000,
