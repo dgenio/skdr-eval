@@ -224,9 +224,9 @@ def plot_dr_results(
     width = 0.35
 
     for i, model in enumerate(models):
-        values = [results[model].get(metric, 0) for metric in metrics]
+        values_list = [results[model].get(metric, 0) for metric in metrics]
         # Normalize values for comparison
-        values = np.array(values)
+        values: np.ndarray = np.array(values_list)
         if values.max() > 0:
             values = values / values.max()
         ax4.bar(x + i * width, values, width, label=model, alpha=0.7)
@@ -274,9 +274,9 @@ def plot_calibration_curve(
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    bin_centers, bin_means = zip(*calibration_curve)
-    bin_centers = np.array(bin_centers)
-    bin_means = np.array(bin_means)
+    bin_centers_raw, bin_means_raw = zip(*calibration_curve)
+    bin_centers: np.ndarray = np.array(bin_centers_raw)
+    bin_means: np.ndarray = np.array(bin_means_raw)
 
     # Plot calibration curve
     ax.plot(
@@ -334,9 +334,9 @@ def plot_roc_curve(
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    fpr, tpr = zip(*roc_curve)
-    fpr = np.array(fpr)
-    tpr = np.array(tpr)
+    fpr_raw, tpr_raw = zip(*roc_curve)
+    fpr: np.ndarray = np.array(fpr_raw)
+    tpr: np.ndarray = np.array(tpr_raw)
 
     # Plot ROC curve
     ax.plot(fpr, tpr, "b-", label="ROC Curve", linewidth=2)
