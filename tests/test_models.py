@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
+from sklearn.svm import SVC
 
 from skdr_eval.exceptions import (
     ConfigurationError,
@@ -205,6 +206,106 @@ def test_model_evaluator_performance_invalid_task_type():
         ModelEvaluator.evaluate_model_performance(
             model, X, y, X, y, task_type="invalid"
         )
+
+
+def test_model_evaluator_performance_no_predict_proba():
+    """evaluate_model_performance skips proba metrics when model lacks predict_proba."""
+    np.random.seed(42)
+    X_train = np.random.randn(80, 5)
+    y_train = np.random.randint(0, 2, 80)
+    X_test = np.random.randn(20, 5)
+    y_test = np.random.randint(0, 2, 20)
+
+    model = SVC()  # no predict_proba by default
+    results = ModelEvaluator.evaluate_model_performance(
+        model, X_train, y_train, X_test, y_test, task_type="classification"
+    )
+
+    assert "train_accuracy" in results
+    assert "train_log_loss" not in results
+    assert "test_roc_auc" not in results
+
+
+def test_model_evaluator_performance_multiclass():
+    """evaluate_model_performance skips roc_auc for multiclass (>2 classes)."""
+    np.random.seed(42)
+    X_train = np.random.randn(90, 5)
+    y_train = np.tile([0, 1, 2], 30)
+    X_test = np.random.randn(30, 5)
+    y_test = np.tile([0, 1, 2], 10)
+
+    model = ModelFactory.create_classifier("logistic", random_state=42, max_iter=500)
+    results = ModelEvaluator.evaluate_model_performance(
+        model, X_train, y_train, X_test, y_test, task_type="classification"
+    )
+
+    assert "train_accuracy" in results
+    assert "train_log_loss" in results
+    assert "test_roc_auc" not in results  # skipped for multiclass
+
+
+def test_model_factory_hist_gradient():
+    """hist_gradient classifier and regressor are created and can fit."""
+    np.random.seed(42)
+    X = np.random.randn(60, 4)
+    y_clf = np.random.randint(0, 2, 60)
+    y_reg = np.random.randn(60)
+
+    clf = ModelFactory.create_classifier("hist_gradient", random_state=42)
+    clf.fit(X, y_clf)
+    assert clf.predict(X).shape == (60,)
+
+    reg = ModelFactory.create_regressor("hist_gradient", random_state=42)
+    reg.fit(X, y_reg)
+    assert reg.predict(X).shape == (60,)
+
+
+def test_model_factory_default_params_hist_gradient():
+    """get_default_params returns params for hist_gradient."""
+    clf_params = ModelFactory.get_default_params("hist_gradient", "classification")
+    assert "max_iter" in clf_params
+    assert "learning_rate" in clf_params
+
+    reg_params = ModelFactory.get_default_params("hist_gradient", "regression")
+    assert "max_iter" in reg_params
+
+
+def test_model_selector_grid_search_regression():
+    """grid_search uses regression path when task_type='regression'."""
+    np.random.seed(42)
+    X = np.random.randn(80, 5)
+    y = np.random.randn(80)
+
+    param_grid = {"alpha": [0.1, 1.0, 10.0]}
+    results = ModelSelector.grid_search(
+        "ridge", param_grid, X, y, task_type="regression", cv=3, random_state=42
+    )
+
+    assert "best_params" in results
+    assert "alpha" in results["best_params"]
+    assert results["best_score"] < 0  # neg_mean_squared_error is negative
+
+
+def test_model_selector_random_search_regression():
+    """random_search uses regression path when task_type='regression'."""
+    np.random.seed(42)
+    X = np.random.randn(80, 5)
+    y = np.random.randn(80)
+
+    param_distributions = {"alpha": [0.01, 0.1, 1.0, 10.0]}
+    results = ModelSelector.random_search(
+        "ridge",
+        param_distributions,
+        X,
+        y,
+        task_type="regression",
+        n_iter=4,
+        cv=3,
+        random_state=42,
+    )
+
+    assert "best_params" in results
+    assert results["best_score"] < 0  # neg_mean_squared_error is negative
 
 
 def test_model_selector_grid_search():
