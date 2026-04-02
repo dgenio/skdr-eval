@@ -156,6 +156,14 @@ Before making any changes, AI agents should:
    make check
    ```
 
+4. **Validate Public API Exports**
+    - If you edit [src/skdr_eval/__init__.py](src/skdr_eval/__init__.py), ensure every symbol in __all__ is actually imported in that file.
+    - For new top-level exports, run a quick import smoke test (for example, import the package and check representative attributes exist).
+
+5. **Validate Statistical Formulas with Numeric Assertions**
+    - For statistical helpers, add at least one test that checks a computed numeric value (not only type/range checks).
+    - Include at least one edge-case test for degenerate inputs (for example, identical samples or zero variance).
+
 ### Common Patterns for AI Agents
 
 #### Adding New Functionality
