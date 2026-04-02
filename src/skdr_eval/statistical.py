@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 from scipy import stats
@@ -102,11 +102,12 @@ def t_test(
 
     # Calculate degrees of freedom
     if equal_var:
-        df = n1 + n2 - 2
+        df: float = float(n1 + n2 - 2)
     else:
         # Welch's t-test degrees of freedom
-        df = (var1 / n1 + var2 / n2) ** 2 / (
-            (var1 / n1) ** 2 / (n1 - 1) + (var2 / n2) ** 2 / (n2 - 1)
+        df = float(
+            (var1 / n1 + var2 / n2) ** 2
+            / ((var1 / n1) ** 2 / (n1 - 1) + (var2 / n2) ** 2 / (n2 - 1))
         )
 
     # Calculate critical value
@@ -272,7 +273,7 @@ def chi_square_test(
             raise DataValidationError("Expected frequencies must be non-negative")
 
     # Calculate chi-square statistic
-    chi2_stat = np.sum((observed - expected) ** 2 / expected)
+    chi2_stat: float = float(np.sum((observed - expected) ** 2 / expected))
 
     # Calculate p-value
     df = len(observed) - 1
@@ -282,7 +283,7 @@ def chi_square_test(
     critical_value = chi2.ppf(1 - alpha, df)
 
     # Calculate effect size (Cramér's V)
-    n = np.sum(observed)
+    n: float = float(np.sum(observed))
     effect_size = np.sqrt(chi2_stat / (n * (len(observed) - 1)))
 
     # Interpretation
@@ -293,12 +294,12 @@ def chi_square_test(
 
     return StatisticalTest(
         test_name="Chi-square test",
-        statistic=chi2_stat,
-        p_value=p_value,
-        critical_value=critical_value,
+        statistic=float(chi2_stat),
+        p_value=float(p_value),
+        critical_value=float(critical_value),
         degrees_of_freedom=df,
         confidence_interval=None,
-        effect_size=effect_size,
+        effect_size=float(effect_size),
         interpretation=interpretation,
     )
 
@@ -307,7 +308,7 @@ def kolmogorov_smirnov_test(
     sample: np.ndarray,
     distribution: str = "norm",
     alpha: float = 0.05,
-    **kwargs,
+    **kwargs: Any,
 ) -> StatisticalTest:
     """Perform Kolmogorov-Smirnov test for goodness of fit.
 
@@ -334,26 +335,33 @@ def kolmogorov_smirnov_test(
         raise DataValidationError("Sample must contain only finite values")
 
     # Get distribution function
+    dist_func: Callable[[np.ndarray], np.ndarray]
     if distribution == "norm":
         loc = kwargs.get("loc", np.mean(sample))
         scale = kwargs.get("scale", np.std(sample))
 
-        def dist_func(x: np.ndarray) -> np.ndarray:
-            return stats.norm.cdf(x, loc=loc, scale=scale)
+        def _dist_norm(x: np.ndarray) -> np.ndarray:
+            return np.asarray(stats.norm.cdf(x, loc=loc, scale=scale))  # type: ignore[no-any-return]
+
+        dist_func = _dist_norm
 
     elif distribution == "uniform":
         loc = kwargs.get("loc", np.min(sample))
         scale = kwargs.get("scale", np.max(sample) - np.min(sample))
 
-        def dist_func(x: np.ndarray) -> np.ndarray:  # type: ignore[misc]
-            return stats.uniform.cdf(x, loc=loc, scale=scale)
+        def _dist_unif(x: np.ndarray) -> np.ndarray:
+            return np.asarray(stats.uniform.cdf(x, loc=loc, scale=scale))  # type: ignore[no-any-return]
+
+        dist_func = _dist_unif
 
     elif distribution == "expon":
         loc = kwargs.get("loc", 0)
         scale = kwargs.get("scale", np.mean(sample))
 
-        def dist_func(x: np.ndarray) -> np.ndarray:  # type: ignore[misc]
-            return stats.expon.cdf(x, loc=loc, scale=scale)
+        def _dist_expon(x: np.ndarray) -> np.ndarray:
+            return np.asarray(stats.expon.cdf(x, loc=loc, scale=scale))  # type: ignore[no-any-return]
+
+        dist_func = _dist_expon
 
     else:
         raise ValueError(f"Unknown distribution: {distribution}")
@@ -388,7 +396,7 @@ def kolmogorov_smirnov_test(
 
 def bootstrap_confidence_interval(
     data: np.ndarray,
-    statistic_func: callable,
+    statistic_func: Callable[[np.ndarray], float],
     n_bootstrap: int = 1000,
     alpha: float = 0.05,
     method: str = "percentile",
@@ -438,24 +446,30 @@ def bootstrap_confidence_interval(
     bootstrap_stats = np.array(bootstrap_stats)
 
     if method == "percentile":
-        ci_lower = np.percentile(bootstrap_stats, 100 * alpha / 2)
-        ci_upper = np.percentile(bootstrap_stats, 100 * (1 - alpha / 2))
+        ci_lower = float(np.percentile(bootstrap_stats, 100 * alpha / 2))
+        ci_upper = float(np.percentile(bootstrap_stats, 100 * (1 - alpha / 2)))
     elif method == "basic":
         original_stat = statistic_func(data)
-        ci_lower = 2 * original_stat - np.percentile(
-            bootstrap_stats, 100 * (1 - alpha / 2)
+        ci_lower = float(
+            2 * original_stat - np.percentile(bootstrap_stats, 100 * (1 - alpha / 2))
         )
-        ci_upper = 2 * original_stat - np.percentile(bootstrap_stats, 100 * alpha / 2)
+        ci_upper = float(
+            2 * original_stat - np.percentile(bootstrap_stats, 100 * alpha / 2)
+        )
     else:
         raise ValueError(f"Unknown bootstrap method: {method}")
 
     return ci_lower, ci_upper
 
 
+def _default_stat_func(x: np.ndarray, y: np.ndarray) -> float:
+    return float(np.mean(x) - np.mean(y))
+
+
 def permutation_test(
     sample1: np.ndarray,
     sample2: np.ndarray,
-    statistic_func: callable = lambda x, y: np.mean(x) - np.mean(y),
+    statistic_func: Callable[[np.ndarray, np.ndarray], float] = _default_stat_func,
     n_permutations: int = 1000,
     alpha: float = 0.05,
     random_state: Optional[int] = None,
@@ -516,7 +530,9 @@ def permutation_test(
     p_value = np.mean(np.abs(permuted_stats) >= np.abs(observed_stat))
 
     # Calculate critical value
-    critical_value = np.percentile(np.abs(permuted_stats), 100 * (1 - alpha))
+    critical_value: float = float(
+        np.percentile(np.abs(permuted_stats), 100 * (1 - alpha))
+    )
 
     # Calculate effect size
     effect_size = observed_stat / np.std(combined)
@@ -529,12 +545,12 @@ def permutation_test(
 
     return StatisticalTest(
         test_name="Permutation test",
-        statistic=observed_stat,
-        p_value=p_value,
-        critical_value=critical_value,
+        statistic=float(observed_stat),
+        p_value=float(p_value),
+        critical_value=float(critical_value),
         degrees_of_freedom=None,
         confidence_interval=None,
-        effect_size=effect_size,
+        effect_size=float(effect_size),
         interpretation=interpretation,
     )
 
@@ -587,7 +603,7 @@ def multiple_comparison_correction(
     else:
         raise ValueError(f"Unknown correction method: {method}")
 
-    return corrected.tolist()
+    return list(corrected.tolist())
 
 
 def power_analysis(
@@ -644,7 +660,7 @@ def power_analysis(
     # Calculate power
     power = 1 - t.cdf(critical_value, df, ncp) + t.cdf(-critical_value, df, ncp)
 
-    return min(max(power, 0), 1)  # Ensure power is between 0 and 1
+    return float(min(max(power, 0), 1))  # Ensure power is between 0 and 1
 
 
 def sample_size_calculation(
