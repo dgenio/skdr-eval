@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, cast
 
 import numpy as np
 from scipy import stats
@@ -341,7 +341,7 @@ def kolmogorov_smirnov_test(
         scale = kwargs.get("scale", np.std(sample))
 
         def _dist_norm(x: np.ndarray) -> np.ndarray:
-            return np.asarray(stats.norm.cdf(x, loc=loc, scale=scale))  # type: ignore[no-any-return]
+            return cast("np.ndarray", stats.norm.cdf(x, loc=loc, scale=scale))
 
         dist_func = _dist_norm
 
@@ -350,7 +350,7 @@ def kolmogorov_smirnov_test(
         scale = kwargs.get("scale", np.max(sample) - np.min(sample))
 
         def _dist_unif(x: np.ndarray) -> np.ndarray:
-            return np.asarray(stats.uniform.cdf(x, loc=loc, scale=scale))  # type: ignore[no-any-return]
+            return cast("np.ndarray", stats.uniform.cdf(x, loc=loc, scale=scale))
 
         dist_func = _dist_unif
 
@@ -359,7 +359,7 @@ def kolmogorov_smirnov_test(
         scale = kwargs.get("scale", np.mean(sample))
 
         def _dist_expon(x: np.ndarray) -> np.ndarray:
-            return np.asarray(stats.expon.cdf(x, loc=loc, scale=scale))  # type: ignore[no-any-return]
+            return cast("np.ndarray", stats.expon.cdf(x, loc=loc, scale=scale))
 
         dist_func = _dist_expon
 
@@ -435,15 +435,15 @@ def bootstrap_confidence_interval(
 
     rng = np.random.RandomState(random_state)
     n = len(data)
-    bootstrap_stats = []
+    bootstrap_stats_list: list[float] = []
 
     for _ in range(n_bootstrap):
         # Sample with replacement
         bootstrap_sample = rng.choice(data, size=n, replace=True)
         bootstrap_stat = statistic_func(bootstrap_sample)
-        bootstrap_stats.append(bootstrap_stat)
+        bootstrap_stats_list.append(bootstrap_stat)
 
-    bootstrap_stats = np.array(bootstrap_stats)
+    bootstrap_stats = np.array(bootstrap_stats_list)
 
     if method == "percentile":
         ci_lower = float(np.percentile(bootstrap_stats, 100 * alpha / 2))
@@ -515,16 +515,16 @@ def permutation_test(
     n1 = len(sample1)
 
     # Perform permutations
-    permuted_stats = []
+    permuted_stats_list: list[float] = []
     for _ in range(n_permutations):
         # Shuffle combined sample
         shuffled = rng.permutation(combined)
         perm_sample1 = shuffled[:n1]
         perm_sample2 = shuffled[n1:]
         perm_stat = statistic_func(perm_sample1, perm_sample2)
-        permuted_stats.append(perm_stat)
+        permuted_stats_list.append(perm_stat)
 
-    permuted_stats = np.array(permuted_stats)
+    permuted_stats = np.array(permuted_stats_list)
 
     # Calculate p-value
     p_value = np.mean(np.abs(permuted_stats) >= np.abs(observed_stat))
@@ -579,24 +579,24 @@ def multiple_comparison_correction(
     if not all(0 <= p <= 1 for p in p_values):
         raise DataValidationError("P-values must be between 0 and 1")
 
-    p_values = np.array(p_values)
-    n = len(p_values)
+    p_arr = np.array(p_values)
+    n = len(p_arr)
 
     if method == "bonferroni":
-        corrected = p_values * n
+        corrected = p_arr * n
         corrected = np.minimum(corrected, 1.0)
     elif method == "holm":
         # Holm-Bonferroni method
-        sorted_indices = np.argsort(p_values)
-        corrected = np.zeros_like(p_values)
+        sorted_indices = np.argsort(p_arr)
+        corrected = np.zeros_like(p_arr)
         for i, idx in enumerate(sorted_indices):
-            corrected[idx] = p_values[idx] * (n - i)
+            corrected[idx] = p_arr[idx] * (n - i)
         corrected = np.minimum(corrected, 1.0)
     elif method == "fdr_bh":
         # Benjamini-Hochberg FDR correction
-        sorted_indices = np.argsort(p_values)
-        sorted_p = p_values[sorted_indices]
-        corrected = np.zeros_like(p_values)
+        sorted_indices = np.argsort(p_arr)
+        sorted_p = p_arr[sorted_indices]
+        corrected = np.zeros_like(p_arr)
         for i in range(n):
             corrected[sorted_indices[i]] = sorted_p[i] * n / (i + 1)
         corrected = np.minimum(corrected, 1.0)
