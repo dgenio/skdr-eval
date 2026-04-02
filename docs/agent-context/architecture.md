@@ -5,9 +5,9 @@ Doubly robust (DR) and stabilized doubly robust (SNDR) estimation are inherently
 
 ## Why the Library Has Chosen This Boundary
 - **Input Layer**: Standard data structures (Pandas DataFrames, NumPy arrays). This follows scikit-learn conventions and reduces friction for users.
-- **Core Logic**: The cross-fitting and propensity-stabilization patterns are statistically necessary, not organizational preferences. See [\docs/agent-context/invariants.md\](docs/agent-context/invariants.md) for what must not be altered.
+- **Core Logic**: The cross-fitting and propensity-stabilization patterns are statistically necessary, not organizational preferences. See [`docs/agent-context/invariants.md`](./invariants.md) for what must not be altered.
 
 ## Why Complex-Looking Code Exists
-Functions like propensity score clipping (e.g., \_clip_propensities\) may look like arbitrary heuristics. They are required for variance stabilization in DR/SNDR and are grounded in statistical theory, not in ad-hoc tuning.
+Functions like propensity score clipping (e.g., the clipping logic in `dr_value_with_clip` in `src/skdr_eval/core.py`) may look like arbitrary heuristics. They are required for variance stabilization in DR/SNDR and are grounded in statistical theory, not in ad-hoc tuning.
 
-*(For specific implementation constraints that enforce this design, consult [\docs/agent-context/invariants.md\](docs/agent-context/invariants.md).)*
+*(For specific implementation constraints that enforce this design, consult [`docs/agent-context/invariants.md`](./invariants.md).)*
