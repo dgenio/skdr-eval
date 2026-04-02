@@ -2,6 +2,17 @@
 
 import importlib
 
+from .config import (
+    ConfigManager,
+    EvaluationConfig,
+    ModelConfig,
+    VisualizationConfig,
+    get_default_config,
+    load_config_from_file,
+    merge_configs,
+    save_config_to_file,
+    validate_config,
+)
 from .core import (
     Design,
     DRResult,
@@ -80,14 +91,17 @@ except ImportError:
 __all__ = [
     "HAS_VISUALIZATION",
     "BootstrapError",
+    "ConfigManager",
     "ConfigurationError",
     "ConvergenceError",
     "DRResult",
     "DataValidationError",
     "Design",
     "EstimationError",
+    "EvaluationConfig",
     "InsufficientDataError",
     "MemoryError",
+    "ModelConfig",
     "ModelEvaluator",
     "ModelFactory",
     "ModelSelector",
@@ -101,6 +115,7 @@ __all__ = [
     "SkdrEvalError",
     "StatisticalTest",
     "VersionError",
+    "VisualizationConfig",
     "__version__",
     "block_bootstrap_ci",
     "bootstrap_confidence_interval",
@@ -114,12 +129,15 @@ __all__ = [
     "evaluate_sklearn_models",
     "fit_outcome_crossfit",
     "fit_propensity_timecal",
+    "get_default_config",
     "get_model_recommendations",
     "induce_policy_from_sklearn",
     "kolmogorov_smirnov_test",
+    "load_config_from_file",
     "make_pairwise_synth",
     "make_synth_logs",
     "mann_whitney_u_test",
+    "merge_configs",
     "multiple_comparison_correction",
     "permutation_test",
     "plot_calibration_curve",
@@ -129,5 +147,7 @@ __all__ = [
     "plot_roc_curve",
     "power_analysis",
     "sample_size_calculation",
+    "save_config_to_file",
     "t_test",
+    "validate_config",
 ]
