@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from scipy.stats import t
 
-from skdr_eval.exceptions import DataValidationError
+from skdr_eval.exceptions import DataValidationError, InsufficientDataError
 from skdr_eval.statistical import (
     bootstrap_confidence_interval,
     chi_square_test,
@@ -253,38 +253,38 @@ def test_sample_size_calculation():
 def test_error_handling():
     """Test error handling in statistical functions."""
     # Test with insufficient data
-    with pytest.raises(Exception):  # Should raise InsufficientDataError
+    with pytest.raises(InsufficientDataError):
         t_test(np.array([1]), np.array([2, 3]))
 
-    with pytest.raises(Exception):  # Should raise InsufficientDataError
+    with pytest.raises(InsufficientDataError):
         mann_whitney_u_test(np.array([1, 2]), np.array([3]))
 
-    with pytest.raises(Exception):  # Should raise InsufficientDataError
+    with pytest.raises(InsufficientDataError):
         chi_square_test(np.array([10]))
 
-    with pytest.raises(Exception):  # Should raise InsufficientDataError
+    with pytest.raises(InsufficientDataError):
         kolmogorov_smirnov_test(np.array([1, 2, 3, 4]))
 
-    with pytest.raises(Exception):  # Should raise InsufficientDataError
+    with pytest.raises(InsufficientDataError):
         bootstrap_confidence_interval(np.array([1]), np.mean)
 
-    with pytest.raises(Exception):  # Should raise InsufficientDataError
+    with pytest.raises(InsufficientDataError):
         permutation_test(np.array([1]), np.array([2, 3]))
 
     # Test with invalid data
-    with pytest.raises(Exception):  # Should raise DataValidationError
+    with pytest.raises(DataValidationError):
         t_test(np.array([1, 2, np.nan]), np.array([3, 4, 5]))
 
-    with pytest.raises(Exception):  # Should raise DataValidationError
+    with pytest.raises(DataValidationError):
         chi_square_test(np.array([-1, 2, 3]))
 
-    with pytest.raises(Exception):  # Should raise DataValidationError
+    with pytest.raises(DataValidationError):
         multiple_comparison_correction([1.5, 0.1])  # Invalid p-value
 
-    with pytest.raises(Exception):  # Should raise DataValidationError
+    with pytest.raises(DataValidationError):
         power_analysis(effect_size=-0.5, n=30)
 
-    with pytest.raises(Exception):  # Should raise DataValidationError
+    with pytest.raises(DataValidationError):
         sample_size_calculation(effect_size=-0.5, power=0.8)
 
 
