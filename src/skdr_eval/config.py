@@ -2,10 +2,9 @@
 
 import json
 import logging
-import os
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 import yaml
 
@@ -24,7 +23,7 @@ class EvaluationConfig:
     min_ess_frac: float = 0.02
 
     # Clipping parameters
-    clip_grid: List[float] = None
+    clip_grid: list[float] = None
 
     # Bootstrap parameters
     n_boot: int = 400
@@ -65,13 +64,13 @@ class EvaluationConfig:
 
     def _validate(self):
         """Validate configuration parameters."""
-        if self.n_splits < 2:
+        if self.n_splits < 2:  # noqa: PLR2004
             raise ConfigurationError("n_splits must be at least 2")
 
         if not 0 < self.min_ess_frac < 1:
             raise ConfigurationError("min_ess_frac must be between 0 and 1")
 
-        if self.n_boot < 100:
+        if self.n_boot < 100:  # noqa: PLR2004
             raise ConfigurationError("n_boot must be at least 100")
 
         if not 0 < self.alpha < 1:
@@ -86,10 +85,10 @@ class EvaluationConfig:
         if self.neg_per_pos < 1:
             raise ConfigurationError("neg_per_pos must be at least 1")
 
-        if self.chunk_pairs < 1000:
+        if self.chunk_pairs < 1000:  # noqa: PLR2004
             raise ConfigurationError("chunk_pairs must be at least 1000")
 
-        if self.dpi < 72:
+        if self.dpi < 72:  # noqa: PLR2004
             raise ConfigurationError("dpi must be at least 72")
 
         valid_log_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -106,7 +105,7 @@ class ModelConfig:
     task_type: str = "classification"
 
     # Hyperparameters
-    hyperparameters: Dict[str, Any] = None
+    hyperparameters: dict[str, Any] = None
 
     # Cross-validation parameters
     cv_folds: int = 5
@@ -133,7 +132,7 @@ class ModelConfig:
         if self.task_type not in valid_task_types:
             raise ConfigurationError(f"task_type must be one of {valid_task_types}")
 
-        if self.cv_folds < 2:
+        if self.cv_folds < 2:  # noqa: PLR2004
             raise ConfigurationError("cv_folds must be at least 2")
 
         if not 0 < self.test_size < 1:
@@ -175,16 +174,16 @@ class VisualizationConfig:
 
     def _validate(self):
         """Validate configuration parameters."""
-        if self.dpi < 72:
+        if self.dpi < 72:  # noqa: PLR2004
             raise ConfigurationError("dpi must be at least 72")
 
-        if self.font_size < 8:
+        if self.font_size < 8:  # noqa: PLR2004
             raise ConfigurationError("font_size must be at least 8")
 
-        if self.title_size < 8:
+        if self.title_size < 8:  # noqa: PLR2004
             raise ConfigurationError("title_size must be at least 8")
 
-        if self.label_size < 8:
+        if self.label_size < 8:  # noqa: PLR2004
             raise ConfigurationError("label_size must be at least 8")
 
         valid_formats = ["png", "pdf", "svg", "jpg", "jpeg"]
@@ -229,10 +228,7 @@ class ConfigManager:
         filename : str, optional
             Custom filename. If None, uses default.
         """
-        if filename is None:
-            filename = self.eval_config_file
-        else:
-            filename = Path(filename)
+        filename = self.eval_config_file if filename is None else Path(filename)
 
         config_dict = asdict(config)
         self._save_yaml(config_dict, filename)
@@ -253,10 +249,7 @@ class ConfigManager:
         EvaluationConfig
             Loaded configuration.
         """
-        if filename is None:
-            filename = self.eval_config_file
-        else:
-            filename = Path(filename)
+        filename = self.eval_config_file if filename is None else Path(filename)
 
         if not filename.exists():
             logger.warning(f"Configuration file {filename} not found, using defaults")
@@ -275,10 +268,7 @@ class ConfigManager:
         filename : str, optional
             Custom filename. If None, uses default.
         """
-        if filename is None:
-            filename = self.model_config_file
-        else:
-            filename = Path(filename)
+        filename = self.model_config_file if filename is None else Path(filename)
 
         config_dict = asdict(config)
         self._save_yaml(config_dict, filename)
@@ -297,10 +287,7 @@ class ConfigManager:
         ModelConfig
             Loaded configuration.
         """
-        if filename is None:
-            filename = self.model_config_file
-        else:
-            filename = Path(filename)
+        filename = self.model_config_file if filename is None else Path(filename)
 
         if not filename.exists():
             logger.warning(f"Configuration file {filename} not found, using defaults")
@@ -321,10 +308,7 @@ class ConfigManager:
         filename : str, optional
             Custom filename. If None, uses default.
         """
-        if filename is None:
-            filename = self.viz_config_file
-        else:
-            filename = Path(filename)
+        filename = self.viz_config_file if filename is None else Path(filename)
 
         config_dict = asdict(config)
         self._save_yaml(config_dict, filename)
@@ -345,10 +329,7 @@ class ConfigManager:
         VisualizationConfig
             Loaded configuration.
         """
-        if filename is None:
-            filename = self.viz_config_file
-        else:
-            filename = Path(filename)
+        filename = self.viz_config_file if filename is None else Path(filename)
 
         if not filename.exists():
             logger.warning(f"Configuration file {filename} not found, using defaults")
@@ -358,7 +339,7 @@ class ConfigManager:
         return VisualizationConfig(**config_dict)
 
     def save_global_config(
-        self, config: Dict[str, Any], filename: Optional[str] = None
+        self, config: dict[str, Any], filename: Optional[str] = None
     ):
         """Save global configuration to file.
 
@@ -369,15 +350,12 @@ class ConfigManager:
         filename : str, optional
             Custom filename. If None, uses default.
         """
-        if filename is None:
-            filename = self.global_config_file
-        else:
-            filename = Path(filename)
+        filename = self.global_config_file if filename is None else Path(filename)
 
         self._save_yaml(config, filename)
         logger.info(f"Global configuration saved to {filename}")
 
-    def load_global_config(self, filename: Optional[str] = None) -> Dict[str, Any]:
+    def load_global_config(self, filename: Optional[str] = None) -> dict[str, Any]:
         """Load global configuration from file.
 
         Parameters
@@ -390,10 +368,7 @@ class ConfigManager:
         Dict[str, Any]
             Loaded configuration dictionary.
         """
-        if filename is None:
-            filename = self.global_config_file
-        else:
-            filename = Path(filename)
+        filename = self.global_config_file if filename is None else Path(filename)
 
         if not filename.exists():
             logger.warning(f"Configuration file {filename} not found, using empty dict")
@@ -425,40 +400,40 @@ class ConfigManager:
 
         logger.info("Default configuration files created")
 
-    def _save_yaml(self, data: Dict[str, Any], filename: Path):
+    def _save_yaml(self, data: dict[str, Any], filename: Path):
         """Save data to YAML file."""
         try:
-            with open(filename, "w") as f:
+            with filename.open("w") as f:
                 yaml.dump(data, f, default_flow_style=False, indent=2)
         except Exception as e:
-            raise ConfigurationError(f"Failed to save YAML file {filename}: {e}")
+            raise ConfigurationError(f"Failed to save YAML file {filename}: {e}") from e
 
-    def _load_yaml(self, filename: Path) -> Dict[str, Any]:
+    def _load_yaml(self, filename: Path) -> dict[str, Any]:
         """Load data from YAML file."""
         try:
-            with open(filename, "r") as f:
+            with filename.open() as f:
                 return yaml.safe_load(f) or {}
         except Exception as e:
-            raise ConfigurationError(f"Failed to load YAML file {filename}: {e}")
+            raise ConfigurationError(f"Failed to load YAML file {filename}: {e}") from e
 
-    def _save_json(self, data: Dict[str, Any], filename: Path):
+    def _save_json(self, data: dict[str, Any], filename: Path):
         """Save data to JSON file."""
         try:
-            with open(filename, "w") as f:
+            with filename.open("w") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
-            raise ConfigurationError(f"Failed to save JSON file {filename}: {e}")
+            raise ConfigurationError(f"Failed to save JSON file {filename}: {e}") from e
 
-    def _load_json(self, filename: Path) -> Dict[str, Any]:
+    def _load_json(self, filename: Path) -> dict[str, Any]:
         """Load data from JSON file."""
         try:
-            with open(filename, "r") as f:
+            with filename.open() as f:
                 return json.load(f) or {}
         except Exception as e:
-            raise ConfigurationError(f"Failed to load JSON file {filename}: {e}")
+            raise ConfigurationError(f"Failed to load JSON file {filename}: {e}") from e
 
 
-def get_default_config() -> Dict[str, Any]:
+def get_default_config() -> dict[str, Any]:
     """Get default configuration dictionary.
 
     Returns
@@ -478,7 +453,7 @@ def get_default_config() -> Dict[str, Any]:
     }
 
 
-def load_config_from_file(filename: Union[str, Path]) -> Dict[str, Any]:
+def load_config_from_file(filename: Union[str, Path]) -> dict[str, Any]:
     """Load configuration from file.
 
     Parameters
@@ -498,21 +473,21 @@ def load_config_from_file(filename: Union[str, Path]) -> Dict[str, Any]:
 
     if filename.suffix.lower() == ".yaml" or filename.suffix.lower() == ".yml":
         try:
-            with open(filename, "r") as f:
+            with filename.open() as f:
                 return yaml.safe_load(f) or {}
         except Exception as e:
-            raise ConfigurationError(f"Failed to load YAML file {filename}: {e}")
+            raise ConfigurationError(f"Failed to load YAML file {filename}: {e}") from e
     elif filename.suffix.lower() == ".json":
         try:
-            with open(filename, "r") as f:
+            with filename.open() as f:
                 return json.load(f) or {}
         except Exception as e:
-            raise ConfigurationError(f"Failed to load JSON file {filename}: {e}")
+            raise ConfigurationError(f"Failed to load JSON file {filename}: {e}") from e
     else:
         raise ConfigurationError(f"Unsupported file format: {filename.suffix}")
 
 
-def save_config_to_file(config: Dict[str, Any], filename: Union[str, Path]):
+def save_config_to_file(config: dict[str, Any], filename: Union[str, Path]):
     """Save configuration to file.
 
     Parameters
@@ -526,21 +501,21 @@ def save_config_to_file(config: Dict[str, Any], filename: Union[str, Path]):
 
     if filename.suffix.lower() == ".yaml" or filename.suffix.lower() == ".yml":
         try:
-            with open(filename, "w") as f:
+            with filename.open("w") as f:
                 yaml.dump(config, f, default_flow_style=False, indent=2)
         except Exception as e:
-            raise ConfigurationError(f"Failed to save YAML file {filename}: {e}")
+            raise ConfigurationError(f"Failed to save YAML file {filename}: {e}") from e
     elif filename.suffix.lower() == ".json":
         try:
-            with open(filename, "w") as f:
+            with filename.open("w") as f:
                 json.dump(config, f, indent=2)
         except Exception as e:
-            raise ConfigurationError(f"Failed to save JSON file {filename}: {e}")
+            raise ConfigurationError(f"Failed to save JSON file {filename}: {e}") from e
     else:
         raise ConfigurationError(f"Unsupported file format: {filename.suffix}")
 
 
-def merge_configs(*configs: Dict[str, Any]) -> Dict[str, Any]:
+def merge_configs(*configs: dict[str, Any]) -> dict[str, Any]:
     """Merge multiple configuration dictionaries.
 
     Parameters
@@ -569,7 +544,7 @@ def merge_configs(*configs: Dict[str, Any]) -> Dict[str, Any]:
     return merged
 
 
-def validate_config(config: Dict[str, Any]) -> bool:
+def validate_config(config: dict[str, Any]) -> bool:
     """Validate configuration dictionary.
 
     Parameters
