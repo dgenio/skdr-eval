@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **`strategy` parameter removed from `estimate_propensity_pairwise()`**: Callers using `strategy=` must switch to `method=`. The `strategy` parameter was previously validated but had no effect on behavior.
+
+### Changed
+- **`estimate_propensity_pairwise()` default `method` is now `"auto"`**: Previously defaulted to `"condlogit"`, which emitted a warning on every call in environments without SciPy. `"auto"` selects `condlogit` when SciPy is available and falls back to `multinomial` silently.
+- **`estimate_propensity_pairwise()` parameters after `design` are now keyword-only**: All parameters except `design` must be passed as keyword arguments. This enforces clarity after the signature change and prevents silent positional-argument misuse.
+- **`evaluate_pairwise_models()` `propensity` parameter now accepts `"auto"`**: Type hint expanded from `Literal["condlogit", "multinomial"]` to `Literal["auto", "condlogit", "multinomial"]`.
+
 ## [0.4.1] - 2025-01-15
 
 ### Fixed

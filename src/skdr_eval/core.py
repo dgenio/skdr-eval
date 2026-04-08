@@ -908,7 +908,8 @@ def _get_outcome_estimator(
 
 def estimate_propensity_pairwise(
     design: PairwiseDesign,
-    method: Literal["auto", "condlogit", "multinomial"] = "condlogit",
+    *,
+    method: Literal["auto", "condlogit", "multinomial"] = "auto",
     neg_per_pos: int = 5,
     n_splits: int = 3,
     random_state: int = 0,

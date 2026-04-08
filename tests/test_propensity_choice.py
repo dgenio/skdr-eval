@@ -74,15 +74,15 @@ def test_propensity_auto_selection():
 def test_propensity_auto_selects_multinomial_when_scipy_unavailable():
     """Test that method='auto' resolves to 'multinomial' when SciPy is unavailable."""
     logs_df, op_daily_df = make_pairwise_synth(
-        n_days=1, n_clients_day=20, n_ops=5, seed=42
+        n_days=3, n_clients_day=50, n_ops=5, seed=42
     )
     design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
 
     with patch("skdr_eval.core.SCIPY_AVAILABLE", False), patch("skdr_eval.core.fit_conditional_logit_with_sampling") as mock_condlogit:
-            propensities = estimate_propensity_pairwise(
-                design, method="auto", n_splits=2, random_state=42
-            )
-            mock_condlogit.assert_not_called()
+        propensities = estimate_propensity_pairwise(
+            design, method="auto", n_splits=2, random_state=42
+        )
+        mock_condlogit.assert_not_called()
 
     assert propensities.shape[0] == len(logs_df)
     assert (propensities >= 0).all()
@@ -94,7 +94,7 @@ def test_propensity_auto_selects_condlogit_when_scipy_available():
         pytest.skip("SciPy not installed in this environment")
 
     logs_df, op_daily_df = make_pairwise_synth(
-        n_days=1, n_clients_day=20, n_ops=5, seed=42
+        n_days=3, n_clients_day=50, n_ops=5, seed=42
     )
     design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
 
@@ -102,10 +102,10 @@ def test_propensity_auto_selects_condlogit_when_scipy_available():
         "skdr_eval.core.fit_conditional_logit_with_sampling",
         wraps=fit_conditional_logit_with_sampling,
     ) as mock_condlogit:
-            propensities = estimate_propensity_pairwise(
-                design, method="auto", n_splits=2, random_state=42
-            )
-            assert mock_condlogit.called
+        propensities = estimate_propensity_pairwise(
+            design, method="auto", n_splits=2, random_state=42
+        )
+        assert mock_condlogit.called
 
     assert propensities.shape[0] == len(logs_df)
     assert (propensities >= 0).all()
