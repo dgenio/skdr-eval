@@ -71,6 +71,46 @@ def test_propensity_auto_selection():
     assert (propensities >= 0).all()
 
 
+def test_propensity_auto_selects_multinomial_when_scipy_unavailable():
+    """Test that method='auto' resolves to 'multinomial' when SciPy is unavailable."""
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=1, n_clients_day=20, n_ops=5, seed=42
+    )
+    design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
+
+    with patch("skdr_eval.core.SCIPY_AVAILABLE", False), patch("skdr_eval.core.fit_conditional_logit_with_sampling") as mock_condlogit:
+            propensities = estimate_propensity_pairwise(
+                design, method="auto", n_splits=2, random_state=42
+            )
+            mock_condlogit.assert_not_called()
+
+    assert propensities.shape[0] == len(logs_df)
+    assert (propensities >= 0).all()
+
+
+def test_propensity_auto_selects_condlogit_when_scipy_available():
+    """Test that method='auto' resolves to 'condlogit' when SciPy is available."""
+    if not SCIPY_AVAILABLE:
+        pytest.skip("SciPy not installed in this environment")
+
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=1, n_clients_day=20, n_ops=5, seed=42
+    )
+    design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
+
+    with patch("skdr_eval.core.SCIPY_AVAILABLE", True), patch(
+        "skdr_eval.core.fit_conditional_logit_with_sampling",
+        wraps=fit_conditional_logit_with_sampling,
+    ) as mock_condlogit:
+            propensities = estimate_propensity_pairwise(
+                design, method="auto", n_splits=2, random_state=42
+            )
+            assert mock_condlogit.called
+
+    assert propensities.shape[0] == len(logs_df)
+    assert (propensities >= 0).all()
+
+
 @pytest.mark.skipif(True, reason="SciPy conditional logit test - may not be available")
 def test_conditional_logit_with_scipy():
     """Test conditional logit when scipy is available."""
@@ -120,7 +160,7 @@ def test_propensity_with_eligibility():
     design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
 
     propensities = estimate_propensity_pairwise(
-        design, method="condlogit", n_splits=2, random_state=42
+        design, method="multinomial", n_splits=2, random_state=42
     )
 
     # Check that ineligible operators have zero probability
@@ -146,7 +186,7 @@ def test_propensity_normalization():
     design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
 
     propensities = estimate_propensity_pairwise(
-        design, method="condlogit", n_splits=2, random_state=42
+        design, method="multinomial", n_splits=2, random_state=42
     )
 
     # Check normalization for each decision
@@ -209,7 +249,7 @@ def test_propensity_error_handling():
     design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
 
     # Test with invalid method
-    with pytest.raises((ValueError, KeyError)):
+    with pytest.raises(ValueError):
         estimate_propensity_pairwise(
             design, method="invalid_method", random_state=42
         )
