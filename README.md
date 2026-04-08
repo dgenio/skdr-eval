@@ -170,7 +170,7 @@ Evaluate models using pairwise (client-operator) evaluation with autoscaling.
 - `report`: DataFrame with per-model evaluation metrics (`V_hat`, `ESS`, `match_rate`, etc.)
 - `detailed`: Dict mapping model name to a dict of estimator name (e.g. `"DR"`, `"SNDR"`) to `DRResult` objects
 
-#### `make_pairwise_synth(n_days=5, n_clients_day=1000, n_ops=20, **kwargs)`
+#### `make_pairwise_synth(n_days=14, n_clients_day=2000, n_ops=200, **kwargs)`
 Generate synthetic pairwise (client-operator) data for evaluation.
 
 **Parameters:**
