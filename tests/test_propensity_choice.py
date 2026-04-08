@@ -78,7 +78,10 @@ def test_propensity_auto_selects_multinomial_when_scipy_unavailable():
     )
     design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
 
-    with patch("skdr_eval.core.SCIPY_AVAILABLE", False), patch("skdr_eval.core.fit_conditional_logit_with_sampling") as mock_condlogit:
+    with (
+        patch("skdr_eval.core.SCIPY_AVAILABLE", False),
+        patch("skdr_eval.core.fit_conditional_logit_with_sampling") as mock_condlogit,
+    ):
         propensities = estimate_propensity_pairwise(
             design, method="auto", n_splits=2, random_state=42
         )
@@ -98,10 +101,13 @@ def test_propensity_auto_selects_condlogit_when_scipy_available():
     )
     design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
 
-    with patch("skdr_eval.core.SCIPY_AVAILABLE", True), patch(
-        "skdr_eval.core.fit_conditional_logit_with_sampling",
-        wraps=fit_conditional_logit_with_sampling,
-    ) as mock_condlogit:
+    with (
+        patch("skdr_eval.core.SCIPY_AVAILABLE", True),
+        patch(
+            "skdr_eval.core.fit_conditional_logit_with_sampling",
+            wraps=fit_conditional_logit_with_sampling,
+        ) as mock_condlogit,
+    ):
         propensities = estimate_propensity_pairwise(
             design, method="auto", n_splits=2, random_state=42
         )
@@ -250,9 +256,7 @@ def test_propensity_error_handling():
 
     # Test with invalid method
     with pytest.raises(ValueError):
-        estimate_propensity_pairwise(
-            design, method="invalid_method", random_state=42
-        )
+        estimate_propensity_pairwise(design, method="invalid_method", random_state=42)
 
 
 def test_large_dataset_fallback():
