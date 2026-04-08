@@ -66,7 +66,7 @@ from .statistical import (
 from .synth import make_pairwise_synth, make_synth_logs
 
 try:
-    from .visualization import (
+    from .visualization import (  # noqa: F401
         create_dashboard,
         plot_calibration_curve,
         plot_diagnostics_summary,
@@ -121,7 +121,6 @@ __all__ = [
     "bootstrap_confidence_interval",
     "build_design",
     "chi_square_test",
-    "create_dashboard",
     "create_model_ensemble",
     "dr_value_with_clip",
     "evaluate_pairwise_models",
@@ -140,14 +139,21 @@ __all__ = [
     "merge_configs",
     "multiple_comparison_correction",
     "permutation_test",
-    "plot_calibration_curve",
-    "plot_diagnostics_summary",
-    "plot_dr_results",
-    "plot_propensity_distribution",
-    "plot_roc_curve",
     "power_analysis",
     "sample_size_calculation",
     "save_config_to_file",
     "t_test",
     "validate_config",
 ]
+
+if HAS_VISUALIZATION:
+    __all__.extend(
+        [
+            "create_dashboard",
+            "plot_calibration_curve",
+            "plot_diagnostics_summary",
+            "plot_dr_results",
+            "plot_propensity_distribution",
+            "plot_roc_curve",
+        ]
+    )

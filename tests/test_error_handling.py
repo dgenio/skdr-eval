@@ -35,27 +35,27 @@ def test_build_design_validation():
     with pytest.raises(DataValidationError):
         skdr_eval.build_design(pd.DataFrame({"col1": [1, 2, 3]}))
 
-    # Test invalid actions
+    # Test invalid actions (>=10 rows to pass min_rows validation)
     logs = pd.DataFrame(
         {
-            "arrival_ts": [1, 2],
-            "action": ["op1", "invalid_op"],
-            "service_time": [1.0, 2.0],
-            "op1_elig": [1, 1],
-            "op2_elig": [1, 1],
+            "arrival_ts": list(range(12)),
+            "action": ["op1", "invalid_op"] * 6,
+            "service_time": [1.0, 2.0] * 6,
+            "op1_elig": [1] * 12,
+            "op2_elig": [1] * 12,
         }
     )
     with pytest.raises(DataValidationError):
         skdr_eval.build_design(logs)
 
-    # Test invalid eligibility values
+    # Test invalid eligibility values (>=10 rows to pass min_rows validation)
     logs = pd.DataFrame(
         {
-            "arrival_ts": [1, 2],
-            "action": ["op1", "op2"],
-            "service_time": [1.0, 2.0],
-            "op1_elig": [1, 0],
-            "op2_elig": [1, 2],  # Invalid: should be 0 or 1
+            "arrival_ts": list(range(12)),
+            "action": ["op1", "op2"] * 6,
+            "service_time": [1.0, 2.0] * 6,
+            "op1_elig": [1, 0] * 6,
+            "op2_elig": [1, 2] * 6,  # Invalid: should be 0 or 1
         }
     )
     with pytest.raises(DataValidationError):

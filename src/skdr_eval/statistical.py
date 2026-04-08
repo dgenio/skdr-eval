@@ -32,7 +32,7 @@ class StatisticalTest:
     statistic: float
     p_value: float
     critical_value: float
-    degrees_of_freedom: Optional[int] = None
+    degrees_of_freedom: Optional[float] = None
     confidence_interval: Optional[tuple[float, float]] = None
     effect_size: Optional[float] = None
     interpretation: str = ""
@@ -153,7 +153,7 @@ def t_test(
         statistic=statistic,
         p_value=p_value,
         critical_value=critical_value,
-        degrees_of_freedom=int(df),
+        degrees_of_freedom=df,
         confidence_interval=(ci_lower, ci_upper),
         effect_size=effect_size,
         interpretation=interpretation,
@@ -271,6 +271,12 @@ def chi_square_test(
             )
         if np.any(expected < 0):
             raise DataValidationError("Expected frequencies must be non-negative")
+
+    # Validate expected frequencies are positive (avoid division by zero)
+    if np.any(expected <= 0):
+        raise DataValidationError(
+            "Expected frequencies must be strictly positive for chi-square test"
+        )
 
     # Calculate chi-square statistic
     chi2_stat: float = float(np.sum((observed - expected) ** 2 / expected))
@@ -535,7 +541,14 @@ def permutation_test(
     )
 
     # Calculate effect size
-    effect_size = observed_stat / np.std(combined)
+    combined_std = float(np.std(combined))
+    if np.isclose(combined_std, 0.0):
+        if np.isclose(observed_stat, 0.0):
+            effect_size = 0.0
+        else:
+            effect_size = float(np.copysign(np.inf, observed_stat))
+    else:
+        effect_size = observed_stat / combined_std
 
     # Interpretation
     if p_value < alpha:
@@ -586,20 +599,23 @@ def multiple_comparison_correction(
         corrected = p_arr * n
         corrected = np.minimum(corrected, 1.0)
     elif method == "holm":
-        # Holm-Bonferroni method
-        sorted_indices = np.argsort(p_arr)
-        corrected = np.zeros_like(p_arr)
-        for i, idx in enumerate(sorted_indices):
-            corrected[idx] = p_arr[idx] * (n - i)
-        corrected = np.minimum(corrected, 1.0)
-    elif method == "fdr_bh":
-        # Benjamini-Hochberg FDR correction
+        # Holm-Bonferroni step-down method with monotonicity adjustment
         sorted_indices = np.argsort(p_arr)
         sorted_p = p_arr[sorted_indices]
+        raw_adjusted = sorted_p * np.arange(n, 0, -1)
+        monotone_adjusted = np.maximum.accumulate(raw_adjusted)
+        monotone_adjusted = np.minimum(monotone_adjusted, 1.0)
         corrected = np.zeros_like(p_arr)
-        for i in range(n):
-            corrected[sorted_indices[i]] = sorted_p[i] * n / (i + 1)
-        corrected = np.minimum(corrected, 1.0)
+        corrected[sorted_indices] = monotone_adjusted
+    elif method == "fdr_bh":
+        # Benjamini-Hochberg FDR step-up method with monotonicity adjustment
+        sorted_indices = np.argsort(p_arr)
+        sorted_p = p_arr[sorted_indices]
+        raw_adjusted = sorted_p * n / np.arange(1, n + 1)
+        monotone_adjusted = np.minimum.accumulate(raw_adjusted[::-1])[::-1]
+        monotone_adjusted = np.minimum(monotone_adjusted, 1.0)
+        corrected = np.zeros_like(p_arr)
+        corrected[sorted_indices] = monotone_adjusted
     else:
         raise ValueError(f"Unknown correction method: {method}")
 

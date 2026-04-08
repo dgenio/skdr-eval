@@ -3,6 +3,7 @@
 import logging
 from typing import Optional
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
@@ -13,6 +14,7 @@ from .exceptions import DataValidationError, InsufficientDataError
 logger = logging.getLogger("skdr_eval")
 
 _MIN_SAMPLES = 10
+_MPL_VERSION = tuple(int(x) for x in matplotlib.__version__.split(".")[:2])
 
 __all__ = [
     "create_dashboard",
@@ -101,7 +103,12 @@ def plot_propensity_distribution(
             box_labels.append(action_names[action])
 
     if box_data:
-        ax2.boxplot(box_data, tick_labels=box_labels)
+        box_kwargs = (
+            {"tick_labels": box_labels}
+            if _MPL_VERSION >= (3, 9)
+            else {"labels": box_labels}
+        )
+        ax2.boxplot(box_data, **box_kwargs)
         ax2.set_ylabel("Propensity Score")
         ax2.set_title("Box Plot by Action")
         ax2.tick_params(axis="x", rotation=45)
@@ -451,7 +458,8 @@ def plot_diagnostics_summary(
     ax4.set_xlabel("Mean Predicted")
     ax4.set_ylabel("Fraction of Positives")
     ax4.set_title("Calibration Curve")
-    ax4.legend()
+    if diagnostics.calibration_curve:
+        ax4.legend()
     ax4.grid(True, alpha=0.3)
 
     # Plot 5: ROC curve
@@ -463,7 +471,8 @@ def plot_diagnostics_summary(
     ax5.set_xlabel("False Positive Rate")
     ax5.set_ylabel("True Positive Rate")
     ax5.set_title("ROC Curve")
-    ax5.legend()
+    if diagnostics.roc_curve:
+        ax5.legend()
     ax5.grid(True, alpha=0.3)
 
     # Plot 6: Quantiles (from diagnostics.statistics, if populated)
@@ -581,6 +590,10 @@ def create_dashboard(
     n_actions = propensities.shape[1]
     if action_names is None:
         action_names = [f"Action {i}" for i in range(n_actions)]
+    elif len(action_names) < n_actions:
+        raise DataValidationError(
+            f"Expected at least {n_actions} action names, but got {len(action_names)}"
+        )
 
     for action in range(n_actions):
         action_mask = actions == action

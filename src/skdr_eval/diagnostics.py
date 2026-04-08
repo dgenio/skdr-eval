@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from sklearn.metrics import log_loss, roc_auc_score, roc_curve
 
-from .exceptions import DataValidationError, InsufficientDataError
+from .exceptions import ConfigurationError, DataValidationError, InsufficientDataError
 
 logger = logging.getLogger("skdr_eval")
 
@@ -480,7 +480,7 @@ def generate_propensity_report(
     elif output_format == "markdown":
         return _generate_markdown_report(diagnostics)
     else:
-        raise ValueError(f"Unknown output format: {output_format}")
+        raise ConfigurationError(f"Unknown output format: {output_format}")
 
 
 def _generate_text_report(diagnostics: PropensityDiagnostics) -> str:

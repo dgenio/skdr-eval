@@ -1834,6 +1834,8 @@ def evaluate_propensity_diagnostics(
         If input data is invalid
     InsufficientDataError
         If there's insufficient data for evaluation
+    ConfigurationError
+        If output_format is not a recognized format
     """
     # Run comprehensive diagnostics
     diagnostics = comprehensive_propensity_diagnostics(propensities, actions)
