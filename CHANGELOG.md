@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Documentation**: Fixed broken pairwise quick start example in README — corrected function signature (`strategy` replaces non-existent `autoscale_strategies`), added required positional args (`metric_col`, `task_type`, `direction`), fixed return-value unpacking (`(report, detailed)` tuple), and added explicit model fitting before evaluation.
+- **evaluate_sklearn_models**: Raise `ValueError` immediately when `models` is empty or contains `None` values, preventing silent `(0, 0)` DataFrames and obscure downstream errors ([#45](https://github.com/dgenio/skdr-eval/issues/45))
 
 ## [0.4.1] - 2025-01-15
 
