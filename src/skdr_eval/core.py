@@ -1133,9 +1133,7 @@ def estimate_propensity_pairwise(
             y_train = np.array([actions[i] for i in train_idx])
 
             # Fit multinomial model
-            model = LogisticRegression(
-                random_state=random_state, max_iter=1000
-            )
+            model = LogisticRegression(random_state=random_state, max_iter=1000)
             try:
                 model.fit(X_train, y_train)
 
@@ -1200,7 +1198,7 @@ def evaluate_pairwise_models(
     direction: Literal["min", "max"],
     n_splits: int = 3,
     strategy: Literal["auto", "direct", "stream", "stream_topk"] = "auto",
-    propensity: Literal["auto", "condlogit", "multinomial"] = "condlogit",
+    propensity: Literal["auto", "condlogit", "multinomial"] = "auto",
     topk: int = 20,
     neg_per_pos: int = 5,
     chunk_pairs: int = 2_000_000,
