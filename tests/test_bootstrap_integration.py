@@ -5,6 +5,7 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 
 import skdr_eval
+from skdr_eval.core import block_bootstrap_ci
 
 # Constants for CI validation
 CI_TOLERANCE_MULTIPLIER = 2.0
@@ -350,3 +351,118 @@ class TestBootstrapIntegration:
         for _, row in report.iterrows():
             assert np.isfinite(row["ci_lower"])
             assert np.isfinite(row["ci_upper"])
+
+
+class TestBootstrapCISimulationProof:
+    """Simulation proof that the moving-block bootstrap CI machinery is
+    properly calibrated.
+
+    Required by AGENTS.md Section 6 and .github/copilot-instructions.md Rule 1:
+    "Any change to statistical evaluation logic MUST include a simulation that
+    proves the code recovers a known ground-truth parameter."
+
+    Strategy overview
+    -----------------
+    We test at two levels:
+
+    1. **Core CI function** (``block_bootstrap_ci``): Generate IID data from
+       a known N(mu, sigma^2) distribution and verify the percentile bootstrap
+       CI covers the true mean ``mu`` at approximately 95% rate across many
+       replications.  This directly tests the statistical machinery.
+
+    2. **Full pipeline sanity** (``evaluate_sklearn_models``): Verify that
+       the CI contains the point estimate, has positive width, and is within
+       a reasonable factor of the influence-function SE.  This confirms the
+       pipeline wires the CI correctly without requiring an external oracle
+       (which is complicated by the q_pi == q_hat design choice documented
+       in core.py ``dr_value_with_clip``).
+    """
+
+    def test_block_bootstrap_ci_coverage(self):
+        """Monte Carlo coverage of block_bootstrap_ci on known N(mu, sigma^2).
+
+        Ground truth: mu = 25.0.
+        We draw K=50 IID samples of size n=500 from N(mu, 3^2), compute the
+        95% CI on each, and check coverage >= 85%.  The block bootstrap is
+        slightly conservative for IID data (block_len = sqrt(n) introduces
+        dependence structure where none exists), so 85% is a safe lower bound
+        for the true 95% nominal rate.
+        """
+        mu = 25.0
+        sigma = 3.0
+        n = 500
+        K = 50
+        alpha = 0.05
+        covered = 0
+
+        for seed in range(K):
+            rng = np.random.RandomState(seed)
+            values = rng.normal(mu, sigma, size=n)
+
+            ci_lo, ci_hi = block_bootstrap_ci(
+                values_num=values,
+                values_den=None,
+                base_mean=np.array([values.mean()]),
+                n_boot=400,
+                alpha=alpha,
+                random_state=seed,
+            )
+
+            if ci_lo <= mu <= ci_hi:
+                covered += 1
+
+        coverage = covered / K
+        assert coverage >= 0.85, (
+            f"block_bootstrap_ci coverage {coverage:.0%} ({covered}/{K}) "
+            f"is below 85% threshold for 95% nominal CI on N({mu}, {sigma}^2)."
+        )
+
+    def test_pipeline_bootstrap_ci_sanity(self):
+        """Sanity checks on bootstrap CI from the full evaluation pipeline.
+
+        Verifies structural properties that any calibrated CI must satisfy:
+        - The DR point estimate V_hat lies within [ci_lower, ci_upper].
+        - The CI has positive width (ci_upper > ci_lower).
+        - The CI width is within 10x of the normal-approximation CI
+          (2 * z_{alpha/2} * SE_if), guarding against gross miscalibration.
+
+        Note: Only DR rows are checked.  SNDR currently shares the DR
+        bootstrap CI (a known limitation — see issue #58), so its point
+        estimate may fall outside the shared CI.
+        """
+        logs, _, _ = skdr_eval.make_synth_logs(n=2000, n_ops=3, seed=42)
+        model = RandomForestRegressor(n_estimators=30, random_state=42)
+
+        report, _ = skdr_eval.evaluate_sklearn_models(
+            logs=logs,
+            models={"rf": model},
+            fit_models=True,
+            n_splits=3,
+            ci_bootstrap=True,
+            alpha=0.05,
+            random_state=42,
+        )
+
+        dr_rows = report[report["estimator"] == "DR"]
+        assert len(dr_rows) > 0, "No DR rows in report"
+
+        for _, row in dr_rows.iterrows():
+            v = row["V_hat"]
+            lo = row["ci_lower"]
+            hi = row["ci_upper"]
+            se = row["SE_if"]
+
+            # CI must contain point estimate
+            assert lo <= v <= hi, f"DR: V_hat={v:.4f} outside CI ({lo:.4f}, {hi:.4f})"
+
+            # CI must have positive width
+            ci_width = hi - lo
+            assert ci_width > 0, "DR: CI width is non-positive"
+
+            # CI width should be within 10x of normal approximation
+            se_width = 2 * 1.96 * se
+            if se_width > 0:
+                assert ci_width < 10 * se_width, (
+                    f"DR: CI width {ci_width:.2f} is >10x the "
+                    f"normal-approx width {se_width:.2f}"
+                )

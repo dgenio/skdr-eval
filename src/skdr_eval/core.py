@@ -760,7 +760,21 @@ def dr_value_with_clip(
     n_samples = len(Y)
     results_grid = []
 
-    # Compute policy value under each operator
+    # Compute policy-weighted outcome model prediction.
+    #
+    # Design note (q_pi == q_hat simplification):
+    # q_hat is 1D (n_samples,) from fit_outcome_crossfit — one prediction per
+    # observation, conditioned on the observed features but not on the action.
+    # The reshape to (n, 1) broadcasts across policy_probs (n, n_actions) and
+    # the sum over axis=1 yields  q_hat[i] * Σ_a π(a|x_i) = q_hat[i] * 1.
+    # So q_pi == q_hat by construction.
+    #
+    # This is intentional: the outcome model is a marginal predictor E[Y|X],
+    # not a per-action model E[Y|X, A=a].  A per-action outcome model would
+    # produce a 2D q_hat (n, n_actions), and the reshape + sum would then
+    # compute the textbook  Σ_a π(a|x) q̂(x, a).  The code is written to
+    # support both shapes without changes — only fit_outcome_crossfit would
+    # need to return a 2D array.  See issue #58 for discussion.
     q_pi = np.sum(policy_probs * q_hat.reshape(n_samples, -1), axis=1)
 
     # Get propensity scores for observed actions
@@ -1139,7 +1153,8 @@ def evaluate_sklearn_models(
             if ci_bootstrap:
                 # Use proper block bootstrap for time-series data
                 try:
-                    # Recompute DR contributions for bootstrap
+                    # Recompute DR contributions for bootstrap.
+                    # q_pi == q_hat here; see design note in dr_value_with_clip.
                     q_pi = np.sum(
                         policy_probs * q_hat.reshape(len(eval_design.Y), -1), axis=1
                     )
@@ -1762,7 +1777,8 @@ def evaluate_pairwise_models(
                 if ci_bootstrap:
                     # Use proper block bootstrap for time-series data
                     try:
-                        # Recompute DR contributions for bootstrap
+                        # Recompute DR contributions for bootstrap.
+                        # q_pi == q_hat here; see design note in dr_value_with_clip.
                         q_pi = np.sum(policy_probs * q_hat.reshape(len(Y), -1), axis=1)
                         pi_obs = propensities[np.arange(len(Y)), A]
                         A_int: np.ndarray = A.astype(int)
