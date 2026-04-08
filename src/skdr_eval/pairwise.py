@@ -61,6 +61,13 @@ class PairwiseDesign:
         elig_col: Optional[str] = "elig_mask",
     ) -> "PairwiseDesign":
         """Create PairwiseDesign from dataframes."""
+        # Reset index so propensity array positions always match DataFrame positions.
+        # Callers may pass a filtered/sliced DataFrame whose index is not a
+        # contiguous RangeIndex; without this reset, `propensities[i, ...]`
+        # writes in estimate_propensity_pairwise would use label values as
+        # positional offsets, silently corrupting data or raising IndexError.
+        logs_df = logs_df.reset_index(drop=True)
+
         # Extract feature columns
         cli_features = [col for col in logs_df.columns if col.startswith("cli_")]
         op_features = [col for col in op_daily_df.columns if col.startswith("op_")]

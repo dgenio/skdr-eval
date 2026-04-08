@@ -1025,7 +1025,17 @@ def evaluate_sklearn_models(
         Summary report with evaluation metrics.
     detailed_results : Dict[str, Dict[str, DRResult]]
         Detailed results for each model and estimator.
+
+    Raises
+    ------
+    ValueError
+        If ``models`` is empty or contains ``None`` values.
     """
+    if not models:
+        raise ValueError("models dict must not be empty")
+    if any(v is None for v in models.values()):
+        raise ValueError("models dict values must not be None")
+
     # Build design
     design = build_design(logs)
 
@@ -1225,8 +1235,8 @@ def _get_outcome_estimator(
 
 def estimate_propensity_pairwise(
     design: PairwiseDesign,
-    strategy: Literal["condlogit", "multinomial"] = "multinomial",
-    method: Literal["condlogit", "multinomial"] = "condlogit",
+    *,
+    method: Literal["auto", "condlogit", "multinomial"] = "auto",
     neg_per_pos: int = 5,
     n_splits: int = 3,
     random_state: int = 0,
@@ -1237,10 +1247,11 @@ def estimate_propensity_pairwise(
     ----------
     design : PairwiseDesign
         Pairwise design object
-    strategy : Literal["auto", "condlogit", "multinomial"]
-        Strategy for propensity estimation
-    method : Literal["condlogit", "multinomial"]
-        Method to use (condlogit requires scipy)
+    method : Literal["auto", "condlogit", "multinomial"]
+        Method to use. ``"auto"`` selects ``"condlogit"`` when SciPy is
+        available and falls back to ``"multinomial"`` otherwise.
+        ``"condlogit"`` requires SciPy and also falls back to
+        ``"multinomial"`` when SciPy is unavailable.
     neg_per_pos : int
         Negative samples per positive for conditional logit
     n_splits : int
@@ -1255,16 +1266,17 @@ def estimate_propensity_pairwise(
     """
 
     # Validate parameters
-    if strategy not in ["auto", "condlogit", "multinomial"]:
+    if method not in ["auto", "condlogit", "multinomial"]:
         raise ValueError(
-            f"Unknown strategy: {strategy}. Must be 'auto', 'condlogit', or 'multinomial'"
+            f"Unknown method: {method}. Must be 'auto', 'condlogit', or 'multinomial'"
         )
 
     n_decisions = len(design.logs_df)
     max_ops = max(len(ops) for ops in design.ops_all_by_day.values())
     propensities: np.ndarray = np.zeros((n_decisions, max_ops), dtype=np.float64)
 
-    # Use the provided method directly since strategy is now constrained
+    if method == "auto":
+        method = "condlogit" if SCIPY_AVAILABLE else "multinomial"
 
     if method == "condlogit" and not SCIPY_AVAILABLE:
         logger.warning("SciPy not available, falling back to multinomial")
@@ -1513,7 +1525,7 @@ def evaluate_pairwise_models(
     direction: Literal["min", "max"],
     n_splits: int = 3,
     strategy: Literal["auto", "direct", "stream", "stream_topk"] = "auto",
-    propensity: Literal["condlogit", "multinomial"] = "condlogit",
+    propensity: Literal["auto", "condlogit", "multinomial"] = "auto",
     topk: int = 20,
     neg_per_pos: int = 5,
     chunk_pairs: int = 2_000_000,
@@ -1613,7 +1625,11 @@ def evaluate_pairwise_models(
 
     # Estimate propensity scores
     propensities = estimate_propensity_pairwise(
-        design, propensity, propensity, neg_per_pos, n_splits, random_state
+        design,
+        method=propensity,
+        neg_per_pos=neg_per_pos,
+        n_splits=n_splits,
+        random_state=random_state,
     )
 
     # Fit outcome models with cross-fitting

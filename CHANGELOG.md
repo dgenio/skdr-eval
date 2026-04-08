@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.4.2] - 2025-01-16
+### Removed
+- **`strategy` parameter removed from `estimate_propensity_pairwise()`**: Callers using `strategy=` must switch to `method=`. The `strategy` parameter was previously validated but had no effect on behavior.
+
+### Changed
+- **`estimate_propensity_pairwise()` default `method` is now `"auto"`**: Previously defaulted to `"condlogit"`, which emitted a warning on every call in environments without SciPy. `"auto"` selects `condlogit` when SciPy is available and falls back to `multinomial` silently.
+- **`estimate_propensity_pairwise()` parameters after `design` are now keyword-only**: All parameters except `design` must be passed as keyword arguments. This enforces clarity after the signature change and prevents silent positional-argument misuse.
+- **`evaluate_pairwise_models()` `propensity` parameter now accepts `"auto"`**: Type hint expanded from `Literal["condlogit", "multinomial"]` to `Literal["auto", "condlogit", "multinomial"]`.
+
+### Fixed
+- **Documentation**: Fixed broken pairwise quick start example in README — corrected function signature (`strategy` replaces non-existent `autoscale_strategies`), added required positional args (`metric_col`, `task_type`, `direction`), fixed return-value unpacking (`(report, detailed)` tuple), and added explicit model fitting before evaluation.
+- **evaluate_sklearn_models**: Raise `ValueError` immediately when `models` is empty or contains `None` values, preventing silent `(0, 0)` DataFrames and obscure downstream errors ([#45](https://github.com/dgenio/skdr-eval/issues/45))
+
+## [0.4.2] - 2025-09-13
 
 ### Fixed
 - **Major Tech Debt**: Implemented proper bootstrap confidence intervals using the existing `block_bootstrap_ci` function
@@ -33,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Performance**: 400 bootstrap samples by default with configurable parameters
 - **Reproducibility**: All bootstrap operations use consistent random seeds
 
-## [0.4.1] - 2025-01-15
+## [0.4.1] - 2025-09-13
 
 ### Fixed
 - **Release Automation**: Configured GitHub Actions workflow to trigger on pushed tags
@@ -45,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Backward Compatibility**: Maintains existing `release` and `workflow_dispatch` triggers
 - **Tag Pattern**: Supports any version tag pattern (v1.0.0, v2.1.3, etc.)
 
-## [0.4.0] - 2025-01-15
+## [0.4.0] - 2025-09-13
 
 ### Added
 - **Comprehensive Type Safety**: Enhanced type annotations throughout the codebase
@@ -72,7 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Type Inference**: Improved type inference with explicit type annotations
 - **Compatibility**: Maintains full backward compatibility while improving type safety
 
-## [0.3.3] - 2025-01-15
+## [0.3.3] - 2025-09-13
 
 ### Fixed
 - **Type Safety Violations**: Resolved critical type annotation issues in core functions
