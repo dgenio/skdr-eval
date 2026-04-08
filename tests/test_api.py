@@ -198,12 +198,21 @@ def test_evaluate_sklearn_models_signature():
 
 def test_evaluate_sklearn_models_empty_models_raises():
     """Test that evaluate_sklearn_models raises ValueError for an empty models dict."""
-    logs, _, _ = skdr_eval.make_synth_logs(n=100, n_ops=3, seed=4)
+    logs, _, _ = skdr_eval.make_synth_logs(n=10, n_ops=3, seed=4)
 
     with pytest.raises(ValueError, match="models dict must not be empty"):
         skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models={},
+            fit_models=True,
+            n_splits=2,
+            random_state=42,
+        )
+
+    with pytest.raises(ValueError, match="models dict values must not be None"):
+        skdr_eval.evaluate_sklearn_models(
+            logs=logs,
+            models={"rf": None},
             fit_models=True,
             n_splits=2,
             random_state=42,

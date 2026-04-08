@@ -749,9 +749,16 @@ def evaluate_sklearn_models(
         Summary report with evaluation metrics.
     detailed_results : Dict[str, Dict[str, DRResult]]
         Detailed results for each model and estimator.
+
+    Raises
+    ------
+    ValueError
+        If ``models`` is empty or contains ``None`` values.
     """
     if not models:
         raise ValueError("models dict must not be empty")
+    if any(v is None for v in models.values()):
+        raise ValueError("models dict values must not be None")
 
     # Build design
     design = build_design(logs)
