@@ -254,7 +254,7 @@ Where:
 
 ## Bootstrap Confidence Intervals
 
-For time-series data, use moving-block bootstrap:
+For time-series data, use moving-block bootstrap with proper statistical methodology:
 
 ```python
 # Enable bootstrap CIs
@@ -267,6 +267,12 @@ report, _ = skdr_eval.evaluate_sklearn_models(
 
 print(report[['model', 'estimator', 'V_hat', 'ci_lower', 'ci_upper']])
 ```
+
+**Key Features:**
+- **Moving-block bootstrap**: Preserves time-series correlation structure
+- **Proper statistical inference**: Uses bootstrap distribution of DR contributions
+- **Automatic fallback**: Falls back to normal approximation if bootstrap fails
+- **Configurable parameters**: Control bootstrap samples, block length, and significance level
 
 ## Examples
 
@@ -359,4 +365,3 @@ Contributions are welcome! Please feel free to submit a Pull Request. For major 
 - Built with [scikit-learn](https://scikit-learn.org/) for machine learning
 - Uses [pandas](https://pandas.pydata.org/) for data manipulation
 - Follows [PEP 621](https://peps.python.org/pep-0621/) for project metadata
-# Release v0.3.6 - Final fix for pip publishing

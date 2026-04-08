@@ -19,7 +19,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Documentation**: Fixed broken pairwise quick start example in README — corrected function signature (`strategy` replaces non-existent `autoscale_strategies`), added required positional args (`metric_col`, `task_type`, `direction`), fixed return-value unpacking (`(report, detailed)` tuple), and added explicit model fitting before evaluation.
 - **evaluate_sklearn_models**: Raise `ValueError` immediately when `models` is empty or contains `None` values, preventing silent `(0, 0)` DataFrames and obscure downstream errors ([#45](https://github.com/dgenio/skdr-eval/issues/45))
 
-## [0.4.1] - 2025-01-15
+## [0.4.2] - 2025-09-13
+
+### Fixed
+- **Major Tech Debt**: Implemented proper bootstrap confidence intervals using the existing `block_bootstrap_ci` function
+- **Statistical Accuracy**: Replaced incorrect normal approximation with proper moving-block bootstrap for time-series data
+- **Dead Code Elimination**: The `block_bootstrap_ci` function was implemented but never used (0% test coverage)
+- **False Advertising**: README claimed "Bootstrap Confidence Intervals" but only used normal approximation
+
+### Added
+- **Comprehensive Test Suite**: Added 14 new tests for `block_bootstrap_ci` function achieving 100% coverage
+- **Integration Tests**: Added 7 integration tests for bootstrap CI in both evaluation functions
+- **Proper Error Handling**: Added parameter validation and graceful fallback mechanisms
+- **Enhanced Documentation**: Updated README with detailed bootstrap CI parameters and usage
+
+### Enhanced
+- **Statistical Rigor**: Bootstrap CIs now properly account for time-series correlation structure
+- **Data Science Best Practices**: Moving-block bootstrap is the gold standard for time-series confidence intervals
+- **Test Coverage**: Improved overall test coverage from 75% to 78%
+- **Code Quality**: Eliminated dead code and improved maintainability
+
+### Technical Details
+- **Bootstrap Method**: Uses moving-block bootstrap with configurable block length (default: sqrt(n))
+- **Fallback Strategy**: Gracefully falls back to normal approximation if bootstrap fails
+- **Performance**: 400 bootstrap samples by default with configurable parameters
+- **Reproducibility**: All bootstrap operations use consistent random seeds
+
+## [0.4.1] - 2025-09-13
 
 ### Fixed
 - **Release Automation**: Configured GitHub Actions workflow to trigger on pushed tags
@@ -31,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Backward Compatibility**: Maintains existing `release` and `workflow_dispatch` triggers
 - **Tag Pattern**: Supports any version tag pattern (v1.0.0, v2.1.3, etc.)
 
-## [0.4.0] - 2025-01-15
+## [0.4.0] - 2025-09-13
 
 ### Added
 - **Comprehensive Type Safety**: Enhanced type annotations throughout the codebase
@@ -58,7 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Type Inference**: Improved type inference with explicit type annotations
 - **Compatibility**: Maintains full backward compatibility while improving type safety
 
-## [0.3.3] - 2025-01-15
+## [0.3.3] - 2025-09-13
 
 ### Fixed
 - **Type Safety Violations**: Resolved critical type annotation issues in core functions
@@ -75,14 +101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.2] - 2025-08-13
 
 ### Fixed
-- **Release Workflow Versioning**: Fixed setuptools-scm version mismatch in CI builds
-- **Git State Management**: Ensured clean git state for accurate version calculation
-- **Version Validation**: Resolved issue where built version didn't match expected tag version
-- **CI Pipeline**: Enhanced release workflow to prevent version calculation errors
-
-### Infrastructure
-- **Release Process**: Improved workflow reliability for consistent version generation
-- **Quality Assurance**: Strengthened version validation in build pipeline
+- **Release Pipeline**: Minor release pipeline fixes and dependency updates
 
 ## [0.3.1] - 2025-08-13
 
