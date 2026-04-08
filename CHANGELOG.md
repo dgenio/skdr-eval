@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-08
+
 ### Removed
 - **`strategy` parameter removed from `estimate_propensity_pairwise()`**: Callers using `strategy=` must switch to `method=`. The `strategy` parameter was previously validated but had no effect on behavior.
 
