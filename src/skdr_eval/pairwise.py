@@ -302,8 +302,8 @@ def induce_policy_direct(
 
         # Get predictions from each model
         for model_name, model in models.items():
+            check_is_fitted(model)
             try:
-                check_is_fitted(model)
                 predictions = model.predict(X_pairs)
 
                 # Group by client and find best operator
@@ -390,8 +390,8 @@ def induce_policy_stream(
 
             # Get predictions from each model
             for model_name, model in models.items():
+                check_is_fitted(model)
                 try:
-                    check_is_fitted(model)
                     predictions = model.predict(X_pairs)
 
                     # Update best decisions for each client in this chunk
@@ -555,8 +555,8 @@ def induce_policy_stream_topk(
 
             # Score top-K with each full model
             for model_name, model in models.items():
+                check_is_fitted(model)
                 try:
-                    check_is_fitted(model)
                     full_preds = model.predict(X_topk)
                     if direction == "min":
                         best_local = np.argmin(full_preds)

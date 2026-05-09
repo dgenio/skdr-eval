@@ -299,5 +299,114 @@ def test_pairwise_error_handling():
         )
 
 
+def test_pairwise_fit_models_true():
+    """Test that fit_models=True fits unfitted models internally."""
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=2, n_clients_day=50, n_ops=8, seed=42
+    )
+
+    # Create unfitted models
+    models = {
+        "ridge": Ridge(random_state=42),
+        "hgb": HistGradientBoostingRegressor(random_state=42, max_iter=10),
+    }
+
+    # Run evaluation with fit_models=True
+    report, detailed_results = evaluate_pairwise_models(
+        logs_df=logs_df,
+        op_daily_df=op_daily_df,
+        models=models,
+        metric_col="service_time",
+        task_type="regression",
+        direction="min",
+        n_splits=2,
+        strategy="direct",
+        fit_models=True,  # Let the function fit the models
+        random_state=42,
+    )
+
+    # Verify results are valid
+    assert isinstance(report, pd.DataFrame)
+    assert len(report) > 0
+    assert "V_hat" in report.columns
+    assert report["V_hat"].notna().all()
+    assert np.isfinite(report["V_hat"]).all()
+
+    # Verify all models were evaluated
+    assert len(detailed_results) == len(models)
+    for model_name in models:
+        assert model_name in detailed_results
+
+
+def test_pairwise_stream_topk_strategy():
+    """Test stream_topk strategy end-to-end with top-K filtering."""
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=2, n_clients_day=30, n_ops=12, seed=42
+    )
+
+    models = {"ridge": Ridge(random_state=42)}
+
+    # Fit model on observed data
+    feature_cols = [col for col in logs_df.columns if col.startswith(("cli_", "op_"))]
+    X = logs_df[feature_cols].values
+    y = logs_df["service_time"].values
+    models["ridge"].fit(X, y)
+
+    # Run evaluation with stream_topk strategy
+    report, detailed_results = evaluate_pairwise_models(
+        logs_df=logs_df,
+        op_daily_df=op_daily_df,
+        models=models,
+        metric_col="service_time",
+        task_type="regression",
+        direction="min",
+        n_splits=2,
+        strategy="stream_topk",
+        topk=5,  # Keep top 5 operators per client
+        random_state=42,
+    )
+
+    # Verify results are valid
+    assert isinstance(report, pd.DataFrame)
+    assert len(report) > 0
+    assert "V_hat" in report.columns
+    assert report["V_hat"].notna().all()
+    assert np.isfinite(report["V_hat"]).all()
+
+    # Verify that stream_topk strategy evaluated successfully
+    assert "ridge" in detailed_results
+    model_results = detailed_results["ridge"]
+    # Should have either DR or SNDR estimator
+    assert len(model_results) > 0
+    for estimator_name, dr_result in model_results.items():
+        # Check that the DRResult has valid values
+        assert hasattr(dr_result, "V_hat")
+        assert np.isfinite(dr_result.V_hat)
+
+
+def test_pairwise_unfitted_model_fails_without_fit_models():
+    """Test that unfitted models raise NotFittedError when fit_models=False."""
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=1, n_clients_day=20, n_ops=5, seed=42
+    )
+
+    # Create unfitted model
+    models = {"ridge": Ridge(random_state=42)}
+
+    # Should raise NotFittedError when trying to predict with unfitted model
+    with pytest.raises(Exception):  # NotFittedError from sklearn
+        evaluate_pairwise_models(
+            logs_df=logs_df,
+            op_daily_df=op_daily_df,
+            models=models,
+            metric_col="service_time",
+            task_type="regression",
+            direction="min",
+            strategy="direct",
+            fit_models=False,  # Don't fit models
+            random_state=42,
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
