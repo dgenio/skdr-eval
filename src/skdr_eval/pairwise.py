@@ -453,6 +453,13 @@ def induce_policy_stream_topk(
     full models only on those K candidates. This reduces computation for large
     operator pools while maintaining good policy quality.
 
+    **Important:** The Ridge surrogate is trained exclusively on historically-chosen
+    operators from the logs. This can systematically suppress operators that were
+    never observed in the historical data, introducing selection bias. The top-K
+    prefiltering ensures only high-predicted operators reach the full models, but
+    low-frequency operators will not be considered even if the full model would
+    rank them highly.
+
     Parameters
     ----------
     models : dict[str, Any]
@@ -508,6 +515,10 @@ def induce_policy_stream_topk(
 
         day_decisions: dict[str, dict[str, Any]] = {name: {} for name in models}
 
+        # Check that all models are fitted before processing clients
+        for model_name, model in models.items():
+            check_is_fitted(model)
+
         for _, client_row in day_clients.iterrows():
             client_id = str(client_row[design.client_id_col])
 
@@ -555,7 +566,6 @@ def induce_policy_stream_topk(
 
             # Score top-K with each full model
             for model_name, model in models.items():
-                check_is_fitted(model)
                 try:
                     full_preds = model.predict(X_topk)
                     if direction == "min":
@@ -596,7 +606,7 @@ def induce_policy(
     direction: Literal["min", "max"] = "min",
     topk: int = 20,
     chunk_pairs: int = 2_000_000,
-    metric_col: str = "",
+    metric_col: str | None = None,
 ) -> dict[str, np.ndarray]:
     """Induce policies using specified or auto-selected strategy.
 

@@ -6,7 +6,7 @@ from typing import Any, Callable, Literal, Protocol
 
 import numpy as np
 import pandas as pd
-from scipy.stats import norm as _norm
+from scipy.stats import norm
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import (
     HistGradientBoostingClassifier,
@@ -1188,14 +1188,14 @@ def evaluate_sklearn_models(
                         )
                     else:
                         # Fallback if no matched samples
-                        z = _norm.ppf(1 - alpha / 2)
+                        z = norm.ppf(1 - alpha / 2)
                         ci_lower, ci_upper = (
                             result.V_hat - z * result.SE_if,
                             result.V_hat + z * result.SE_if,
                         )
                 except (ValueError, RuntimeError, np.linalg.LinAlgError):
                     # Fallback to normal approximation if bootstrap fails
-                    z = _norm.ppf(1 - alpha / 2)
+                    z = norm.ppf(1 - alpha / 2)
                     ci_lower, ci_upper = (
                         result.V_hat - z * result.SE_if,
                         result.V_hat + z * result.SE_if,
@@ -1828,14 +1828,14 @@ def evaluate_pairwise_models(
                             )
                         else:
                             # Fallback if no matched samples
-                            z = _norm.ppf(1 - alpha / 2)
+                            z = norm.ppf(1 - alpha / 2)
                             ci_lower, ci_upper = (
                                 result.V_hat - z * result.SE_if,
                                 result.V_hat + z * result.SE_if,
                             )
                     except (ValueError, RuntimeError, np.linalg.LinAlgError):
                         # Fallback to normal approximation if bootstrap fails
-                        z = _norm.ppf(1 - alpha / 2)
+                        z = norm.ppf(1 - alpha / 2)
                         ci_lower, ci_upper = (
                             result.V_hat - z * result.SE_if,
                             result.V_hat + z * result.SE_if,

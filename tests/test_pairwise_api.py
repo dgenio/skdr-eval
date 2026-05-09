@@ -409,5 +409,36 @@ def test_pairwise_unfitted_model_fails_without_fit_models():
         )
 
 
+@pytest.mark.parametrize(
+    "strategy",
+    ["direct", "stream", "stream_topk"],
+    ids=["direct_unfitted", "stream_unfitted", "stream_topk_unfitted"],
+)
+def test_pairwise_unfitted_models_fail_across_strategies(strategy: str):
+    """Test that unfitted models raise NotFittedError immediately for all strategies."""
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=2, n_clients_day=30, n_ops=10, seed=42
+    )
+
+    # Create unfitted model
+    models = {"ridge": Ridge(random_state=42)}
+
+    # All strategies should fail fast with NotFittedError on unfitted models
+    with pytest.raises(NotFittedError):
+        evaluate_pairwise_models(
+            logs_df=logs_df,
+            op_daily_df=op_daily_df,
+            models=models,
+            metric_col="service_time",
+            task_type="regression",
+            direction="min",
+            n_splits=2,
+            strategy=strategy,
+            topk=5,
+            fit_models=False,  # Don't fit models
+            random_state=42,
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
