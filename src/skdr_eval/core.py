@@ -1026,7 +1026,13 @@ def evaluate_sklearn_models(
     clip_grid : Tuple[float, ...], default=(2, 5, 10, 20, 50, inf)
         Clipping thresholds.
     ci_bootstrap : bool, default=False
-        Whether to compute bootstrap confidence intervals.
+        Whether to compute bootstrap confidence intervals via
+        ``block_bootstrap_ci`` on the per-decision DR contributions. Note that
+        this is a **conditional bootstrap**: ``q_hat``, propensities, and the
+        policy itself are held fixed across replicates, so the resulting CI
+        captures sampling variability of the influence function *given* the
+        nuisances but not variability *of* the nuisances. May under-cover when
+        nuisance estimation error is non-negligible.
     alpha : float, default=0.05
         Significance level for confidence intervals.
     policy_train : str, default="all"
@@ -1549,7 +1555,7 @@ def evaluate_pairwise_models(
     ci_bootstrap: bool = False,
     alpha: float = 0.05,
     fit_models: bool = False,
-    policy_train: Literal["all", "pre_split"] = "pre_split",
+    policy_train: Literal["all", "pre_split"] = "all",
     policy_train_frac: float = 0.85,
     surrogate_model: str = "hgb",
     day_col: str = "arrival_day",
@@ -1580,14 +1586,18 @@ def evaluate_pairwise_models(
         logs_df against metric_col before inducing policies. Set to True when
         passing unfitted model instances; set to False when passing pre-fitted
         models.
-    policy_train : Literal["all", "pre_split"], default="pre_split"
-        How to split data for fitting policy models when ``fit_models=True``:
-        - ``"pre_split"``: Fit on the first ``policy_train_frac`` of the data
-          (sorted by day) and evaluate only on the held-out tail. Avoids
-          training-on-test data leakage and matches ``evaluate_sklearn_models``.
+    policy_train : Literal["all", "pre_split"], default="all"
+        How to split data for fitting policy models when ``fit_models=True``.
+        Default matches ``evaluate_sklearn_models`` for API symmetry; consider
+        ``"pre_split"`` to eliminate training-on-test leakage.
+
         - ``"all"``: Fit on all data and evaluate on all data. Faster but
-          biased; only use when models are intentionally fit elsewhere or
-          when bias is acceptable.
+          biased — included for API symmetry with ``evaluate_sklearn_models``
+          and for callers that fit models elsewhere.
+        - ``"pre_split"``: Fit on the first ``policy_train_frac`` of the data
+          (sorted by day) and evaluate only on the held-out tail. Removes
+          training-on-test leakage; the statistically safer choice when
+          fitting via ``fit_models=True``.
         Ignored when ``fit_models=False``.
     policy_train_frac : float, default=0.85
         Fraction of data (chronologically) used to fit policy models when
@@ -1616,7 +1626,11 @@ def evaluate_pairwise_models(
     clip_grid : Tuple[float, ...]
         Clipping thresholds
     ci_bootstrap : bool
-        Whether to compute bootstrap CIs
+        Whether to compute bootstrap CIs via ``block_bootstrap_ci`` on the
+        per-decision DR contributions. **Conditional bootstrap**: ``q_hat``,
+        propensities, and the policy are fixed across replicates, so the CI
+        does not reflect nuisance estimation error and may under-cover when
+        that error is non-negligible.
     alpha : float
         Significance level for CIs
     day_col : str

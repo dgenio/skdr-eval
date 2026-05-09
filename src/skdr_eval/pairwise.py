@@ -263,6 +263,10 @@ def induce_policy_direct(
     """
     logger.info("Using direct expansion strategy")
 
+    # Fail fast if any model is unfitted (validate once before any work)
+    for model in models.values():
+        check_is_fitted(model)
+
     policies: dict[str, list[str]] = {name: [] for name in models}
 
     # Process each day
@@ -301,42 +305,35 @@ def induce_policy_direct(
         feature_cols = design.cli_features + design.op_features
         X_pairs: np.ndarray = day_pairs_df[feature_cols].values.astype(np.float32)
 
-        # Get predictions from each model
+        # Get predictions from each model. Prediction errors propagate (per
+        # invariants.md: prefer fail-loud over silent first-operator fallback).
         for model_name, model in models.items():
-            check_is_fitted(model)
-            try:
-                predictions = model.predict(X_pairs)
+            predictions = model.predict(X_pairs)
 
-                # Group by client and find best operator
-                day_decisions = []
-                for client_idx in day_clients.index:
-                    # Find pairs for this client
-                    client_mask = np.array(client_indices) == client_idx
-                    if not np.any(client_mask):
-                        # No eligible operators - use first available
-                        day_decisions.append(design.ops_all_by_day[day][0])
-                        continue
+            # Group by client and find best operator
+            day_decisions = []
+            for client_idx in day_clients.index:
+                # Find pairs for this client
+                client_mask = np.array(client_indices) == client_idx
+                if not np.any(client_mask):
+                    # No eligible operators - use first available
+                    day_decisions.append(design.ops_all_by_day[day][0])
+                    continue
 
-                    client_preds = predictions[client_mask]
-                    client_ops = day_pairs_df.loc[
-                        client_mask, design.operator_id_col
-                    ].values
+                client_preds = predictions[client_mask]
+                client_ops = day_pairs_df.loc[
+                    client_mask, design.operator_id_col
+                ].values
 
-                    # Choose best operator
-                    if direction == "min":
-                        best_idx = np.argmin(client_preds)
-                    else:
-                        best_idx = np.argmax(client_preds)
+                # Choose best operator
+                if direction == "min":
+                    best_idx = np.argmin(client_preds)
+                else:
+                    best_idx = np.argmax(client_preds)
 
-                    day_decisions.append(client_ops[best_idx])
+                day_decisions.append(client_ops[best_idx])
 
-                policies[model_name].extend(day_decisions)
-
-            except Exception as e:
-                logger.error(f"Error predicting with model {model_name}: {e}")
-                # Fallback to first available operator
-                fallback_decisions = [design.ops_all_by_day[day][0]] * len(day_clients)
-                policies[model_name].extend(fallback_decisions)
+            policies[model_name].extend(day_decisions)
 
     # Convert to numpy arrays
     return {name: np.array(decisions) for name, decisions in policies.items()}
@@ -368,6 +365,10 @@ def induce_policy_stream(
     """
     logger.info(f"Using streaming strategy with chunk_pairs={chunk_pairs}")
 
+    # Fail fast if any model is unfitted (validate once before any work)
+    for model in models.values():
+        check_is_fitted(model)
+
     policies: dict[str, list[str]] = {name: [] for name in models}
 
     # Process each day
@@ -380,7 +381,8 @@ def induce_policy_stream(
         # Initialize decisions for this day
         day_decisions: dict[str, dict[str, Any]] = {name: {} for name in models}
 
-        # Process chunks
+        # Process chunks. Prediction errors propagate (per invariants.md:
+        # prefer fail-loud over silent first-operator fallback).
         for chunk in build_candidate_pairs(design, day, chunk_pairs):
             if len(chunk) == 0:
                 continue
@@ -391,35 +393,28 @@ def induce_policy_stream(
 
             # Get predictions from each model
             for model_name, model in models.items():
-                check_is_fitted(model)
-                try:
-                    predictions = model.predict(X_pairs)
+                predictions = model.predict(X_pairs)
 
-                    # Update best decisions for each client in this chunk
-                    for i, (_, row) in enumerate(chunk.iterrows()):
-                        client_id = str(row[design.client_id_col])
-                        operator_id = str(row[design.operator_id_col])
-                        pred = float(predictions[i])
+                # Update best decisions for each client in this chunk
+                for i, (_, row) in enumerate(chunk.iterrows()):
+                    client_id = str(row[design.client_id_col])
+                    operator_id = str(row[design.operator_id_col])
+                    pred = float(predictions[i])
 
-                        if client_id not in day_decisions[model_name]:
+                    if client_id not in day_decisions[model_name]:
+                        day_decisions[model_name][client_id] = {
+                            "best_op": operator_id,
+                            "best_pred": pred,
+                        }
+                    else:
+                        current_best = day_decisions[model_name][client_id]["best_pred"]
+                        if (direction == "min" and pred < current_best) or (
+                            direction == "max" and pred > current_best
+                        ):
                             day_decisions[model_name][client_id] = {
                                 "best_op": operator_id,
                                 "best_pred": pred,
                             }
-                        else:
-                            current_best = day_decisions[model_name][client_id][
-                                "best_pred"
-                            ]
-                            if (direction == "min" and pred < current_best) or (
-                                direction == "max" and pred > current_best
-                            ):
-                                day_decisions[model_name][client_id] = {
-                                    "best_op": operator_id,
-                                    "best_pred": pred,
-                                }
-
-                except Exception as e:
-                    logger.error(f"Error predicting with model {model_name}: {e}")
 
         # Extract decisions for this day in client order
         for model_name in models:
@@ -565,6 +560,10 @@ def induce_policy_stream_topk(
         f"surrogate={surrogate_model}"
     )
 
+    # Fail fast if any model is unfitted (validate once before any work)
+    for model in models.values():
+        check_is_fitted(model)
+
     # Step 1: Fit a cheap surrogate that captures cli x op interactions
     X_cli_surr = design.logs_df[design.cli_features].values.astype(np.float32)
     X_op_surr = design.logs_df[design.op_features].values.astype(np.float32)
@@ -577,7 +576,8 @@ def induce_policy_stream_topk(
     )
 
     # Step 2: For each day x client, use the surrogate to prefilter to top-K
-    # operators, then score those K with the full models
+    # operators, then score those K with the full models. Prediction errors
+    # propagate (per invariants.md: prefer fail-loud over silent fallback).
     policies: dict[str, list[str]] = {name: [] for name in models}
 
     for day in sorted(design.ops_all_by_day.keys()):
@@ -596,15 +596,15 @@ def induce_policy_stream_topk(
 
         day_ops = design.day_to_op_df[day]
 
-        # Check that all models are fitted before processing clients
-        for model in models.values():
-            check_is_fitted(model)
+        # Vectorize day-level cli features once: row i corresponds to the i-th
+        # client in day_clients (positional index, not pandas index).
+        day_cli_arr = day_clients[design.cli_features].to_numpy(dtype=np.float32)
 
         # Initialize day decisions for all models
         day_decisions: dict[str, list[str]] = {name: [] for name in models}
 
         # Process clients in order and collect decisions on-the-fly
-        for _, client_row in day_clients.iterrows():
+        for client_pos, (_, client_row) in enumerate(day_clients.iterrows()):
             # Get eligible operators
             if design.elig_col and design.elig_col in client_row:
                 elig_ops_raw = client_row[design.elig_col]
@@ -624,10 +624,8 @@ def induce_policy_stream_topk(
                     day_decisions[model_name].append(design.ops_all_by_day[day][0])
                 continue
 
-            # Build feature matrices for all eligible (client, op) pairs
-            cli_vals = np.array(
-                [float(client_row[f]) for f in design.cli_features], dtype=np.float32
-            )
+            # Slice the precomputed day-level cli row (no per-client list comp)
+            cli_vals = day_cli_arr[client_pos]
             op_vals = eligible_ops_df[design.op_features].values.astype(np.float32)
             X_cli_elig = np.tile(cli_vals, (len(eligible_ops_df), 1))
 
@@ -648,16 +646,12 @@ def induce_policy_stream_topk(
 
             # Score top-K with each full model and collect decisions
             for model_name, model in models.items():
-                try:
-                    full_preds = model.predict(X_topk)
-                    if direction == "min":
-                        best_local = np.argmin(full_preds)
-                    else:
-                        best_local = np.argmax(full_preds)
-                    day_decisions[model_name].append(str(topk_op_ids[best_local]))
-                except Exception as e:
-                    logger.error(f"Error predicting with model {model_name}: {e}")
-                    day_decisions[model_name].append(design.ops_all_by_day[day][0])
+                full_preds = model.predict(X_topk)
+                if direction == "min":
+                    best_local = np.argmin(full_preds)
+                else:
+                    best_local = np.argmax(full_preds)
+                day_decisions[model_name].append(str(topk_op_ids[best_local]))
 
         # Extend policies with day decisions
         for model_name in models:
@@ -692,7 +686,11 @@ def induce_policy(
     topk : int
         Number of top operators for stream_topk strategy
     chunk_pairs : int
-        Maximum pairs per chunk
+        Maximum pairs per chunk. Used by the ``"direct"`` and ``"stream"``
+        strategies; **ignored** by ``"stream_topk"`` (which is per-client and
+        does not chunk along the pairs axis). See
+        https://github.com/dgenio/skdr-eval/issues for the chunked-stream_topk
+        follow-up.
     metric_col : str
         Target metric column name; required when strategy is "stream_topk"
     surrogate_model : str, default="hgb"
