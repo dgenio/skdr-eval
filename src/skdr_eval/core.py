@@ -1549,6 +1549,9 @@ def evaluate_pairwise_models(
     ci_bootstrap: bool = False,
     alpha: float = 0.05,
     fit_models: bool = False,
+    policy_train: Literal["all", "pre_split"] = "pre_split",
+    policy_train_frac: float = 0.85,
+    surrogate_model: str = "hgb",
     day_col: str = "arrival_day",
     client_id_col: str = "client_id",
     operator_id_col: str = "operator_id",
@@ -1577,6 +1580,25 @@ def evaluate_pairwise_models(
         logs_df against metric_col before inducing policies. Set to True when
         passing unfitted model instances; set to False when passing pre-fitted
         models.
+    policy_train : Literal["all", "pre_split"], default="pre_split"
+        How to split data for fitting policy models when ``fit_models=True``:
+        - ``"pre_split"``: Fit on the first ``policy_train_frac`` of the data
+          (sorted by day) and evaluate only on the held-out tail. Avoids
+          training-on-test data leakage and matches ``evaluate_sklearn_models``.
+        - ``"all"``: Fit on all data and evaluate on all data. Faster but
+          biased; only use when models are intentionally fit elsewhere or
+          when bias is acceptable.
+        Ignored when ``fit_models=False``.
+    policy_train_frac : float, default=0.85
+        Fraction of data (chronologically) used to fit policy models when
+        ``policy_train="pre_split"``. Remaining tail is used for evaluation.
+    surrogate_model : str, default="hgb"
+        Surrogate model used by ``stream_topk`` strategy to prefilter operators.
+        - ``"hgb"`` (default): HistGradientBoostingRegressor; non-linear,
+          captures cli x op interactions automatically.
+        - ``"ridge_interaction"``: Ridge with explicit cli x op outer-product
+          interaction terms; cheaper but still per-client personalized.
+        Plain ``"ridge"`` is rejected because it produces day-global top-K.
     n_splits : int
         Number of cross-validation splits
     strategy : Literal["auto", "direct", "stream", "stream_topk"]
@@ -1628,9 +1650,59 @@ def evaluate_pairwise_models(
     if direction not in ["min", "max"]:
         raise ValueError(f"Unknown direction: {direction}. Must be 'min' or 'max'")
 
-    # Create pairwise design
+    # Validate policy_train parameters
+    if policy_train not in ("all", "pre_split"):
+        raise ValueError(
+            f"Unknown policy_train: {policy_train}. Must be 'all' or 'pre_split'"
+        )
+    if not 0.0 < policy_train_frac < 1.0:
+        raise ValueError(
+            f"policy_train_frac must be in (0, 1), got {policy_train_frac}"
+        )
+
+    # Optional pre_split: fit policy models on training portion, evaluate on
+    # held-out tail. This avoids training-on-test leakage when fit_models=True.
+    eval_logs_df = logs_df
+    if fit_models and policy_train == "pre_split":
+        # Sort by day to respect time order, then split chronologically
+        sorted_logs = logs_df.sort_values(by=day_col, kind="stable").reset_index(
+            drop=True
+        )
+        n_total = len(sorted_logs)
+        n_train = max(1, int(n_total * policy_train_frac))
+        train_logs = sorted_logs.iloc[:n_train].reset_index(drop=True)
+        eval_logs_df = sorted_logs.iloc[n_train:].reset_index(drop=True)
+        if len(eval_logs_df) == 0:
+            raise ValueError(
+                f"pre_split left 0 evaluation rows (n_total={n_total}, "
+                f"policy_train_frac={policy_train_frac}); reduce the fraction"
+            )
+        logger.info(
+            f"pre_split: fitting policy models on {len(train_logs):,} train rows, "
+            f"evaluating on {len(eval_logs_df):,} held-out rows"
+        )
+
+        # Fit on training portion only
+        train_design = PairwiseDesign.from_dataframes(
+            train_logs, op_daily_df, day_col, client_id_col, operator_id_col, elig_col
+        )
+        feature_cols = train_design.cli_features + train_design.op_features
+        X_fit = train_design.logs_df[feature_cols].values.astype(np.float32)
+        y_fit = train_design.logs_df[metric_col].values
+        for model in models.values():
+            model.fit(X_fit, y_fit)
+        logger.info(
+            f"Fitted {len(models)} policy model(s) on {len(X_fit)} train pairs"
+        )
+
+    # Create pairwise design from the (possibly held-out) evaluation logs
     design = PairwiseDesign.from_dataframes(
-        logs_df, op_daily_df, day_col, client_id_col, operator_id_col, elig_col
+        eval_logs_df,
+        op_daily_df,
+        day_col,
+        client_id_col,
+        operator_id_col,
+        elig_col,
     )
 
     # Log statistics
@@ -1641,21 +1713,32 @@ def evaluate_pairwise_models(
         f"{stats['memory_gb']:.2f} GB estimated memory"
     )
 
-    # Fit policy models if requested
-    if fit_models:
+    # Fit on all data (legacy behavior, biased but supported for compatibility)
+    if fit_models and policy_train == "all":
         feature_cols = design.cli_features + design.op_features
         X_fit = design.logs_df[feature_cols].values.astype(np.float32)
         y_fit = design.logs_df[metric_col].values
         for model in models.values():
             model.fit(X_fit, y_fit)
         logger.info(
-            f"Fitted {len(models)} policy model(s) on {len(X_fit)} observed pairs"
+            f"Fitted {len(models)} policy model(s) on {len(X_fit)} pairs (policy_train='all')"
         )
 
-    # Induce policies
+    # Induce policies (held-out for pre_split, full data for "all")
     policies = induce_policy(
-        models, design, strategy, direction, topk, chunk_pairs, metric_col
+        models,
+        design,
+        strategy,
+        direction,
+        topk,
+        chunk_pairs,
+        metric_col,
+        surrogate_model=surrogate_model,
+        random_state=random_state,
     )
+
+    # Mirror eval_logs_df into the local variable used downstream
+    logs_df = design.logs_df
 
     # Estimate propensity scores
     propensities = estimate_propensity_pairwise(

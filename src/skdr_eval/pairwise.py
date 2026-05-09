@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
+from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import Ridge
 from sklearn.utils.validation import check_is_fitted
 
@@ -438,27 +439,103 @@ def induce_policy_stream(
     return {name: np.array(decisions) for name, decisions in policies.items()}
 
 
+def _make_interaction_features(X_cli: np.ndarray, X_op: np.ndarray) -> np.ndarray:
+    """Build cli x op interaction features alongside the originals.
+
+    Linear models on concatenated [X_cli | X_op] cannot rank operators
+    differently across clients (the client term is constant for fixed client),
+    so a Ridge surrogate would produce day-global top-K. Adding outer-product
+    interaction terms restores per-client personalization.
+    """
+    n_rows = X_cli.shape[0]
+    n_cli = X_cli.shape[1]
+    n_op = X_op.shape[1]
+    interactions = (X_cli[:, :, None] * X_op[:, None, :]).reshape(n_rows, n_cli * n_op)
+    return np.hstack([X_cli, X_op, interactions]).astype(np.float32)
+
+
+def _fit_surrogate(
+    surrogate_model: str,
+    X_cli: np.ndarray,
+    X_op: np.ndarray,
+    y: np.ndarray,
+    random_state: int = 0,
+) -> tuple[Any, str]:
+    """Fit a surrogate that captures client x operator interactions.
+
+    Returns the fitted surrogate and a string indicating the feature mode:
+    - "interaction" for ridge_interaction (concat + outer product)
+    - "concat" for hgb (tree models capture interactions internally)
+    """
+    if surrogate_model == "hgb":
+        X = np.hstack([X_cli, X_op]).astype(np.float32)
+        model = HistGradientBoostingRegressor(
+            max_iter=50, max_depth=4, random_state=random_state
+        )
+        model.fit(X, y)
+        return model, "concat"
+    elif surrogate_model == "ridge_interaction":
+        X = _make_interaction_features(X_cli, X_op)
+        model = Ridge()
+        model.fit(X, y)
+        return model, "interaction"
+    elif surrogate_model == "ridge":
+        raise ValueError(
+            "surrogate_model='ridge' is degenerate for stream_topk: a linear "
+            "model on concatenated [cli | op] features cannot rank operators "
+            "differently across clients (top-K becomes day-global). Use "
+            "'hgb' (default) or 'ridge_interaction' instead."
+        )
+    else:
+        raise ValueError(
+            f"surrogate_model must be 'hgb' or 'ridge_interaction', "
+            f"got {surrogate_model!r}"
+        )
+
+
+def _surrogate_features(
+    feature_mode: str, X_cli: np.ndarray, X_op: np.ndarray
+) -> np.ndarray:
+    """Build features matching what the surrogate was fitted on."""
+    if feature_mode == "interaction":
+        return _make_interaction_features(X_cli, X_op)
+    return np.hstack([X_cli, X_op]).astype(np.float32)
+
+
 def induce_policy_stream_topk(
     models: dict[str, Any],
     design: PairwiseDesign,
     metric_col: str,
     direction: Literal["min", "max"] = "min",
     topk: int = 20,
-    surrogate_model: str = "ridge",
+    surrogate_model: str = "hgb",
+    random_state: int = 0,
 ) -> dict[str, np.ndarray]:
     """Induce policies using streaming + top-K prefiltering strategy.
 
-    Fits a cheap Ridge surrogate on observed (cli_*, op_*) pairs, uses it to
+    Fits a cheap surrogate on observed (cli_*, op_*) pairs, uses it to
     prefilter to the top-K most promising operators per decision, then runs the
     full models only on those K candidates. This reduces computation for large
     operator pools while maintaining good policy quality.
 
-    **Important:** The Ridge surrogate is trained exclusively on historically-chosen
-    operators from the logs. This can systematically suppress operators that were
-    never observed in the historical data, introducing selection bias. The top-K
-    prefiltering ensures only high-predicted operators reach the full models, but
-    low-frequency operators will not be considered even if the full model would
-    rank them highly.
+    **Surrogate choice matters for personalization.** A naive linear model on
+    concatenated [cli | op] features is degenerate: for a fixed client the
+    score becomes ``constant + b·op``, so the top-K is identical across all
+    clients on the day (day-global rather than personalized). To avoid this:
+
+    - ``"hgb"`` (default): HistGradientBoostingRegressor — non-linear, captures
+      cli x op interactions automatically. Slightly slower than Ridge but still
+      a "cheap surrogate" relative to deep models.
+    - ``"ridge_interaction"``: Ridge regression with explicit cli x op outer-
+      product interaction features. Preserves the linear-model speed while
+      enabling per-client ranking.
+    - ``"ridge"`` (rejected): plain Ridge on concatenated features — raises
+      ValueError because top-K would degenerate to day-global selection.
+
+    **Selection bias caveat.** The surrogate is trained on historically-chosen
+    (client, operator) pairs from the logs. Operators that were never observed
+    have no training signal and may be systematically suppressed by the top-K
+    filter even if the full model would rank them highly.
 
     Parameters
     ----------
@@ -472,26 +549,32 @@ def induce_policy_stream_topk(
         Whether to minimize or maximize the target metric
     topk : int, default=20
         Number of top operators to consider per decision after prefiltering
-    surrogate_model : str, default="ridge"
-        Surrogate model type for prefiltering. Only "ridge" is supported.
+    surrogate_model : str, default="hgb"
+        Surrogate model type for prefiltering. One of "hgb" or
+        "ridge_interaction". "ridge" is rejected (degenerate).
+    random_state : int, default=0
+        Random seed for the surrogate model.
 
     Returns
     -------
     dict[str, np.ndarray]
         Dictionary mapping model names to induced policies
     """
-    if surrogate_model != "ridge":
-        raise ValueError(f"surrogate_model must be 'ridge', got {surrogate_model!r}")
+    logger.info(
+        f"Using streaming + top-K strategy with topk={topk}, "
+        f"surrogate={surrogate_model}"
+    )
 
-    logger.info(f"Using streaming + top-K strategy with topk={topk}")
-
-    # Step 1: Fit a cheap Ridge surrogate on observed (client, chosen_op) pairs
-    feature_cols = design.cli_features + design.op_features
-    X_surr = design.logs_df[feature_cols].values.astype(np.float32)
+    # Step 1: Fit a cheap surrogate that captures cli x op interactions
+    X_cli_surr = design.logs_df[design.cli_features].values.astype(np.float32)
+    X_op_surr = design.logs_df[design.op_features].values.astype(np.float32)
     y_surr = design.logs_df[metric_col].values.astype(np.float64)
-    surrogate = Ridge()
-    surrogate.fit(X_surr, y_surr)
-    logger.info(f"Surrogate Ridge fitted on {len(X_surr)} observed pairs")
+    surrogate, feature_mode = _fit_surrogate(
+        surrogate_model, X_cli_surr, X_op_surr, y_surr, random_state=random_state
+    )
+    logger.info(
+        f"Surrogate {surrogate_model!r} fitted on {len(X_cli_surr)} observed pairs"
+    )
 
     # Step 2: For each day x client, use the surrogate to prefilter to top-K
     # operators, then score those K with the full models
@@ -514,7 +597,7 @@ def induce_policy_stream_topk(
         day_ops = design.day_to_op_df[day]
 
         # Check that all models are fitted before processing clients
-        for model_name, model in models.items():
+        for model in models.values():
             check_is_fitted(model)
 
         # Initialize day decisions for all models
@@ -522,8 +605,6 @@ def induce_policy_stream_topk(
 
         # Process clients in order and collect decisions on-the-fly
         for _, client_row in day_clients.iterrows():
-            client_id = str(client_row[design.client_id_col])
-
             # Get eligible operators
             if design.elig_col and design.elig_col in client_row:
                 elig_ops_raw = client_row[design.elig_col]
@@ -543,15 +624,16 @@ def induce_policy_stream_topk(
                     day_decisions[model_name].append(design.ops_all_by_day[day][0])
                 continue
 
-            # Build feature matrix for all eligible (client, op) pairs
+            # Build feature matrices for all eligible (client, op) pairs
             cli_vals = np.array(
                 [float(client_row[f]) for f in design.cli_features], dtype=np.float32
             )
             op_vals = eligible_ops_df[design.op_features].values.astype(np.float32)
-            X_elig = np.hstack([np.tile(cli_vals, (len(eligible_ops_df), 1)), op_vals])
+            X_cli_elig = np.tile(cli_vals, (len(eligible_ops_df), 1))
 
-            # Surrogate prefilter: keep top-K
-            surr_preds = surrogate.predict(X_elig)
+            # Surrogate uses interaction-aware features so ranking varies per client
+            X_surr_elig = _surrogate_features(feature_mode, X_cli_elig, op_vals)
+            surr_preds = surrogate.predict(X_surr_elig)
             k = min(topk, len(eligible_ops_df))
             if direction == "min":
                 topk_idx = np.argpartition(surr_preds, k - 1)[:k]
@@ -560,6 +642,7 @@ def induce_policy_stream_topk(
 
             topk_ops_df = eligible_ops_df.iloc[topk_idx]
             op_vals_k = topk_ops_df[design.op_features].values.astype(np.float32)
+            # Full models use concatenated features (matches their training)
             X_topk = np.hstack([np.tile(cli_vals, (k, 1)), op_vals_k])
             topk_op_ids = topk_ops_df[design.operator_id_col].values
 
@@ -591,6 +674,8 @@ def induce_policy(
     topk: int = 20,
     chunk_pairs: int = 2_000_000,
     metric_col: str | None = None,
+    surrogate_model: str = "hgb",
+    random_state: int = 0,
 ) -> dict[str, np.ndarray]:
     """Induce policies using specified or auto-selected strategy.
 
@@ -610,6 +695,11 @@ def induce_policy(
         Maximum pairs per chunk
     metric_col : str
         Target metric column name; required when strategy is "stream_topk"
+    surrogate_model : str, default="hgb"
+        Surrogate model for stream_topk prefiltering. "hgb" or
+        "ridge_interaction".
+    random_state : int, default=0
+        Random seed used by the surrogate model.
 
     Returns
     -------
@@ -630,6 +720,14 @@ def induce_policy(
     elif strategy == "stream_topk":
         if not metric_col:
             raise ValueError("metric_col must be provided when strategy='stream_topk'")
-        return induce_policy_stream_topk(models, design, metric_col, direction, topk)
+        return induce_policy_stream_topk(
+            models,
+            design,
+            metric_col,
+            direction,
+            topk,
+            surrogate_model=surrogate_model,
+            random_state=random_state,
+        )
     else:
         raise ValueError(f"Unknown strategy: {strategy}")

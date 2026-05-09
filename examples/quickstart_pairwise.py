@@ -196,9 +196,65 @@ def main():
     print("  • Eligibility constraints are properly handled")
     print("  • DR and SNDR estimators provide robust policy evaluation")
 
+    # Demonstrate fit_models + pre_split safeguard (issue #44 + cross-fitting fix)
+    print("\n🛡️  fit_models=True with pre_split cross-fitting safeguard:")
+    print(
+        "  Passing UNFITTED models is safe when fit_models=True. The default"
+    )
+    print(
+        "  policy_train='pre_split' fits on the first 85% of days and evaluates"
+    )
+    print(
+        "  on the held-out tail, avoiding training-on-test data leakage."
+    )
+
+    unfitted_models = {
+        "ridge_unfit": Ridge(random_state=42),
+    }
+    report_safe, _ = evaluate_pairwise_models(
+        logs_df=logs_df,
+        op_daily_df=op_daily_df,
+        models=unfitted_models,
+        metric_col="service_time",
+        task_type="regression",
+        direction="min",
+        n_splits=2,
+        strategy="direct",
+        fit_models=True,
+        policy_train="pre_split",  # default; shown explicitly
+        policy_train_frac=0.85,
+        random_state=42,
+    )
+    print(report_safe[["model", "estimator", "V_hat", "ESS"]].round(3))
+
+    # Demonstrate stream_topk with HGB surrogate (issue #42 fix)
+    print("\n⚡ stream_topk strategy with non-degenerate HGB surrogate:")
+    print(
+        "  surrogate_model='hgb' (default) captures cli x op interactions so the"
+    )
+    print(
+        "  top-K is personalized per client (NOT day-global as plain Ridge would be)."
+    )
+
+    report_topk, _ = evaluate_pairwise_models(
+        logs_df=logs_df,
+        op_daily_df=op_daily_df,
+        models=models_regression,  # already fitted above
+        metric_col="service_time",
+        task_type="regression",
+        direction="min",
+        n_splits=2,
+        strategy="stream_topk",
+        topk=5,
+        surrogate_model="hgb",  # default; "ridge_interaction" is the lighter alternative
+        random_state=42,
+    )
+    print(report_topk[["model", "estimator", "V_hat", "ESS"]].round(3))
+
     print("\n🔧 Next steps:")
     print("  • Try with your own data using the same API")
     print("  • Experiment with different strategies: 'direct', 'stream', 'stream_topk'")
+    print("  • Use surrogate_model='ridge_interaction' for cheaper top-K prefiltering")
     print("  • Install optional extras: pip install skdr-eval[choice,speed]")
     print("  • Check the documentation for advanced features")
 

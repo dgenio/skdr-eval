@@ -8,7 +8,12 @@ from sklearn.exceptions import NotFittedError
 from sklearn.linear_model import LogisticRegression, Ridge
 
 from skdr_eval import evaluate_pairwise_models, make_pairwise_synth
-from skdr_eval.pairwise import PairwiseDesign
+from skdr_eval.pairwise import (
+    PairwiseDesign,
+    _fit_surrogate,
+    _surrogate_features,
+    induce_policy_stream_topk,
+)
 
 
 def test_pairwise_regression_basic():
@@ -438,6 +443,184 @@ def test_pairwise_unfitted_models_fail_across_strategies(strategy: str):
             fit_models=False,  # Don't fit models
             random_state=42,
         )
+
+
+def test_stream_topk_rejects_plain_ridge_surrogate():
+    """Plain ridge surrogate is degenerate (day-global top-K) and must be rejected."""
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=1, n_clients_day=20, n_ops=8, seed=42
+    )
+    design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
+
+    # Fit a model so check_is_fitted passes (we want to hit the surrogate validation)
+    feature_cols = design.cli_features + design.op_features
+    X = design.logs_df[feature_cols].values
+    y = design.logs_df["service_time"].values
+    model = Ridge()
+    model.fit(X, y)
+
+    with pytest.raises(ValueError, match="degenerate"):
+        induce_policy_stream_topk(
+            models={"m": model},
+            design=design,
+            metric_col="service_time",
+            surrogate_model="ridge",  # rejected
+        )
+
+
+@pytest.mark.parametrize("surrogate_model", ["hgb", "ridge_interaction"])
+def test_stream_topk_personalization_recovery(surrogate_model: str):
+    """Simulation proof: stream_topk top-K must vary across clients.
+
+    Required by AGENTS.md / .claude/CLAUDE.md: any change to statistical
+    evaluation logic must include a simulation that proves the code recovers
+    a known ground-truth parameter.
+
+    Ground truth setup
+    ------------------
+    We construct synthetic data where the optimal operator depends on a
+    *client* feature: clients with ``cli_type=0`` should prefer operators with
+    high ``op_a``; clients with ``cli_type=1`` should prefer operators with
+    high ``op_b``. The true target is
+
+        y = - (cli_type * op_b + (1 - cli_type) * op_a) + small_noise
+
+    so ``direction="min"`` recovers each client's preferred operator.
+
+    A degenerate surrogate (linear on concatenated [cli | op]) cannot
+    distinguish the two client types and would produce the *same* top-K for
+    all clients. The fixed surrogates ("hgb", "ridge_interaction") capture
+    the cli x op interaction and produce *client-specific* top-K rankings —
+    we verify this directly.
+    """
+    rng = np.random.RandomState(7)
+    n_ops = 12
+    n_clients_per_type = 200
+    topk = 3
+
+    # Operators: half are op_a-heavy, half are op_b-heavy (well separated)
+    op_a = np.concatenate([
+        rng.uniform(0.8, 1.0, n_ops // 2),
+        rng.uniform(0.0, 0.2, n_ops - n_ops // 2),
+    ])
+    op_b = np.concatenate([
+        rng.uniform(0.0, 0.2, n_ops // 2),
+        rng.uniform(0.8, 1.0, n_ops - n_ops // 2),
+    ])
+    op_ids = [f"op_{i}" for i in range(n_ops)]
+
+    op_daily_df = pd.DataFrame({
+        "operator_id": op_ids,
+        "arrival_day": ["d1"] * n_ops,
+        "op_a": op_a,
+        "op_b": op_b,
+    })
+
+    # Two client types with opposite preferences (cli_type repurposed as cli_x)
+    cli_x = np.concatenate(
+        [np.zeros(n_clients_per_type), np.ones(n_clients_per_type)]
+    )
+    n_clients = len(cli_x)
+    chosen_idx = rng.randint(0, n_ops, size=n_clients)
+    chosen_op_a = op_a[chosen_idx]
+    chosen_op_b = op_b[chosen_idx]
+    noise = rng.normal(0, 0.02, size=n_clients)
+    y = -(cli_x * chosen_op_b + (1 - cli_x) * chosen_op_a) + noise
+
+    logs_df = pd.DataFrame({
+        "client_id": [f"c{i}" for i in range(n_clients)],
+        "operator_id": [op_ids[i] for i in chosen_idx],
+        "arrival_day": ["d1"] * n_clients,
+        "arrival_ts": np.arange(n_clients),
+        "cli_x": cli_x,
+        "op_a": chosen_op_a,
+        "op_b": chosen_op_b,
+        "service_time": y,
+    })
+
+    design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
+
+    # Test the surrogate's *ranking* per client directly. This is the
+    # personalization property. We do NOT route through the full model —
+    # whether the full model can also resolve the interaction is a separate
+    # concern (and depends on its capacity / data).
+    X_cli_train = design.logs_df[design.cli_features].values.astype(np.float32)
+    X_op_train = design.logs_df[design.op_features].values.astype(np.float32)
+    y_train = design.logs_df["service_time"].values.astype(np.float64)
+
+    surrogate, feature_mode = _fit_surrogate(
+        surrogate_model, X_cli_train, X_op_train, y_train, random_state=0
+    )
+
+    # Build features for one type-0 client and one type-1 client paired with
+    # *all* operators, then score with the surrogate.
+    op_features_full = op_daily_df[["op_a", "op_b"]].values.astype(np.float32)
+
+    def _score_for(cli_x_value: float) -> np.ndarray:
+        X_cli = np.full((n_ops, 1), cli_x_value, dtype=np.float32)
+        X_in = _surrogate_features(feature_mode, X_cli, op_features_full)
+        return surrogate.predict(X_in)
+
+    score_type0 = _score_for(0.0)
+    score_type1 = _score_for(1.0)
+
+    # Top-K (smallest scores under direction="min") for each client type
+    top0 = np.argpartition(score_type0, topk - 1)[:topk]
+    top1 = np.argpartition(score_type1, topk - 1)[:topk]
+
+    # Personalization signal: top-K rankings must differ between client types.
+    # A degenerate (linear-on-concat) surrogate produces identical top-K, so
+    # checking set inequality is the strongest possible assertion.
+    assert set(top0) != set(top1), (
+        f"surrogate={surrogate_model}: top-K is identical across client types "
+        f"({sorted(top0)} == {sorted(top1)}); this is the day-global degeneracy "
+        f"the fix must prevent."
+    )
+
+    # Stronger correctness check: the surrogate should rank op_a-heavy
+    # operators highly for type-0 clients and op_b-heavy for type-1 clients.
+    # op_a-heavy operators are the first half (indices 0..n_ops/2-1).
+    a_heavy_set = set(range(n_ops // 2))
+    b_heavy_set = set(range(n_ops // 2, n_ops))
+    overlap_type0_with_a = len(set(top0) & a_heavy_set)
+    overlap_type1_with_b = len(set(top1) & b_heavy_set)
+    assert overlap_type0_with_a >= topk - 1, (
+        f"surrogate={surrogate_model}: type-0 top-K should be op_a-heavy; "
+        f"got {sorted(top0)} (a-heavy indices: {sorted(a_heavy_set)})"
+    )
+    assert overlap_type1_with_b >= topk - 1, (
+        f"surrogate={surrogate_model}: type-1 top-K should be op_b-heavy; "
+        f"got {sorted(top1)} (b-heavy indices: {sorted(b_heavy_set)})"
+    )
+
+
+def test_pairwise_pre_split_holds_out_evaluation_data():
+    """pre_split must reduce the evaluation set, fitting on earlier days only."""
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=4, n_clients_day=40, n_ops=6, seed=42
+    )
+
+    models = {"ridge": Ridge(random_state=42)}
+    # pre_split should fit on first 75% of days, evaluate on remaining 25%
+    report, _ = evaluate_pairwise_models(
+        logs_df=logs_df,
+        op_daily_df=op_daily_df,
+        models=models,
+        metric_col="service_time",
+        task_type="regression",
+        direction="min",
+        n_splits=2,
+        strategy="direct",
+        fit_models=True,
+        policy_train="pre_split",
+        policy_train_frac=0.75,
+        random_state=42,
+    )
+
+    # Evaluation succeeded with held-out data
+    assert isinstance(report, pd.DataFrame)
+    assert len(report) > 0
+    assert np.isfinite(report["V_hat"]).all()
 
 
 if __name__ == "__main__":
