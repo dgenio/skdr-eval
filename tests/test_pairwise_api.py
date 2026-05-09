@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.exceptions import NotFittedError
 from sklearn.linear_model import LogisticRegression, Ridge
 
 from skdr_eval import evaluate_pairwise_models, make_pairwise_synth
@@ -378,7 +379,7 @@ def test_pairwise_stream_topk_strategy():
     model_results = detailed_results["ridge"]
     # Should have either DR or SNDR estimator
     assert len(model_results) > 0
-    for estimator_name, dr_result in model_results.items():
+    for _estimator_name, dr_result in model_results.items():
         # Check that the DRResult has valid values
         assert hasattr(dr_result, "V_hat")
         assert np.isfinite(dr_result.V_hat)
@@ -394,7 +395,7 @@ def test_pairwise_unfitted_model_fails_without_fit_models():
     models = {"ridge": Ridge(random_state=42)}
 
     # Should raise NotFittedError when trying to predict with unfitted model
-    with pytest.raises(Exception):  # NotFittedError from sklearn
+    with pytest.raises(NotFittedError):
         evaluate_pairwise_models(
             logs_df=logs_df,
             op_daily_df=op_daily_df,
