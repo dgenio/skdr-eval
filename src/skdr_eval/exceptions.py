@@ -1,12 +1,12 @@
 """Custom exceptions for skdr-eval library."""
 
-from typing import Any, Optional
+from typing import Any
 
 
 class SkdrEvalError(Exception):
     """Base exception for skdr-eval library."""
 
-    def __init__(self, message: str, details: Optional[dict[str, Any]] = None):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(message)
         self.message = message
         self.details = details or {}

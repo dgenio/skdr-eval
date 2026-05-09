@@ -1,7 +1,6 @@
 """Conditional logit model for propensity estimation."""
 
 import logging
-from typing import Optional
 
 import numpy as np
 
@@ -177,7 +176,7 @@ def calibrate_temperature(
     y_val: np.ndarray,
     coef: np.ndarray,
     intercept: float,
-    temp_grid: Optional[np.ndarray] = None,
+    temp_grid: np.ndarray | None = None,
 ) -> float:
     """Calibrate temperature parameter on validation set.
 

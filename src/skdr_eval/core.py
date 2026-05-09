@@ -2,10 +2,11 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional, Protocol, Union
+from typing import Any, Callable, Literal, Protocol
 
 import numpy as np
 import pandas as pd
+from scipy.stats import norm as _norm
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import (
     HistGradientBoostingClassifier,
@@ -278,7 +279,7 @@ def build_design(
 def fit_propensity_timecal(
     X_phi: np.ndarray,
     A: np.ndarray,
-    ts: Optional[np.ndarray] = None,
+    ts: np.ndarray | None = None,
     n_splits: int = 3,
     random_state: int = 0,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -484,7 +485,7 @@ def fit_outcome_crossfit(
     X_obs: np.ndarray,
     Y: np.ndarray,
     n_splits: int = 3,
-    estimator: Union[str, Callable[[], Any]] = "hgb",
+    estimator: str | Callable[[], Any] = "hgb",
     random_state: int = 0,
 ) -> tuple[np.ndarray, list[tuple[Any, np.ndarray, np.ndarray]]]:
     """Fit outcome model with cross-fitting.
@@ -904,10 +905,10 @@ def dr_value_with_clip(
 
 def block_bootstrap_ci(
     values_num: np.ndarray,
-    values_den: Optional[np.ndarray],
+    values_den: np.ndarray | None,
     base_mean: np.ndarray,  # noqa: ARG001
     n_boot: int = 400,
-    block_len: Optional[int] = None,
+    block_len: int | None = None,
     alpha: float = 0.05,
     random_state: int = 0,
 ) -> tuple[float, float]:
@@ -998,7 +999,7 @@ def evaluate_sklearn_models(
     models: dict[str, Any],
     fit_models: bool = True,
     n_splits: int = 3,
-    outcome_estimator: Union[str, Callable[[], Any]] = "hgb",
+    outcome_estimator: str | Callable[[], Any] = "hgb",
     random_state: int = 0,
     clip_grid: tuple[float, ...] = (2, 5, 10, 20, 50, float("inf")),
     ci_bootstrap: bool = False,
@@ -1187,16 +1188,17 @@ def evaluate_sklearn_models(
                         )
                     else:
                         # Fallback if no matched samples
+                        z = _norm.ppf(1 - alpha / 2)
                         ci_lower, ci_upper = (
-                            result.V_hat - 1.96 * result.SE_if,
-                            result.V_hat + 1.96 * result.SE_if,
+                            result.V_hat - z * result.SE_if,
+                            result.V_hat + z * result.SE_if,
                         )
                 except (ValueError, RuntimeError, np.linalg.LinAlgError):
                     # Fallback to normal approximation if bootstrap fails
-                    # This can happen with numerical issues in bootstrap calculations
+                    z = _norm.ppf(1 - alpha / 2)
                     ci_lower, ci_upper = (
-                        result.V_hat - 1.96 * result.SE_if,
-                        result.V_hat + 1.96 * result.SE_if,
+                        result.V_hat - z * result.SE_if,
+                        result.V_hat + z * result.SE_if,
                     )
                 row["ci_lower"] = ci_lower
                 row["ci_upper"] = ci_upper
@@ -1208,9 +1210,7 @@ def evaluate_sklearn_models(
     return report, detailed_results
 
 
-def _get_outcome_estimator(
-    estimator: Union[str, Callable[[], Any]], task_type: str
-) -> Any:
+def _get_outcome_estimator(estimator: str | Callable[[], Any], task_type: str) -> Any:
     """Get outcome estimator based on task type."""
     if callable(estimator):
         result = estimator()
@@ -1538,6 +1538,7 @@ def evaluate_pairwise_models(
     metric_col: str,
     task_type: Literal["regression", "binary"],
     direction: Literal["min", "max"],
+    fit_models: bool = False,
     n_splits: int = 3,
     strategy: Literal["auto", "direct", "stream", "stream_topk"] = "auto",
     propensity: Literal["auto", "condlogit", "multinomial"] = "auto",
@@ -1551,9 +1552,9 @@ def evaluate_pairwise_models(
     day_col: str = "arrival_day",
     client_id_col: str = "client_id",
     operator_id_col: str = "operator_id",
-    elig_col: Optional[str] = "elig_mask",
+    elig_col: str | None = "elig_mask",
     random_state: int = 0,
-    outcome_estimator: Union[str, Callable[[], Any]] = "hgb",
+    outcome_estimator: str | Callable[[], Any] = "hgb",
 ) -> tuple[pd.DataFrame, dict[str, dict[str, DRResult]]]:
     """Evaluate pairwise models using autoscale strategy.
 
@@ -1564,13 +1565,18 @@ def evaluate_pairwise_models(
     op_daily_df : pd.DataFrame
         Daily operator snapshots
     models : Dict[str, Any]
-        Dictionary of model_name -> fitted model
+        Dictionary of model_name -> model instance (fitted or unfitted).
     metric_col : str
         Target metric column name
     task_type : Literal["regression", "binary"]
         Type of prediction task
     direction : Literal["min", "max"]
         Whether to minimize or maximize metric
+    fit_models : bool, default=False
+        If True, fit each model on the observed (cli_*, op_*) features from
+        logs_df against metric_col before inducing policies. Set to True when
+        passing unfitted model instances; set to False when passing pre-fitted
+        models.
     n_splits : int
         Number of cross-validation splits
     strategy : Literal["auto", "direct", "stream", "stream_topk"]
@@ -1597,11 +1603,11 @@ def evaluate_pairwise_models(
         Client ID column name
     operator_id_col : str
         Operator ID column name
-    elig_col : Optional[str]
+    elig_col : str | None
         Eligibility column name
     random_state : int
         Random seed
-    outcome_estimator : Union[str, Callable[[], Any]]
+    outcome_estimator : str | Callable[[], Any]
         Outcome model estimator
 
     Returns
@@ -1635,8 +1641,21 @@ def evaluate_pairwise_models(
         f"{stats['memory_gb']:.2f} GB estimated memory"
     )
 
+    # Fit policy models if requested
+    if fit_models:
+        feature_cols = design.cli_features + design.op_features
+        X_fit = design.logs_df[feature_cols].values.astype(np.float32)
+        y_fit = design.logs_df[metric_col].values
+        for model in models.values():
+            model.fit(X_fit, y_fit)
+        logger.info(
+            f"Fitted {len(models)} policy model(s) on {len(X_fit)} observed pairs"
+        )
+
     # Induce policies
-    policies = induce_policy(models, design, strategy, direction, topk, chunk_pairs)
+    policies = induce_policy(
+        models, design, strategy, direction, topk, chunk_pairs, metric_col
+    )
 
     # Estimate propensity scores
     propensities = estimate_propensity_pairwise(
@@ -1809,16 +1828,17 @@ def evaluate_pairwise_models(
                             )
                         else:
                             # Fallback if no matched samples
+                            z = _norm.ppf(1 - alpha / 2)
                             ci_lower, ci_upper = (
-                                result.V_hat - 1.96 * result.SE_if,
-                                result.V_hat + 1.96 * result.SE_if,
+                                result.V_hat - z * result.SE_if,
+                                result.V_hat + z * result.SE_if,
                             )
                     except (ValueError, RuntimeError, np.linalg.LinAlgError):
                         # Fallback to normal approximation if bootstrap fails
-                        # This can happen with numerical issues in bootstrap calculations
+                        z = _norm.ppf(1 - alpha / 2)
                         ci_lower, ci_upper = (
-                            result.V_hat - 1.96 * result.SE_if,
-                            result.V_hat + 1.96 * result.SE_if,
+                            result.V_hat - z * result.SE_if,
+                            result.V_hat + z * result.SE_if,
                         )
                     report_row["ci_lower"] = ci_lower
                     report_row["ci_upper"] = ci_upper

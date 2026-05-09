@@ -3,10 +3,12 @@
 import logging
 from collections.abc import Generator
 from dataclasses import dataclass
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
+from sklearn.linear_model import Ridge
+from sklearn.utils.validation import check_is_fitted
 
 logger = logging.getLogger("skdr_eval")
 
@@ -27,7 +29,7 @@ class PairwiseDesign:
         Column name for client ID
     operator_id_col : str
         Column name for operator ID
-    elig_col : Optional[str]
+    elig_col : str | None
         Column name for eligibility mask (list of eligible operators)
     cli_features : List[str]
         Client feature column names (cli_*)
@@ -44,7 +46,7 @@ class PairwiseDesign:
     day_col: str
     client_id_col: str
     operator_id_col: str
-    elig_col: Optional[str]
+    elig_col: str | None
     cli_features: list[str]
     op_features: list[str]
     ops_all_by_day: dict[str, list[str]]
@@ -58,7 +60,7 @@ class PairwiseDesign:
         day_col: str = "arrival_day",
         client_id_col: str = "client_id",
         operator_id_col: str = "operator_id",
-        elig_col: Optional[str] = "elig_mask",
+        elig_col: str | None = "elig_mask",
     ) -> "PairwiseDesign":
         """Create PairwiseDesign from dataframes."""
         # Reset index so propensity array positions always match DataFrame positions.
@@ -301,6 +303,7 @@ def induce_policy_direct(
         # Get predictions from each model
         for model_name, model in models.items():
             try:
+                check_is_fitted(model)
                 predictions = model.predict(X_pairs)
 
                 # Group by client and find best operator
@@ -388,6 +391,7 @@ def induce_policy_stream(
             # Get predictions from each model
             for model_name, model in models.items():
                 try:
+                    check_is_fitted(model)
                     predictions = model.predict(X_pairs)
 
                     # Update best decisions for each client in this chunk
@@ -437,21 +441,17 @@ def induce_policy_stream(
 def induce_policy_stream_topk(
     models: dict[str, Any],
     design: PairwiseDesign,
+    metric_col: str,
     direction: Literal["min", "max"] = "min",
     topk: int = 20,
-    chunk_pairs: int = 2_000_000,
-    surrogate_model: str = "ridge",  # noqa: ARG001
+    surrogate_model: str = "ridge",
 ) -> dict[str, np.ndarray]:
     """Induce policies using streaming + top-K prefiltering strategy.
 
-    This strategy first uses a surrogate model to prefilter to the top-K
-    most promising operators per decision, then runs the full models only
-    on those candidates. This reduces computational cost for large operator
-    pools while maintaining good performance.
-
-    **Note**: This strategy is not fully implemented and will fall back to
-    the streaming strategy. The surrogate model prefiltering is planned
-    for future releases.
+    Fits a cheap Ridge surrogate on observed (cli_*, op_*) pairs, uses it to
+    prefilter to the top-K most promising operators per decision, then runs the
+    full models only on those K candidates. This reduces computation for large
+    operator pools while maintaining good policy quality.
 
     Parameters
     ----------
@@ -459,36 +459,134 @@ def induce_policy_stream_topk(
         Dictionary of fitted models to evaluate
     design : PairwiseDesign
         Pairwise design containing data and metadata
+    metric_col : str
+        Target metric column in design.logs_df used to train the surrogate.
     direction : Literal["min", "max"], default="min"
         Whether to minimize or maximize the target metric
     topk : int, default=20
-        Number of top operators to consider per decision
-    chunk_pairs : int, default=2_000_000
-        Maximum number of pairs to process in memory at once
+        Number of top operators to consider per decision after prefiltering
     surrogate_model : str, default="ridge"
-        Model to use for prefiltering (currently unused)
+        Surrogate model type for prefiltering. Only "ridge" is supported.
 
     Returns
     -------
     dict[str, np.ndarray]
         Dictionary mapping model names to induced policies
-
-    Notes
-    -----
-    This strategy is designed for scenarios with very large operator pools
-    where evaluating all pairs would be computationally prohibitive.
-    Currently falls back to streaming strategy.
     """
+    if surrogate_model != "ridge":
+        raise ValueError(f"surrogate_model must be 'ridge', got {surrogate_model!r}")
+
     logger.info(f"Using streaming + top-K strategy with topk={topk}")
 
-    # For now, fallback to streaming strategy
-    # In a full implementation, we would:
-    # 1. Train a cheap surrogate model on a sample
-    # 2. Use it to prefilter to top-K operators per decision
-    # 3. Then run the full models only on those K candidates
+    # Step 1: Fit a cheap Ridge surrogate on observed (client, chosen_op) pairs
+    feature_cols = design.cli_features + design.op_features
+    X_surr = design.logs_df[feature_cols].values.astype(np.float32)
+    y_surr = design.logs_df[metric_col].values.astype(np.float64)
+    surrogate = Ridge()
+    surrogate.fit(X_surr, y_surr)
+    logger.info(f"Surrogate Ridge fitted on {len(X_surr)} observed pairs")
 
-    logger.warning("Top-K strategy not fully implemented, falling back to streaming")
-    return induce_policy_stream(models, design, direction, chunk_pairs)
+    # Step 2: For each day x client, use the surrogate to prefilter to top-K
+    # operators, then score those K with the full models
+    policies: dict[str, list[str]] = {name: [] for name in models}
+
+    for day in sorted(design.ops_all_by_day.keys()):
+        day_clients = design.logs_df[design.logs_df[design.day_col] == day]
+
+        if len(day_clients) == 0:
+            continue
+
+        if day not in design.day_to_op_df:
+            logger.warning(f"No operators found for day {day}")
+            for model_name in models:
+                policies[model_name].extend(
+                    [design.ops_all_by_day[day][0]] * len(day_clients)
+                )
+            continue
+
+        day_ops = design.day_to_op_df[day]
+
+        day_decisions: dict[str, dict[str, Any]] = {name: {} for name in models}
+
+        for _, client_row in day_clients.iterrows():
+            client_id = str(client_row[design.client_id_col])
+
+            # Get eligible operators
+            if design.elig_col and design.elig_col in client_row:
+                elig_ops_raw = client_row[design.elig_col]
+                if hasattr(elig_ops_raw, "iloc"):
+                    elig_ops_raw = elig_ops_raw.iloc[0] if len(elig_ops_raw) > 0 else []
+                if isinstance(elig_ops_raw, (list, tuple)):
+                    eligible_ops_df = day_ops[
+                        day_ops[design.operator_id_col].isin(elig_ops_raw)
+                    ]
+                else:
+                    eligible_ops_df = day_ops
+            else:
+                eligible_ops_df = day_ops
+
+            if len(eligible_ops_df) == 0:
+                for model_name in models:
+                    day_decisions[model_name][client_id] = {
+                        "best_op": design.ops_all_by_day[day][0],
+                        "best_pred": 0.0,
+                    }
+                continue
+
+            # Build feature matrix for all eligible (client, op) pairs
+            cli_vals = np.array(
+                [float(client_row[f]) for f in design.cli_features], dtype=np.float32
+            )
+            op_vals = eligible_ops_df[design.op_features].values.astype(np.float32)
+            X_elig = np.hstack([np.tile(cli_vals, (len(eligible_ops_df), 1)), op_vals])
+
+            # Surrogate prefilter: keep top-K
+            surr_preds = surrogate.predict(X_elig)
+            k = min(topk, len(eligible_ops_df))
+            if direction == "min":
+                topk_idx = np.argpartition(surr_preds, k - 1)[:k]
+            else:
+                topk_idx = np.argpartition(surr_preds, -k)[-k:]
+
+            topk_ops_df = eligible_ops_df.iloc[topk_idx]
+            op_vals_k = topk_ops_df[design.op_features].values.astype(np.float32)
+            X_topk = np.hstack([np.tile(cli_vals, (k, 1)), op_vals_k])
+            topk_op_ids = topk_ops_df[design.operator_id_col].values
+
+            # Score top-K with each full model
+            for model_name, model in models.items():
+                try:
+                    check_is_fitted(model)
+                    full_preds = model.predict(X_topk)
+                    if direction == "min":
+                        best_local = np.argmin(full_preds)
+                    else:
+                        best_local = np.argmax(full_preds)
+                    day_decisions[model_name][client_id] = {
+                        "best_op": str(topk_op_ids[best_local]),
+                        "best_pred": float(full_preds[best_local]),
+                    }
+                except Exception as e:
+                    logger.error(f"Error predicting with model {model_name}: {e}")
+                    day_decisions[model_name][client_id] = {
+                        "best_op": design.ops_all_by_day[day][0],
+                        "best_pred": 0.0,
+                    }
+
+        # Collect day decisions in client order
+        for model_name in models:
+            day_model_decisions = []
+            for _, client_row in day_clients.iterrows():
+                client_id = str(client_row[design.client_id_col])
+                if client_id in day_decisions[model_name]:
+                    day_model_decisions.append(
+                        day_decisions[model_name][client_id]["best_op"]
+                    )
+                else:
+                    day_model_decisions.append(design.ops_all_by_day[day][0])
+            policies[model_name].extend(day_model_decisions)
+
+    return {name: np.array(decisions) for name, decisions in policies.items()}
 
 
 def induce_policy(
@@ -498,6 +596,7 @@ def induce_policy(
     direction: Literal["min", "max"] = "min",
     topk: int = 20,
     chunk_pairs: int = 2_000_000,
+    metric_col: str = "",
 ) -> dict[str, np.ndarray]:
     """Induce policies using specified or auto-selected strategy.
 
@@ -515,6 +614,8 @@ def induce_policy(
         Number of top operators for stream_topk strategy
     chunk_pairs : int
         Maximum pairs per chunk
+    metric_col : str
+        Target metric column name; required when strategy is "stream_topk"
 
     Returns
     -------
@@ -533,6 +634,8 @@ def induce_policy(
     elif strategy == "stream":
         return induce_policy_stream(models, design, direction, chunk_pairs)
     elif strategy == "stream_topk":
-        return induce_policy_stream_topk(models, design, direction, topk, chunk_pairs)
+        if not metric_col:
+            raise ValueError("metric_col must be provided when strategy='stream_topk'")
+        return induce_policy_stream_topk(models, design, metric_col, direction, topk)
     else:
         raise ValueError(f"Unknown strategy: {strategy}")

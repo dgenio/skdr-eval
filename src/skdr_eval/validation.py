@@ -1,7 +1,7 @@
 """Input validation utilities for skdr-eval library."""
 
 import logging
-from typing import Any, Optional, Union
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -19,7 +19,7 @@ logger = logging.getLogger("skdr_eval")
 def validate_dataframe(
     df: pd.DataFrame,
     name: str,
-    required_columns: Optional[list[str]] = None,
+    required_columns: list[str] | None = None,
     min_rows: int = 1,
     allow_empty: bool = False,
 ) -> None:
@@ -67,8 +67,8 @@ def validate_dataframe(
 def validate_numpy_array(
     arr: np.ndarray,
     name: str,
-    expected_shape: Optional[tuple[int, ...]] = None,
-    expected_dtype: Optional[type] = None,
+    expected_shape: tuple[int, ...] | None = None,
+    expected_dtype: type | None = None,
     min_size: int = 1,
     allow_empty: bool = False,
 ) -> None:
@@ -127,7 +127,7 @@ def validate_numpy_array(
 def validate_sklearn_estimator(
     estimator: Any,
     name: str,
-    required_methods: Optional[list[str]] = None,
+    required_methods: list[str] | None = None,
 ) -> None:
     """Validate a sklearn estimator.
 
@@ -266,22 +266,22 @@ def validate_memory_usage(
 
 
 def validate_parameter_range(
-    value: Union[int, float],
+    value: int | float,
     name: str,
-    min_val: Optional[Union[int, float]] = None,
-    max_val: Optional[Union[int, float]] = None,
+    min_val: int | float | None = None,
+    max_val: int | float | None = None,
 ) -> None:
     """Validate that a parameter is within a specified range.
 
     Parameters
     ----------
-    value : Union[int, float]
+    value : int | float
         Value to validate
     name : str
         Name of the parameter for error messages
-    min_val : Union[int, float], optional
+    min_val : int | float, optional
         Minimum allowed value
-    max_val : Union[int, float], optional
+    max_val : int | float, optional
         Maximum allowed value
 
     Raises
@@ -356,14 +356,14 @@ def validate_positive_integer(
 
 
 def validate_random_state(
-    random_state: Optional[Union[int, np.random.RandomState]],
+    random_state: int | np.random.RandomState | None,
     name: str = "random_state",
 ) -> None:
     """Validate a random state parameter.
 
     Parameters
     ----------
-    random_state : Optional[Union[int, np.random.RandomState]]
+    random_state : int | np.random.RandomState | None
         Random state to validate
     name : str, default="random_state"
         Name of the parameter for error messages
