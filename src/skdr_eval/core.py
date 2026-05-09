@@ -1691,9 +1691,7 @@ def evaluate_pairwise_models(
         y_fit = train_design.logs_df[metric_col].values
         for model in models.values():
             model.fit(X_fit, y_fit)
-        logger.info(
-            f"Fitted {len(models)} policy model(s) on {len(X_fit)} train pairs"
-        )
+        logger.info(f"Fitted {len(models)} policy model(s) on {len(X_fit)} train pairs")
 
     # Create pairwise design from the (possibly held-out) evaluation logs
     design = PairwiseDesign.from_dataframes(
