@@ -499,27 +499,31 @@ def test_stream_topk_personalization_recovery(surrogate_model: str):
     topk = 3
 
     # Operators: half are op_a-heavy, half are op_b-heavy (well separated)
-    op_a = np.concatenate([
-        rng.uniform(0.8, 1.0, n_ops // 2),
-        rng.uniform(0.0, 0.2, n_ops - n_ops // 2),
-    ])
-    op_b = np.concatenate([
-        rng.uniform(0.0, 0.2, n_ops // 2),
-        rng.uniform(0.8, 1.0, n_ops - n_ops // 2),
-    ])
+    op_a = np.concatenate(
+        [
+            rng.uniform(0.8, 1.0, n_ops // 2),
+            rng.uniform(0.0, 0.2, n_ops - n_ops // 2),
+        ]
+    )
+    op_b = np.concatenate(
+        [
+            rng.uniform(0.0, 0.2, n_ops // 2),
+            rng.uniform(0.8, 1.0, n_ops - n_ops // 2),
+        ]
+    )
     op_ids = [f"op_{i}" for i in range(n_ops)]
 
-    op_daily_df = pd.DataFrame({
-        "operator_id": op_ids,
-        "arrival_day": ["d1"] * n_ops,
-        "op_a": op_a,
-        "op_b": op_b,
-    })
+    op_daily_df = pd.DataFrame(
+        {
+            "operator_id": op_ids,
+            "arrival_day": ["d1"] * n_ops,
+            "op_a": op_a,
+            "op_b": op_b,
+        }
+    )
 
     # Two client types with opposite preferences (cli_type repurposed as cli_x)
-    cli_x = np.concatenate(
-        [np.zeros(n_clients_per_type), np.ones(n_clients_per_type)]
-    )
+    cli_x = np.concatenate([np.zeros(n_clients_per_type), np.ones(n_clients_per_type)])
     n_clients = len(cli_x)
     chosen_idx = rng.randint(0, n_ops, size=n_clients)
     chosen_op_a = op_a[chosen_idx]
@@ -527,16 +531,18 @@ def test_stream_topk_personalization_recovery(surrogate_model: str):
     noise = rng.normal(0, 0.02, size=n_clients)
     y = -(cli_x * chosen_op_b + (1 - cli_x) * chosen_op_a) + noise
 
-    logs_df = pd.DataFrame({
-        "client_id": [f"c{i}" for i in range(n_clients)],
-        "operator_id": [op_ids[i] for i in chosen_idx],
-        "arrival_day": ["d1"] * n_clients,
-        "arrival_ts": np.arange(n_clients),
-        "cli_x": cli_x,
-        "op_a": chosen_op_a,
-        "op_b": chosen_op_b,
-        "service_time": y,
-    })
+    logs_df = pd.DataFrame(
+        {
+            "client_id": [f"c{i}" for i in range(n_clients)],
+            "operator_id": [op_ids[i] for i in chosen_idx],
+            "arrival_day": ["d1"] * n_clients,
+            "arrival_ts": np.arange(n_clients),
+            "cli_x": cli_x,
+            "op_a": chosen_op_a,
+            "op_b": chosen_op_b,
+            "service_time": y,
+        }
+    )
 
     design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
 

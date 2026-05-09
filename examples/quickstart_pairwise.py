@@ -198,15 +198,9 @@ def main():
 
     # Demonstrate fit_models + pre_split safeguard (issue #44 + cross-fitting fix)
     print("\n🛡️  fit_models=True with pre_split cross-fitting safeguard:")
-    print(
-        "  Passing UNFITTED models is safe when fit_models=True. The default"
-    )
-    print(
-        "  policy_train='pre_split' fits on the first 85% of days and evaluates"
-    )
-    print(
-        "  on the held-out tail, avoiding training-on-test data leakage."
-    )
+    print("  Passing UNFITTED models is safe when fit_models=True. The default")
+    print("  policy_train='pre_split' fits on the first 85% of days and evaluates")
+    print("  on the held-out tail, avoiding training-on-test data leakage.")
 
     unfitted_models = {
         "ridge_unfit": Ridge(random_state=42),
@@ -229,9 +223,7 @@ def main():
 
     # Demonstrate stream_topk with HGB surrogate (issue #42 fix)
     print("\n⚡ stream_topk strategy with non-degenerate HGB surrogate:")
-    print(
-        "  surrogate_model='hgb' (default) captures cli x op interactions so the"
-    )
+    print("  surrogate_model='hgb' (default) captures cli x op interactions so the")
     print(
         "  top-K is personalized per client (NOT day-global as plain Ridge would be)."
     )
