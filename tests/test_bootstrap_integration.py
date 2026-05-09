@@ -88,7 +88,7 @@ class TestBootstrapIntegration:
             "rf": RandomForestRegressor(n_estimators=10, random_state=42),
         }
 
-        # Test without bootstrap CI
+        # Test without bootstrap CI using fit_models=True to fit models internally
         report_no_ci, _ = skdr_eval.evaluate_pairwise_models(
             logs_df=logs_df,
             op_daily_df=op_daily_df,
@@ -98,10 +98,11 @@ class TestBootstrapIntegration:
             direction="min",
             n_splits=3,
             ci_bootstrap=False,
+            fit_models=True,
             random_state=42,
         )
 
-        # Test with bootstrap CI
+        # Test with bootstrap CI, using fit_models=True
         report_with_ci, _ = skdr_eval.evaluate_pairwise_models(
             logs_df=logs_df,
             op_daily_df=op_daily_df,
@@ -112,6 +113,7 @@ class TestBootstrapIntegration:
             n_splits=3,
             ci_bootstrap=True,
             alpha=0.05,
+            fit_models=True,
             random_state=42,
         )
 
