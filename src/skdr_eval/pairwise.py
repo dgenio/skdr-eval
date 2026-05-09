@@ -513,12 +513,14 @@ def induce_policy_stream_topk(
 
         day_ops = design.day_to_op_df[day]
 
-        day_decisions: dict[str, dict[str, Any]] = {name: {} for name in models}
-
         # Check that all models are fitted before processing clients
         for model_name, model in models.items():
             check_is_fitted(model)
 
+        # Initialize day decisions for all models
+        day_decisions: dict[str, list[str]] = {name: [] for name in models}
+
+        # Process clients in order and collect decisions on-the-fly
         for _, client_row in day_clients.iterrows():
             client_id = str(client_row[design.client_id_col])
 
@@ -538,10 +540,7 @@ def induce_policy_stream_topk(
 
             if len(eligible_ops_df) == 0:
                 for model_name in models:
-                    day_decisions[model_name][client_id] = {
-                        "best_op": design.ops_all_by_day[day][0],
-                        "best_pred": 0.0,
-                    }
+                    day_decisions[model_name].append(design.ops_all_by_day[day][0])
                 continue
 
             # Build feature matrix for all eligible (client, op) pairs
@@ -564,7 +563,7 @@ def induce_policy_stream_topk(
             X_topk = np.hstack([np.tile(cli_vals, (k, 1)), op_vals_k])
             topk_op_ids = topk_ops_df[design.operator_id_col].values
 
-            # Score top-K with each full model
+            # Score top-K with each full model and collect decisions
             for model_name, model in models.items():
                 try:
                     full_preds = model.predict(X_topk)
@@ -572,29 +571,14 @@ def induce_policy_stream_topk(
                         best_local = np.argmin(full_preds)
                     else:
                         best_local = np.argmax(full_preds)
-                    day_decisions[model_name][client_id] = {
-                        "best_op": str(topk_op_ids[best_local]),
-                        "best_pred": float(full_preds[best_local]),
-                    }
+                    day_decisions[model_name].append(str(topk_op_ids[best_local]))
                 except Exception as e:
                     logger.error(f"Error predicting with model {model_name}: {e}")
-                    day_decisions[model_name][client_id] = {
-                        "best_op": design.ops_all_by_day[day][0],
-                        "best_pred": 0.0,
-                    }
+                    day_decisions[model_name].append(design.ops_all_by_day[day][0])
 
-        # Collect day decisions in client order
+        # Extend policies with day decisions
         for model_name in models:
-            day_model_decisions = []
-            for _, client_row in day_clients.iterrows():
-                client_id = str(client_row[design.client_id_col])
-                if client_id in day_decisions[model_name]:
-                    day_model_decisions.append(
-                        day_decisions[model_name][client_id]["best_op"]
-                    )
-                else:
-                    day_model_decisions.append(design.ops_all_by_day[day][0])
-            policies[model_name].extend(day_model_decisions)
+            policies[model_name].extend(day_decisions[model_name])
 
     return {name: np.array(decisions) for name, decisions in policies.items()}
 
