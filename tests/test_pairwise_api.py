@@ -673,5 +673,96 @@ def test_pairwise_pre_split_holds_out_evaluation_data():
     assert np.isfinite(report["V_hat"]).all()
 
 
+def test_pairwise_invalid_policy_train_raises():
+    """Unknown policy_train value must raise ValueError before any work."""
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=1, n_clients_day=10, n_ops=4, seed=42
+    )
+    with pytest.raises(ValueError, match="Unknown policy_train"):
+        evaluate_pairwise_models(
+            logs_df=logs_df,
+            op_daily_df=op_daily_df,
+            models={"ridge": Ridge(random_state=42)},
+            metric_col="service_time",
+            task_type="regression",
+            direction="min",
+            policy_train="bogus",
+        )
+
+
+@pytest.mark.parametrize("bad_frac", [-0.1, 0.0, 1.0, 1.5])
+def test_pairwise_invalid_policy_train_frac_raises(bad_frac: float):
+    """policy_train_frac outside (0, 1) must raise ValueError."""
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=1, n_clients_day=10, n_ops=4, seed=42
+    )
+    with pytest.raises(ValueError, match=r"policy_train_frac must be in \(0, 1\)"):
+        evaluate_pairwise_models(
+            logs_df=logs_df,
+            op_daily_df=op_daily_df,
+            models={"ridge": Ridge(random_state=42)},
+            metric_col="service_time",
+            task_type="regression",
+            direction="min",
+            policy_train_frac=bad_frac,
+        )
+
+
+def test_pairwise_pre_split_zero_eval_rows_raises():
+    """pre_split with frac so high that the held-out tail is empty must raise."""
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=1, n_clients_day=2, n_ops=3, seed=42
+    )
+    # 2 total rows * 0.999 -> int(1.998) = 1 train row, 1 eval row -> safe.
+    # We need fit_models=True and frac so high the tail is empty.
+    # int(2 * 0.9999) == 1, leaves 1 row. Force the edge: pick a frac whose
+    # int() truncates to n_total, leaving 0 eval rows.
+    # For n_total=2 we need int(2 * frac) == 2 -> frac in [1.0, ...) which is
+    # rejected upstream. Instead use n_total=1 to hit the raise.
+    logs_df = logs_df.iloc[:1].reset_index(drop=True)
+    with pytest.raises(ValueError, match="pre_split left 0 evaluation rows"):
+        evaluate_pairwise_models(
+            logs_df=logs_df,
+            op_daily_df=op_daily_df,
+            models={"ridge": Ridge(random_state=42)},
+            metric_col="service_time",
+            task_type="regression",
+            direction="min",
+            fit_models=True,
+            policy_train="pre_split",
+            policy_train_frac=0.85,
+        )
+
+
+def test_stream_topk_day_with_no_operators_raises():
+    """A day with clients but no operator candidates must fail loud.
+
+    ``PairwiseDesign.from_dataframes`` keeps ``ops_all_by_day`` and
+    ``day_to_op_df`` in sync, so we break the invariant directly to
+    exercise the defensive raise added per the audit (F3).
+    """
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=1, n_clients_day=5, n_ops=4, seed=42
+    )
+
+    feature_cols = [col for col in logs_df.columns if col.startswith(("cli_", "op_"))]
+    X = logs_df[feature_cols].values
+    y = logs_df["service_time"].values
+    model = Ridge(random_state=42)
+    model.fit(X, y)
+
+    design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
+    day_key = next(iter(design.ops_all_by_day))
+    design.day_to_op_df.pop(day_key)  # break the invariant
+
+    with pytest.raises(DataValidationError, match="no operator candidates"):
+        induce_policy_stream_topk(
+            models={"ridge": model},
+            design=design,
+            metric_col="service_time",
+            topk=2,
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
