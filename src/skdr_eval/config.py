@@ -4,7 +4,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 import yaml
 
@@ -29,7 +29,7 @@ class EvaluationConfig:
 
     # Bootstrap parameters
     n_boot: int = 400
-    block_len: Optional[int] = None
+    block_len: int | None = None
     alpha: float = 0.05
 
     # Model parameters
@@ -99,7 +99,7 @@ class ModelConfig:
 
     # Cross-validation parameters
     cv_folds: int = 5
-    cv_scoring: Optional[str] = None
+    cv_scoring: str | None = None
 
     # Training parameters
     random_state: int = 42
@@ -181,7 +181,7 @@ class VisualizationConfig:
 class ConfigManager:
     """Manager class for handling configuration files and settings."""
 
-    def __init__(self, config_dir: Optional[Union[str, Path]] = None):
+    def __init__(self, config_dir: str | Path | None = None):
         """Initialize configuration manager.
 
         Parameters
@@ -204,7 +204,7 @@ class ConfigManager:
         self.global_config_file = self.config_dir / "global.yaml"
 
     def save_evaluation_config(
-        self, config: EvaluationConfig, filename: Union[str, Path, None] = None
+        self, config: EvaluationConfig, filename: str | Path | None = None
     ) -> None:
         """Save evaluation configuration to file.
 
@@ -222,7 +222,7 @@ class ConfigManager:
         logger.info(f"Evaluation configuration saved to {path}")
 
     def load_evaluation_config(
-        self, filename: Union[str, Path, None] = None
+        self, filename: str | Path | None = None
     ) -> EvaluationConfig:
         """Load evaluation configuration from file.
 
@@ -246,7 +246,7 @@ class ConfigManager:
         return EvaluationConfig(**config_dict)
 
     def save_model_config(
-        self, config: ModelConfig, filename: Union[str, Path, None] = None
+        self, config: ModelConfig, filename: str | Path | None = None
     ) -> None:
         """Save model configuration to file.
 
@@ -263,7 +263,7 @@ class ConfigManager:
         self._save_yaml(config_dict, path)
         logger.info(f"Model configuration saved to {path}")
 
-    def load_model_config(self, filename: Union[str, Path, None] = None) -> ModelConfig:
+    def load_model_config(self, filename: str | Path | None = None) -> ModelConfig:
         """Load model configuration from file.
 
         Parameters
@@ -286,7 +286,7 @@ class ConfigManager:
         return ModelConfig(**config_dict)
 
     def save_visualization_config(
-        self, config: VisualizationConfig, filename: Union[str, Path, None] = None
+        self, config: VisualizationConfig, filename: str | Path | None = None
     ) -> None:
         """Save visualization configuration to file.
 
@@ -304,7 +304,7 @@ class ConfigManager:
         logger.info(f"Visualization configuration saved to {path}")
 
     def load_visualization_config(
-        self, filename: Union[str, Path, None] = None
+        self, filename: str | Path | None = None
     ) -> VisualizationConfig:
         """Load visualization configuration from file.
 
@@ -328,7 +328,7 @@ class ConfigManager:
         return VisualizationConfig(**config_dict)
 
     def save_global_config(
-        self, config: dict[str, Any], filename: Union[str, Path, None] = None
+        self, config: dict[str, Any], filename: str | Path | None = None
     ) -> None:
         """Save global configuration to file.
 
@@ -344,9 +344,7 @@ class ConfigManager:
         self._save_yaml(config, path)
         logger.info(f"Global configuration saved to {path}")
 
-    def load_global_config(
-        self, filename: Union[str, Path, None] = None
-    ) -> dict[str, Any]:
+    def load_global_config(self, filename: str | Path | None = None) -> dict[str, Any]:
         """Load global configuration from file.
 
         Parameters
@@ -428,7 +426,7 @@ def get_default_config() -> dict[str, Any]:
     }
 
 
-def load_config_from_file(filename: Union[str, Path]) -> dict[str, Any]:
+def load_config_from_file(filename: str | Path) -> dict[str, Any]:
     """Load configuration from file.
 
     Parameters
@@ -462,7 +460,7 @@ def load_config_from_file(filename: Union[str, Path]) -> dict[str, Any]:
         raise ConfigurationError(f"Unsupported file format: {filename.suffix}")
 
 
-def save_config_to_file(config: dict[str, Any], filename: Union[str, Path]) -> None:
+def save_config_to_file(config: dict[str, Any], filename: str | Path) -> None:
     """Save configuration to file.
 
     Parameters

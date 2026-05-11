@@ -1,7 +1,7 @@
 """Extended model support for skdr-eval library."""
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 from sklearn.base import BaseEstimator
@@ -90,7 +90,7 @@ class ModelFactory:
 
     @staticmethod
     def create_classifier(
-        model_type: str, random_state: Optional[int] = None, **kwargs: Any
+        model_type: str, random_state: int | None = None, **kwargs: Any
     ) -> BaseEstimator:
         """Create a classifier instance.
 
@@ -135,7 +135,7 @@ class ModelFactory:
 
     @staticmethod
     def create_regressor(
-        model_type: str, random_state: Optional[int] = None, **kwargs: Any
+        model_type: str, random_state: int | None = None, **kwargs: Any
     ) -> BaseEstimator:
         """Create a regressor instance.
 
@@ -243,8 +243,8 @@ class ModelEvaluator:
         X: np.ndarray,
         y: np.ndarray,
         cv: int = 5,
-        scoring: Optional[str] = None,
-        random_state: Optional[int] = None,
+        scoring: str | None = None,
+        random_state: int | None = None,
     ) -> dict[str, Any]:
         """Perform cross-validation on a model.
 
@@ -407,8 +407,8 @@ class ModelSelector:
         y: np.ndarray,
         task_type: str = "classification",
         cv: int = 5,
-        scoring: Optional[str] = None,
-        random_state: Optional[int] = None,
+        scoring: str | None = None,
+        random_state: int | None = None,
     ) -> dict[str, Any]:
         """Perform grid search for hyperparameter tuning.
 
@@ -469,8 +469,8 @@ class ModelSelector:
         task_type: str = "classification",
         n_iter: int = 100,
         cv: int = 5,
-        scoring: Optional[str] = None,
-        random_state: Optional[int] = None,
+        scoring: str | None = None,
+        random_state: int | None = None,
     ) -> dict[str, Any]:
         """Perform random search for hyperparameter tuning.
 
@@ -595,7 +595,7 @@ def get_model_recommendations(
 def create_model_ensemble(
     model_types: list[str],
     task_type: str,
-    random_state: Optional[int] = None,
+    random_state: int | None = None,
     **kwargs: Any,
 ) -> BaseEstimator:
     """Create an ensemble of models.

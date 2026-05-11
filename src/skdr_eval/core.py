@@ -2,10 +2,11 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional, Protocol, Union
+from typing import Any, Callable, Literal, Protocol
 
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import (
     HistGradientBoostingClassifier,
@@ -278,7 +279,7 @@ def build_design(
 def fit_propensity_timecal(
     X_phi: np.ndarray,
     A: np.ndarray,
-    ts: Optional[np.ndarray] = None,
+    ts: np.ndarray | None = None,
     n_splits: int = 3,
     random_state: int = 0,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -484,7 +485,7 @@ def fit_outcome_crossfit(
     X_obs: np.ndarray,
     Y: np.ndarray,
     n_splits: int = 3,
-    estimator: Union[str, Callable[[], Any]] = "hgb",
+    estimator: str | Callable[[], Any] = "hgb",
     random_state: int = 0,
 ) -> tuple[np.ndarray, list[tuple[Any, np.ndarray, np.ndarray]]]:
     """Fit outcome model with cross-fitting.
@@ -904,10 +905,10 @@ def dr_value_with_clip(
 
 def block_bootstrap_ci(
     values_num: np.ndarray,
-    values_den: Optional[np.ndarray],
+    values_den: np.ndarray | None,
     base_mean: np.ndarray,  # noqa: ARG001
     n_boot: int = 400,
-    block_len: Optional[int] = None,
+    block_len: int | None = None,
     alpha: float = 0.05,
     random_state: int = 0,
 ) -> tuple[float, float]:
@@ -998,7 +999,7 @@ def evaluate_sklearn_models(
     models: dict[str, Any],
     fit_models: bool = True,
     n_splits: int = 3,
-    outcome_estimator: Union[str, Callable[[], Any]] = "hgb",
+    outcome_estimator: str | Callable[[], Any] = "hgb",
     random_state: int = 0,
     clip_grid: tuple[float, ...] = (2, 5, 10, 20, 50, float("inf")),
     ci_bootstrap: bool = False,
@@ -1025,7 +1026,13 @@ def evaluate_sklearn_models(
     clip_grid : Tuple[float, ...], default=(2, 5, 10, 20, 50, inf)
         Clipping thresholds.
     ci_bootstrap : bool, default=False
-        Whether to compute bootstrap confidence intervals.
+        Whether to compute bootstrap confidence intervals via
+        ``block_bootstrap_ci`` on the per-decision DR contributions. Note that
+        this is a **conditional bootstrap**: ``q_hat``, propensities, and the
+        policy itself are held fixed across replicates, so the resulting CI
+        captures sampling variability of the influence function *given* the
+        nuisances but not variability *of* the nuisances. May under-cover when
+        nuisance estimation error is non-negligible.
     alpha : float, default=0.05
         Significance level for confidence intervals.
     policy_train : str, default="all"
@@ -1187,16 +1194,17 @@ def evaluate_sklearn_models(
                         )
                     else:
                         # Fallback if no matched samples
+                        z = norm.ppf(1 - alpha / 2)
                         ci_lower, ci_upper = (
-                            result.V_hat - 1.96 * result.SE_if,
-                            result.V_hat + 1.96 * result.SE_if,
+                            result.V_hat - z * result.SE_if,
+                            result.V_hat + z * result.SE_if,
                         )
                 except (ValueError, RuntimeError, np.linalg.LinAlgError):
                     # Fallback to normal approximation if bootstrap fails
-                    # This can happen with numerical issues in bootstrap calculations
+                    z = norm.ppf(1 - alpha / 2)
                     ci_lower, ci_upper = (
-                        result.V_hat - 1.96 * result.SE_if,
-                        result.V_hat + 1.96 * result.SE_if,
+                        result.V_hat - z * result.SE_if,
+                        result.V_hat + z * result.SE_if,
                     )
                 row["ci_lower"] = ci_lower
                 row["ci_upper"] = ci_upper
@@ -1208,9 +1216,7 @@ def evaluate_sklearn_models(
     return report, detailed_results
 
 
-def _get_outcome_estimator(
-    estimator: Union[str, Callable[[], Any]], task_type: str
-) -> Any:
+def _get_outcome_estimator(estimator: str | Callable[[], Any], task_type: str) -> Any:
     """Get outcome estimator based on task type."""
     if callable(estimator):
         result = estimator()
@@ -1548,12 +1554,16 @@ def evaluate_pairwise_models(
     clip_grid: tuple[float, ...] = (2, 5, 10, 20, 50, float("inf")),
     ci_bootstrap: bool = False,
     alpha: float = 0.05,
+    fit_models: bool = False,
+    policy_train: Literal["all", "pre_split"] = "all",
+    policy_train_frac: float = 0.85,
+    surrogate_model: str = "hgb",
     day_col: str = "arrival_day",
     client_id_col: str = "client_id",
     operator_id_col: str = "operator_id",
-    elig_col: Optional[str] = "elig_mask",
+    elig_col: str | None = "elig_mask",
     random_state: int = 0,
-    outcome_estimator: Union[str, Callable[[], Any]] = "hgb",
+    outcome_estimator: str | Callable[[], Any] = "hgb",
 ) -> tuple[pd.DataFrame, dict[str, dict[str, DRResult]]]:
     """Evaluate pairwise models using autoscale strategy.
 
@@ -1564,13 +1574,41 @@ def evaluate_pairwise_models(
     op_daily_df : pd.DataFrame
         Daily operator snapshots
     models : Dict[str, Any]
-        Dictionary of model_name -> fitted model
+        Dictionary of model_name -> model instance (fitted or unfitted).
     metric_col : str
         Target metric column name
     task_type : Literal["regression", "binary"]
         Type of prediction task
     direction : Literal["min", "max"]
         Whether to minimize or maximize metric
+    fit_models : bool, default=False
+        If True, fit each model on the observed (cli_*, op_*) features from
+        logs_df against metric_col before inducing policies. Set to True when
+        passing unfitted model instances; set to False when passing pre-fitted
+        models.
+    policy_train : Literal["all", "pre_split"], default="all"
+        How to split data for fitting policy models when ``fit_models=True``.
+        Default matches ``evaluate_sklearn_models`` for API symmetry; consider
+        ``"pre_split"`` to eliminate training-on-test leakage.
+
+        - ``"all"``: Fit on all data and evaluate on all data. Faster but
+          biased — included for API symmetry with ``evaluate_sklearn_models``
+          and for callers that fit models elsewhere.
+        - ``"pre_split"``: Fit on the first ``policy_train_frac`` of the data
+          (sorted by day) and evaluate only on the held-out tail. Removes
+          training-on-test leakage; the statistically safer choice when
+          fitting via ``fit_models=True``.
+        Ignored when ``fit_models=False``.
+    policy_train_frac : float, default=0.85
+        Fraction of data (chronologically) used to fit policy models when
+        ``policy_train="pre_split"``. Remaining tail is used for evaluation.
+    surrogate_model : str, default="hgb"
+        Surrogate model used by ``stream_topk`` strategy to prefilter operators.
+        - ``"hgb"`` (default): HistGradientBoostingRegressor; non-linear,
+          captures cli x op interactions automatically.
+        - ``"ridge_interaction"``: Ridge with explicit cli x op outer-product
+          interaction terms; cheaper but still per-client personalized.
+        Plain ``"ridge"`` is rejected because it produces day-global top-K.
     n_splits : int
         Number of cross-validation splits
     strategy : Literal["auto", "direct", "stream", "stream_topk"]
@@ -1588,7 +1626,11 @@ def evaluate_pairwise_models(
     clip_grid : Tuple[float, ...]
         Clipping thresholds
     ci_bootstrap : bool
-        Whether to compute bootstrap CIs
+        Whether to compute bootstrap CIs via ``block_bootstrap_ci`` on the
+        per-decision DR contributions. **Conditional bootstrap**: ``q_hat``,
+        propensities, and the policy are fixed across replicates, so the CI
+        does not reflect nuisance estimation error and may under-cover when
+        that error is non-negligible.
     alpha : float
         Significance level for CIs
     day_col : str
@@ -1597,11 +1639,11 @@ def evaluate_pairwise_models(
         Client ID column name
     operator_id_col : str
         Operator ID column name
-    elig_col : Optional[str]
+    elig_col : str | None
         Eligibility column name
     random_state : int
         Random seed
-    outcome_estimator : Union[str, Callable[[], Any]]
+    outcome_estimator : str | Callable[[], Any]
         Outcome model estimator
 
     Returns
@@ -1622,9 +1664,57 @@ def evaluate_pairwise_models(
     if direction not in ["min", "max"]:
         raise ValueError(f"Unknown direction: {direction}. Must be 'min' or 'max'")
 
-    # Create pairwise design
+    # Validate policy_train parameters
+    if policy_train not in ("all", "pre_split"):
+        raise ValueError(
+            f"Unknown policy_train: {policy_train}. Must be 'all' or 'pre_split'"
+        )
+    if not 0.0 < policy_train_frac < 1.0:
+        raise ValueError(
+            f"policy_train_frac must be in (0, 1), got {policy_train_frac}"
+        )
+
+    # Optional pre_split: fit policy models on training portion, evaluate on
+    # held-out tail. This avoids training-on-test leakage when fit_models=True.
+    eval_logs_df = logs_df
+    if fit_models and policy_train == "pre_split":
+        # Sort by day to respect time order, then split chronologically
+        sorted_logs = logs_df.sort_values(by=day_col, kind="stable").reset_index(
+            drop=True
+        )
+        n_total = len(sorted_logs)
+        n_train = max(1, int(n_total * policy_train_frac))
+        train_logs = sorted_logs.iloc[:n_train].reset_index(drop=True)
+        eval_logs_df = sorted_logs.iloc[n_train:].reset_index(drop=True)
+        if len(eval_logs_df) == 0:
+            raise ValueError(
+                f"pre_split left 0 evaluation rows (n_total={n_total}, "
+                f"policy_train_frac={policy_train_frac}); reduce the fraction"
+            )
+        logger.info(
+            f"pre_split: fitting policy models on {len(train_logs):,} train rows, "
+            f"evaluating on {len(eval_logs_df):,} held-out rows"
+        )
+
+        # Fit on training portion only
+        train_design = PairwiseDesign.from_dataframes(
+            train_logs, op_daily_df, day_col, client_id_col, operator_id_col, elig_col
+        )
+        feature_cols = train_design.cli_features + train_design.op_features
+        X_fit = train_design.logs_df[feature_cols].values.astype(np.float32)
+        y_fit = train_design.logs_df[metric_col].values
+        for model in models.values():
+            model.fit(X_fit, y_fit)
+        logger.info(f"Fitted {len(models)} policy model(s) on {len(X_fit)} train pairs")
+
+    # Create pairwise design from the (possibly held-out) evaluation logs
     design = PairwiseDesign.from_dataframes(
-        logs_df, op_daily_df, day_col, client_id_col, operator_id_col, elig_col
+        eval_logs_df,
+        op_daily_df,
+        day_col,
+        client_id_col,
+        operator_id_col,
+        elig_col,
     )
 
     # Log statistics
@@ -1635,8 +1725,32 @@ def evaluate_pairwise_models(
         f"{stats['memory_gb']:.2f} GB estimated memory"
     )
 
-    # Induce policies
-    policies = induce_policy(models, design, strategy, direction, topk, chunk_pairs)
+    # Fit on all data (legacy behavior, biased but supported for compatibility)
+    if fit_models and policy_train == "all":
+        feature_cols = design.cli_features + design.op_features
+        X_fit = design.logs_df[feature_cols].values.astype(np.float32)
+        y_fit = design.logs_df[metric_col].values
+        for model in models.values():
+            model.fit(X_fit, y_fit)
+        logger.info(
+            f"Fitted {len(models)} policy model(s) on {len(X_fit)} pairs (policy_train='all')"
+        )
+
+    # Induce policies (held-out for pre_split, full data for "all")
+    policies = induce_policy(
+        models,
+        design,
+        strategy,
+        direction,
+        topk,
+        chunk_pairs,
+        metric_col,
+        surrogate_model=surrogate_model,
+        random_state=random_state,
+    )
+
+    # Mirror eval_logs_df into the local variable used downstream
+    logs_df = design.logs_df
 
     # Estimate propensity scores
     propensities = estimate_propensity_pairwise(
@@ -1809,16 +1923,17 @@ def evaluate_pairwise_models(
                             )
                         else:
                             # Fallback if no matched samples
+                            z = norm.ppf(1 - alpha / 2)
                             ci_lower, ci_upper = (
-                                result.V_hat - 1.96 * result.SE_if,
-                                result.V_hat + 1.96 * result.SE_if,
+                                result.V_hat - z * result.SE_if,
+                                result.V_hat + z * result.SE_if,
                             )
                     except (ValueError, RuntimeError, np.linalg.LinAlgError):
                         # Fallback to normal approximation if bootstrap fails
-                        # This can happen with numerical issues in bootstrap calculations
+                        z = norm.ppf(1 - alpha / 2)
                         ci_lower, ci_upper = (
-                            result.V_hat - 1.96 * result.SE_if,
-                            result.V_hat + 1.96 * result.SE_if,
+                            result.V_hat - z * result.SE_if,
+                            result.V_hat + z * result.SE_if,
                         )
                     report_row["ci_lower"] = ci_lower
                     report_row["ci_upper"] = ci_upper

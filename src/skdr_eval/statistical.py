@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, cast
+from typing import Any, Callable, cast
 
 import numpy as np
 from scipy import stats
@@ -32,9 +32,9 @@ class StatisticalTest:
     statistic: float
     p_value: float
     critical_value: float
-    degrees_of_freedom: Optional[float] = None
-    confidence_interval: Optional[tuple[float, float]] = None
-    effect_size: Optional[float] = None
+    degrees_of_freedom: float | None = None
+    confidence_interval: tuple[float, float] | None = None
+    effect_size: float | None = None
     interpretation: str = ""
 
 
@@ -229,7 +229,7 @@ def mann_whitney_u_test(
 
 def chi_square_test(
     observed: np.ndarray,
-    expected: Optional[np.ndarray] = None,
+    expected: np.ndarray | None = None,
     alpha: float = 0.05,
 ) -> StatisticalTest:
     """Perform chi-square test for goodness of fit or independence.
@@ -406,7 +406,7 @@ def bootstrap_confidence_interval(
     n_bootstrap: int = 1000,
     alpha: float = 0.05,
     method: str = "percentile",
-    random_state: Optional[int] = None,
+    random_state: int | None = None,
 ) -> tuple[float, float]:
     """Calculate bootstrap confidence interval for a statistic.
 
@@ -478,7 +478,7 @@ def permutation_test(
     statistic_func: Callable[[np.ndarray, np.ndarray], float] = _default_stat_func,
     n_permutations: int = 1000,
     alpha: float = 0.05,
-    random_state: Optional[int] = None,
+    random_state: int | None = None,
 ) -> StatisticalTest:
     """Perform permutation test for comparing two samples.
 
@@ -602,7 +602,7 @@ def multiple_comparison_correction(
         # Holm-Bonferroni step-down method with monotonicity adjustment
         sorted_indices = np.argsort(p_arr)
         sorted_p = p_arr[sorted_indices]
-        raw_adjusted = sorted_p * np.arange(n, 0, -1)
+        raw_adjusted = sorted_p * np.arange(n, 0, -1, dtype=np.float64)
         monotone_adjusted = np.maximum.accumulate(raw_adjusted)
         monotone_adjusted = np.minimum(monotone_adjusted, 1.0)
         corrected = np.zeros_like(p_arr)
@@ -611,7 +611,7 @@ def multiple_comparison_correction(
         # Benjamini-Hochberg FDR step-up method with monotonicity adjustment
         sorted_indices = np.argsort(p_arr)
         sorted_p = p_arr[sorted_indices]
-        raw_adjusted = sorted_p * n / np.arange(1, n + 1)
+        raw_adjusted = sorted_p * n / np.arange(1, n + 1, dtype=np.float64)
         monotone_adjusted = np.minimum.accumulate(raw_adjusted[::-1])[::-1]
         monotone_adjusted = np.minimum(monotone_adjusted, 1.0)
         corrected = np.zeros_like(p_arr)

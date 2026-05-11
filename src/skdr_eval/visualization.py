@@ -1,7 +1,6 @@
 """Visualization tools for skdr-eval library."""
 
 import logging
-from typing import Optional
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -29,9 +28,9 @@ __all__ = [
 def plot_propensity_distribution(
     propensities: np.ndarray,
     actions: np.ndarray,
-    action_names: Optional[list[str]] = None,
+    action_names: list[str] | None = None,
     figsize: tuple[int, int] = (12, 8),
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> Figure:
     """Plot propensity score distributions by action.
 
@@ -162,7 +161,7 @@ def plot_propensity_distribution(
 def plot_dr_results(
     results: dict[str, dict[str, float]],
     figsize: tuple[int, int] = (12, 8),
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> Figure:
     """Plot DR/SNDR evaluation results.
 
@@ -258,7 +257,7 @@ def plot_dr_results(
 def plot_calibration_curve(
     calibration_curve: list[tuple[float, float]],
     figsize: tuple[int, int] = (8, 6),
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> Figure:
     """Plot propensity score calibration curve.
 
@@ -318,7 +317,7 @@ def plot_calibration_curve(
 def plot_roc_curve(
     roc_curve: list[tuple[float, float]],
     figsize: tuple[int, int] = (8, 6),
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> Figure:
     """Plot ROC curve for propensity score discrimination.
 
@@ -371,7 +370,7 @@ def plot_roc_curve(
 def plot_diagnostics_summary(
     diagnostics: PropensityDiagnostics,
     figsize: tuple[int, int] = (15, 10),
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> Figure:
     """Plot comprehensive diagnostics summary.
 
@@ -541,11 +540,11 @@ def plot_diagnostics_summary(
 def create_dashboard(
     propensities: np.ndarray,
     actions: np.ndarray,
-    results: Optional[dict[str, dict[str, float]]] = None,
-    diagnostics: Optional[PropensityDiagnostics] = None,
-    action_names: Optional[list[str]] = None,
+    results: dict[str, dict[str, float]] | None = None,
+    diagnostics: PropensityDiagnostics | None = None,
+    action_names: list[str] | None = None,
     figsize: tuple[int, int] = (20, 15),
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> Figure:
     """Create a comprehensive dashboard with all visualizations.
 
