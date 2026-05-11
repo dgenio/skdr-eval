@@ -8,6 +8,7 @@ from sklearn.exceptions import NotFittedError
 from sklearn.linear_model import LogisticRegression, Ridge
 
 from skdr_eval import evaluate_pairwise_models, make_pairwise_synth
+from skdr_eval.exceptions import DataValidationError
 from skdr_eval.pairwise import (
     PairwiseDesign,
     _fit_surrogate,
@@ -441,6 +442,49 @@ def test_pairwise_unfitted_models_fail_across_strategies(strategy: str):
             strategy=strategy,
             topk=5,
             fit_models=False,  # Don't fit models
+            random_state=42,
+        )
+
+
+@pytest.mark.parametrize(
+    "strategy",
+    ["direct", "stream", "stream_topk"],
+    ids=["direct_empty_elig", "stream_empty_elig", "stream_topk_empty_elig"],
+)
+def test_empty_eligibility_raises_across_strategies(strategy: str):
+    """A client with an empty eligibility list must fail loudly.
+
+    Per docs/agent-context/invariants.md, the previous silent first-operator
+    fallback hid data-quality issues. Every induction strategy should now
+    raise DataValidationError when a client has no eligible operators.
+    """
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=1, n_clients_day=20, n_ops=6, seed=42
+    )
+
+    # Force the first client of the day to have an empty eligibility list.
+    # Use `.at` for scalar list assignment (`.loc` tries to broadcast).
+    logs_df = logs_df.copy()
+    logs_df.at[logs_df.index[0], "elig_mask"] = []
+
+    feature_cols = [col for col in logs_df.columns if col.startswith(("cli_", "op_"))]
+    X = logs_df[feature_cols].values
+    y = logs_df["service_time"].values
+    model = Ridge(random_state=42)
+    model.fit(X, y)
+
+    with pytest.raises(DataValidationError, match="No eligible operators"):
+        evaluate_pairwise_models(
+            logs_df=logs_df,
+            op_daily_df=op_daily_df,
+            models={"ridge": model},
+            metric_col="service_time",
+            task_type="regression",
+            direction="min",
+            n_splits=2,
+            strategy=strategy,
+            topk=3,
+            elig_col="elig_mask",
             random_state=42,
         )
 

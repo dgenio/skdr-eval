@@ -11,6 +11,8 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import Ridge
 from sklearn.utils.validation import check_is_fitted
 
+from .exceptions import DataValidationError
+
 logger = logging.getLogger("skdr_eval")
 
 
@@ -276,22 +278,31 @@ def induce_policy_direct(
         if len(day_clients) == 0:
             continue
 
+        # Build a client_id -> day_clients.index mapping once per day; this
+        # replaces an O(n_chunk * n_clients) iterrows-and-scan inside the
+        # chunk loop with an O(n_clients) dict build + O(n_chunk) lookup.
+        # First occurrence wins, matching the prior .index[0] semantics.
+        unique_first = day_clients.drop_duplicates(
+            subset=[design.client_id_col], keep="first"
+        )
+        client_id_to_idx = dict(
+            zip(
+                unique_first[design.client_id_col].values,
+                unique_first.index.values,
+            )
+        )
+
         # Collect all pairs for this day
         all_pairs = []
-        client_indices = []
+        client_indices: list[int] = []
 
         for chunk in build_candidate_pairs(design, day, chunk_pairs):
             if len(chunk) == 0:
                 continue
 
-            # Track which client each pair belongs to
-            chunk_client_indices = []
-            for _, row in chunk.iterrows():
-                client_idx = day_clients[
-                    day_clients[design.client_id_col] == row[design.client_id_col]
-                ].index[0]
-                chunk_client_indices.append(client_idx)
-
+            chunk_client_indices = (
+                chunk[design.client_id_col].map(client_id_to_idx).tolist()
+            )
             all_pairs.append(chunk)
             client_indices.extend(chunk_client_indices)
 
@@ -311,14 +322,24 @@ def induce_policy_direct(
             predictions = model.predict(X_pairs)
 
             # Group by client and find best operator
+            client_indices_arr = np.asarray(client_indices)
             day_decisions = []
             for client_idx in day_clients.index:
                 # Find pairs for this client
-                client_mask = np.array(client_indices) == client_idx
+                client_mask = client_indices_arr == client_idx
                 if not np.any(client_mask):
-                    # No eligible operators - use first available
-                    day_decisions.append(design.ops_all_by_day[day][0])
-                    continue
+                    # No eligible operators is a data-quality issue, not a
+                    # normal case. Per docs/agent-context/invariants.md,
+                    # prefer fail-loud over silent first-operator fallback.
+                    raise DataValidationError(
+                        "No eligible operators for client; cannot induce a "
+                        "policy. Check eligibility masks for empty rows.",
+                        details={
+                            "day": str(day),
+                            "client_index": int(client_idx),
+                            "strategy": "direct",
+                        },
+                    )
 
                 client_preds = predictions[client_mask]
                 client_ops = day_pairs_df.loc[
@@ -421,13 +442,24 @@ def induce_policy_stream(
             day_model_decisions = []
             for _, client_row in day_clients.iterrows():
                 client_id = str(client_row[design.client_id_col])
-                if client_id in day_decisions[model_name]:
-                    day_model_decisions.append(
-                        day_decisions[model_name][client_id]["best_op"]
+                if client_id not in day_decisions[model_name]:
+                    # Streaming produced no pairs for this client, which
+                    # means an empty eligibility set. Per invariants.md the
+                    # project prefers fail-loud over silent fallbacks; treat
+                    # this as a data-quality error.
+                    raise DataValidationError(
+                        "No eligible operators for client; cannot induce a "
+                        "policy. Check eligibility masks for empty rows.",
+                        details={
+                            "day": str(day),
+                            "client_id": client_id,
+                            "strategy": "stream",
+                            "model": model_name,
+                        },
                     )
-                else:
-                    # Fallback to first available operator
-                    day_model_decisions.append(design.ops_all_by_day[day][0])
+                day_model_decisions.append(
+                    day_decisions[model_name][client_id]["best_op"]
+                )
 
             policies[model_name].extend(day_model_decisions)
 
@@ -587,12 +619,17 @@ def induce_policy_stream_topk(
             continue
 
         if day not in design.day_to_op_df:
-            logger.warning(f"No operators found for day {day}")
-            for model_name in models:
-                policies[model_name].extend(
-                    [design.ops_all_by_day[day][0]] * len(day_clients)
-                )
-            continue
+            # A day with clients but no operator candidates is a data-quality
+            # error, not a normal case. Per invariants.md, prefer fail-loud.
+            raise DataValidationError(
+                "Day has clients but no operator candidates; cannot induce a "
+                "policy. Check op_daily_df coverage.",
+                details={
+                    "day": str(day),
+                    "n_clients": len(day_clients),
+                    "strategy": "stream_topk",
+                },
+            )
 
         day_ops = design.day_to_op_df[day]
 
@@ -620,9 +657,17 @@ def induce_policy_stream_topk(
                 eligible_ops_df = day_ops
 
             if len(eligible_ops_df) == 0:
-                for model_name in models:
-                    day_decisions[model_name].append(design.ops_all_by_day[day][0])
-                continue
+                # Empty eligibility for this client. Per invariants.md, fail
+                # loud rather than silently substituting the first operator.
+                raise DataValidationError(
+                    "No eligible operators for client; cannot induce a "
+                    "policy. Check eligibility masks for empty rows.",
+                    details={
+                        "day": str(day),
+                        "client_position": int(client_pos),
+                        "strategy": "stream_topk",
+                    },
+                )
 
             # Slice the precomputed day-level cli row (no per-client list comp)
             cli_vals = day_cli_arr[client_pos]
