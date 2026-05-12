@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>skdr-eval evaluation report</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 24px; color: #1f2328; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 24px 0 6px; }
+  table { border-collapse: collapse; margin: 8px 0 16px; font-size: 13px; }
+  th, td { border: 1px solid #d0d7de; padding: 4px 8px; text-align: left; }
+  th { background: #f6f8fa; }
+  td.numeric { text-align: right; font-variant-numeric: tabular-nums; }
+  .health-ok { color: #1a7f37; font-weight: 600; }
+  .health-caution { color: #9a6700; font-weight: 600; }
+  .health-high_risk { color: #cf222e; font-weight: 700; }
+  .meta { color: #57606a; font-size: 12px; }
+  .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; background: #f6f8fa; padding: 1px 4px; border-radius: 3px; }
+  .empty { color: #6e7781; font-style: italic; }
+</style>
+</head>
+<body>
+<h1>skdr-eval evaluation report</h1>
+<div class="meta">
+  Schema {{ schema_version }} &middot; skdr-eval {{ skdr_eval_version }} &middot; generated {{ timestamp }}
+</div>
+
+<h2>Headline results</h2>
+{% if report_rows %}
+<table>
+  <thead><tr>
+    <th>model</th><th>estimator</th><th>V&#770;</th><th>SE</th>
+    <th>CI</th><th>clip</th><th>ESS</th><th>match_rate</th><th>support</th><th>codes</th>
+  </tr></thead>
+  <tbody>
+  {% for row in report_rows %}
+    <tr>
+      <td>{{ row.model }}</td>
+      <td>{{ row.estimator }}</td>
+      <td class="numeric">{{ row.V_hat|fmt_num }}</td>
+      <td class="numeric">{{ row.SE_if|fmt_num }}</td>
+      <td class="numeric">
+        {%- if row.ci_lower is not none and row.ci_upper is not none -%}
+          [{{ row.ci_lower|fmt_num }}, {{ row.ci_upper|fmt_num }}]
+        {%- else -%}
+          &mdash;
+        {%- endif -%}
+      </td>
+      <td class="numeric">{{ row.clip|fmt_num(default="∞") }}</td>
+      <td class="numeric">{{ row.ESS|fmt_num }}</td>
+      <td class="numeric">{{ row.match_rate|fmt_num(spec="%.3f") }}</td>
+      <td class="health-{{ row.support_health or 'ok' }}">{{ row.support_health or "ok" }}</td>
+      <td><span class="code">{{ row.diagnostic_warnings or "" }}</span></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="empty">No report rows.</p>{% endif %}
+
+<h2>Support-health warnings</h2>
+{% if warnings_rows %}
+<table>
+  <thead><tr><th>model</th><th>estimator</th><th>support_health</th><th>warning_codes</th></tr></thead>
+  <tbody>
+  {% for row in warnings_rows %}
+    <tr>
+      <td>{{ row.model }}</td>
+      <td>{{ row.estimator }}</td>
+      <td class="health-{{ row.support_health }}">{{ row.support_health }}</td>
+      <td><span class="code">{{ row.warning_codes|join(", ") }}</span></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="empty">No warnings recorded.</p>{% endif %}
+
+<h2>Clip-grid sensitivity</h2>
+{% if sensitivity_rows %}
+<table>
+  <thead><tr>
+    <th>model</th><th>estimator</th><th>V_min</th><th>V_max</th><th>V_range</th>
+    <th>chosen_clip</th><th>argmin_MSE_clip</th><th>DR/SNDR agree</th><th>stable</th>
+  </tr></thead>
+  <tbody>
+  {% for row in sensitivity_rows %}
+    <tr>
+      <td>{{ row.model }}</td>
+      <td>{{ row.estimator }}</td>
+      <td class="numeric">{{ row.V_min|fmt_num }}</td>
+      <td class="numeric">{{ row.V_max|fmt_num }}</td>
+      <td class="numeric">{{ row.V_range|fmt_num }}</td>
+      <td class="numeric">{{ row.chosen_clip|fmt_num(default="∞") }}</td>
+      <td class="numeric">{{ row.argmin_MSE_clip|fmt_num(default="∞") }}</td>
+      <td>{{ "yes" if row.dr_sndr_agree else "no" }}</td>
+      <td>{{ "yes" if row.stable else "no" }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="empty">No sensitivity rows.</p>{% endif %}
+
+<h2>Propensity diagnostics</h2>
+{% if diagnostics %}
+<table>
+  <thead><tr>
+    <th>model</th><th>overlap</th><th>balance</th><th>calibration</th><th>discrimination</th><th>log_loss</th>
+  </tr></thead>
+  <tbody>
+  {% for model, diag in diagnostics.items() %}
+    <tr>
+      <td>{{ model }}</td>
+      <td class="numeric">{{ diag.overlap_ratio|fmt_num(spec="%.3f") }}</td>
+      <td class="numeric">{{ diag.balance_ratio|fmt_num(spec="%.3f") }}</td>
+      <td class="numeric">{{ diag.calibration_score|fmt_num(spec="%.3f") }}</td>
+      <td class="numeric">{{ diag.discrimination_score|fmt_num(spec="%.3f") }}</td>
+      <td class="numeric">{{ diag.log_loss_score|fmt_num(spec="%.3f") }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="empty">No diagnostics recorded.</p>{% endif %}
+
+<h2>Metadata</h2>
+<pre class="code">{{ metadata_json }}</pre>
+</body>
+</html>

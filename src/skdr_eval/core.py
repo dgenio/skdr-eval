@@ -2,7 +2,10 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Literal, Protocol
+
+if TYPE_CHECKING:
+    from .reporting import EvaluationArtifact, SupportHealthThresholds
 
 import numpy as np
 import pandas as pd
@@ -1006,7 +1009,8 @@ def evaluate_sklearn_models(
     alpha: float = 0.05,
     policy_train: str = "all",
     policy_train_frac: float = 0.85,
-) -> tuple[pd.DataFrame, dict[str, dict[str, DRResult]]]:
+    support_thresholds: "SupportHealthThresholds | None" = None,
+) -> "EvaluationArtifact":
     """Evaluate sklearn models using DR and SNDR estimators.
 
     Parameters
@@ -1039,13 +1043,17 @@ def evaluate_sklearn_models(
         Training data for policy ("all" or "pre_split").
     policy_train_frac : float, default=0.85
         Fraction of data for policy training if policy_train="pre_split".
+    support_thresholds : SupportHealthThresholds, optional
+        Thresholds for support-health warnings attached to the returned
+        artifact. See :class:`skdr_eval.reporting.SupportHealthThresholds`.
 
     Returns
     -------
-    report : pd.DataFrame
-        Summary report with evaluation metrics.
-    detailed_results : Dict[str, Dict[str, DRResult]]
-        Detailed results for each model and estimator.
+    EvaluationArtifact
+        Bundled result containing ``report``, ``detailed``, ``warnings``,
+        ``sensitivity``, ``diagnostics``, and ``metadata``. **Breaking change
+        in 0.6.0**: previously returned ``(report, detailed)``; migrate by
+        unpacking ``artifact.report`` and ``artifact.detailed``.
 
     Raises
     ------
@@ -1213,7 +1221,26 @@ def evaluate_sklearn_models(
 
     report = pd.DataFrame(report_rows)
 
-    return report, detailed_results
+    from .reporting import build_evaluation_artifact  # noqa: PLC0415
+
+    return build_evaluation_artifact(
+        report=report,
+        detailed=detailed_results,
+        n_samples=len(eval_design.Y),
+        propensities=propensities,
+        actions=eval_design.A,
+        thresholds=support_thresholds,
+        evaluator="evaluate_sklearn_models",
+        random_state=random_state,
+        alpha=alpha if ci_bootstrap else None,
+        extra_metadata={
+            "policy_train": policy_train,
+            "policy_train_frac": float(policy_train_frac),
+            "n_splits": int(n_splits),
+            "clip_grid": [None if not np.isfinite(c) else float(c) for c in clip_grid],
+            "ci_bootstrap": bool(ci_bootstrap),
+        },
+    )
 
 
 def _get_outcome_estimator(estimator: str | Callable[[], Any], task_type: str) -> Any:
@@ -1564,7 +1591,8 @@ def evaluate_pairwise_models(
     elig_col: str | None = "elig_mask",
     random_state: int = 0,
     outcome_estimator: str | Callable[[], Any] = "hgb",
-) -> tuple[pd.DataFrame, dict[str, dict[str, DRResult]]]:
+    support_thresholds: "SupportHealthThresholds | None" = None,
+) -> "EvaluationArtifact":
     """Evaluate pairwise models using autoscale strategy.
 
     Parameters
@@ -1645,13 +1673,17 @@ def evaluate_pairwise_models(
         Random seed
     outcome_estimator : str | Callable[[], Any]
         Outcome model estimator
+    support_thresholds : SupportHealthThresholds, optional
+        Thresholds for support-health warnings attached to the returned
+        artifact. See :class:`skdr_eval.reporting.SupportHealthThresholds`.
 
     Returns
     -------
-    report : pd.DataFrame
-        Summary report
-    detailed_results : Dict[str, Dict[str, DRResult]]
-        Detailed results per model and estimator
+    EvaluationArtifact
+        Bundled result containing ``report``, ``detailed``, ``warnings``,
+        ``sensitivity``, ``diagnostics``, and ``metadata``. **Breaking change
+        in 0.6.0**: previously returned ``(report, detailed_results)``;
+        migrate by unpacking ``artifact.report`` and ``artifact.detailed``.
     """
 
     logger.info("Starting pairwise evaluation")
@@ -1947,7 +1979,31 @@ def evaluate_pairwise_models(
 
     logger.info(f"Completed pairwise evaluation for {len(models)} models")
 
-    return report, detailed_results
+    from .reporting import build_evaluation_artifact  # noqa: PLC0415
+
+    return build_evaluation_artifact(
+        report=report,
+        detailed=detailed_results,
+        n_samples=len(Y),
+        propensities=propensities,
+        actions=np.asarray(A, dtype=int),
+        thresholds=support_thresholds,
+        evaluator="evaluate_pairwise_models",
+        random_state=random_state,
+        alpha=alpha if ci_bootstrap else None,
+        extra_metadata={
+            "task_type": task_type,
+            "direction": direction,
+            "strategy": strategy,
+            "propensity": propensity,
+            "metric_col": metric_col,
+            "policy_train": policy_train,
+            "policy_train_frac": float(policy_train_frac),
+            "n_splits": int(n_splits),
+            "clip_grid": [None if not np.isfinite(c) else float(c) for c in clip_grid],
+            "ci_bootstrap": bool(ci_bootstrap),
+        },
+    )
 
 
 def evaluate_propensity_diagnostics(

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>skdr-eval evaluation card &mdash; {{ model_name }}</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 24px; max-width: 720px; color: #1f2328; }
+  .card { border: 1px solid #d0d7de; border-radius: 6px; padding: 20px; background: #fff; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 18px 0 6px; color: #57606a; text-transform: uppercase; letter-spacing: 0.04em; }
+  .headline { font-size: 28px; font-weight: 700; margin: 6px 0; }
+  .ci { color: #57606a; font-size: 14px; }
+  .health { display: inline-block; padding: 3px 10px; border-radius: 999px; font-weight: 600; font-size: 13px; }
+  .health-ok { color: #1a7f37; background: #dafbe1; }
+  .health-caution { color: #9a6700; background: #fff8c5; }
+  .health-high_risk { color: #cf222e; background: #ffebe9; }
+  table { border-collapse: collapse; font-size: 13px; width: 100%; margin: 4px 0 0; }
+  td, th { border: 1px solid #d0d7de; padding: 4px 8px; text-align: left; }
+  th { background: #f6f8fa; }
+  td.numeric { text-align: right; font-variant-numeric: tabular-nums; }
+  .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+  .interpretation { background: #f6f8fa; border-left: 3px solid #0969da; padding: 10px 14px; margin: 8px 0; font-size: 14px; line-height: 1.5; }
+  .plot { margin: 10px 0; }
+  .meta { color: #6e7781; font-size: 11px; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>{{ model_name }}</h1>
+  <div class="meta">{{ task_summary }}</div>
+
+  <h2>Headline result ({{ headline_estimator }})</h2>
+  <div class="headline">V&#770; = {{ headline_v|fmt_num }}</div>
+  <div class="ci">
+    {% if headline_ci_lower is not none and headline_ci_upper is not none %}
+      {{ ci_label }}: [{{ headline_ci_lower|fmt_num }}, {{ headline_ci_upper|fmt_num }}]
+      &middot; SE = {{ headline_se|fmt_num }}
+    {% else %}
+      SE = {{ headline_se|fmt_num }} (no bootstrap CI)
+    {% endif %}
+  </div>
+  <div style="margin-top: 8px;">
+    <span class="health health-{{ support_health }}">{{ support_health }}</span>
+    {% if warning_codes %}
+      <span class="code">&middot; {{ warning_codes|join(", ") }}</span>
+    {% endif %}
+  </div>
+
+  <h2>Interpretation</h2>
+  <div class="interpretation">{{ interpretation }}</div>
+
+  {% if plot_b64 %}
+  <h2>Clip-grid sensitivity</h2>
+  <div class="plot"><img alt="clip sensitivity" src="data:image/png;base64,{{ plot_b64 }}"></div>
+  {% endif %}
+
+  <h2>All estimators</h2>
+  <table>
+    <thead><tr><th>estimator</th><th>V&#770;</th><th>SE</th><th>clip</th><th>ESS</th><th>match_rate</th></tr></thead>
+    <tbody>
+    {% for row in estimator_rows %}
+      <tr>
+        <td>{{ row.estimator }}</td>
+        <td class="numeric">{{ row.V_hat|fmt_num }}</td>
+        <td class="numeric">{{ row.SE_if|fmt_num }}</td>
+        <td class="numeric">{{ row.clip|fmt_num(default="∞") }}</td>
+        <td class="numeric">{{ row.ESS|fmt_num }}</td>
+        <td class="numeric">{{ row.match_rate|fmt_num(spec="%.3f") }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% if diagnostics %}
+  <h2>Propensity diagnostics</h2>
+  <table>
+    <tbody>
+      <tr><th>overlap_ratio</th><td class="numeric">{{ diagnostics.overlap_ratio|fmt_num(spec="%.3f") }}</td></tr>
+      <tr><th>balance_ratio</th><td class="numeric">{{ diagnostics.balance_ratio|fmt_num(spec="%.3f") }}</td></tr>
+      <tr><th>calibration_score</th><td class="numeric">{{ diagnostics.calibration_score|fmt_num(spec="%.3f") }}</td></tr>
+      <tr><th>discrimination_score</th><td class="numeric">{{ diagnostics.discrimination_score|fmt_num(spec="%.3f") }}</td></tr>
+      <tr><th>log_loss_score</th><td class="numeric">{{ diagnostics.log_loss_score|fmt_num(spec="%.3f") }}</td></tr>
+    </tbody>
+  </table>
+  {% endif %}
+
+  <div class="meta">
+    Schema {{ schema_version }} &middot; skdr-eval {{ skdr_eval_version }} &middot; generated {{ timestamp }}
+  </div>
+</div>
+</body>
+</html>

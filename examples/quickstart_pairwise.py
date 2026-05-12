@@ -78,7 +78,7 @@ def main():
     # Run pairwise evaluation for regression task
     print("\n🎯 Running pairwise evaluation (regression, minimize service time)...")
 
-    report_reg, detailed_reg = evaluate_pairwise_models(
+    artifact_reg = evaluate_pairwise_models(
         logs_df=logs_df,
         op_daily_df=op_daily_df,
         models=models_regression,
@@ -90,6 +90,10 @@ def main():
         propensity="auto",  # Let system choose propensity method
         random_state=42,
     )
+
+    # 0.6.0: evaluate_pairwise_models returns an EvaluationArtifact.
+    report_reg = artifact_reg.report
+    detailed_reg = artifact_reg.detailed
 
     print("\n📊 Regression Results:")
     print(
@@ -136,7 +140,7 @@ def main():
     # Run pairwise evaluation for binary task
     print("\n🎯 Running pairwise evaluation (binary, maximize success rate)...")
 
-    report_binary, _ = evaluate_pairwise_models(
+    report_binary = evaluate_pairwise_models(
         logs_df=logs_binary,
         op_daily_df=op_daily_binary,
         models=models_binary,
@@ -147,7 +151,7 @@ def main():
         strategy="auto",
         propensity="auto",
         random_state=42,
-    )
+    ).report
 
     print("\n📊 Binary Classification Results:")
     print(
@@ -205,7 +209,7 @@ def main():
     unfitted_models = {
         "ridge_unfit": Ridge(random_state=42),
     }
-    report_safe, _ = evaluate_pairwise_models(
+    report_safe = evaluate_pairwise_models(
         logs_df=logs_df,
         op_daily_df=op_daily_df,
         models=unfitted_models,
@@ -218,7 +222,7 @@ def main():
         policy_train="pre_split",  # default; shown explicitly
         policy_train_frac=0.85,
         random_state=42,
-    )
+    ).report
     print(report_safe[["model", "estimator", "V_hat", "ESS"]].round(3))
 
     # Demonstrate stream_topk with HGB surrogate (issue #42 fix)
@@ -228,7 +232,7 @@ def main():
         "  top-K is personalized per client (NOT day-global as plain Ridge would be)."
     )
 
-    report_topk, _ = evaluate_pairwise_models(
+    report_topk = evaluate_pairwise_models(
         logs_df=logs_df,
         op_daily_df=op_daily_df,
         models=models_regression,  # already fitted above
@@ -240,7 +244,7 @@ def main():
         topk=5,
         surrogate_model="hgb",  # default; "ridge_interaction" is the lighter alternative
         random_state=42,
-    )
+    ).report
     print(report_topk[["model", "estimator", "V_hat", "ESS"]].round(3))
 
     print("\n🔧 Next steps:")

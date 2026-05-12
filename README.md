@@ -82,7 +82,7 @@ models = {
 }
 
 # 3. Evaluate models using DR and SNDR
-report, detailed_results = skdr_eval.evaluate_sklearn_models(
+artifact = skdr_eval.evaluate_sklearn_models(
     logs=logs,
     models=models,
     fit_models=True,
@@ -91,8 +91,22 @@ report, detailed_results = skdr_eval.evaluate_sklearn_models(
 )
 
 # 4. View results
-print(report[['model', 'estimator', 'V_hat', 'ESS', 'match_rate']])
+print(artifact.report[['model', 'estimator', 'V_hat', 'ESS', 'match_rate']])
+
+# 5. Trust signals (issue #22 / #23)
+print(artifact.warnings)        # per-(model, estimator) support_health + codes
+print(artifact.sensitivity)     # clip-grid value range and stability flag
+print(artifact.diagnostics)     # propensity overlap / calibration / discrimination
+
+# 6. Export (issue #28) and stakeholder card (issue #30)
+artifact.export("artifacts/run", formats=["json", "html"])
+artifact.save_card("artifacts/run_card.html", "RandomForest")
 ```
+
+> **Breaking change in 0.6.0:** `evaluate_sklearn_models` and
+> `evaluate_pairwise_models` now return a single `EvaluationArtifact`
+> instead of the legacy `(report, detailed)` tuple. Unpack
+> `artifact.report` / `artifact.detailed` to migrate.
 
 ### Pairwise Evaluation
 
@@ -109,7 +123,7 @@ model = HistGradientBoostingRegressor(random_state=42)
 model.fit(logs_df[feature_cols].values, logs_df["service_time"].values)
 
 # 3. Run pairwise evaluation
-report, detailed = skdr_eval.evaluate_pairwise_models(
+artifact = skdr_eval.evaluate_pairwise_models(
     logs_df=logs_df,
     op_daily_df=op_daily_df,
     models={"HGB": model},
@@ -122,7 +136,8 @@ report, detailed = skdr_eval.evaluate_pairwise_models(
 )
 
 # 4. View results
-print(report[["model", "estimator", "V_hat", "ESS", "match_rate"]])
+print(artifact.report[["model", "estimator", "V_hat", "ESS", "match_rate"]])
+print(artifact.warnings)
 ```
 
 ## API Reference
@@ -185,7 +200,7 @@ Evaluate models using pairwise (client-operator) evaluation with autoscaling.
 - `random_state`: Random seed for reproducibility (default: 0)
 
 **Returns:**
-- `tuple[pd.DataFrame, dict[str, dict[str, DRResult]]]`: A summary report DataFrame and detailed results per model and estimator
+- `EvaluationArtifact`: bundled result. Use `.report` for the summary DataFrame, `.detailed` for per-model `DRResult`s, `.warnings` for support-health warnings, `.sensitivity` for clip-grid stability, `.diagnostics` for propensity diagnostics, and `.to_json` / `.to_html` / `.card` / `.export` for stakeholder artifacts.
 
 #### `make_pairwise_synth(n_days=14, n_clients_day=2000, n_ops=200, **kwargs)`
 Generate synthetic pairwise (client-operator) data for evaluation.
@@ -258,14 +273,14 @@ For time-series data, use moving-block bootstrap with proper statistical methodo
 
 ```python
 # Enable bootstrap CIs
-report, _ = skdr_eval.evaluate_sklearn_models(
+artifact = skdr_eval.evaluate_sklearn_models(
     logs=logs,
     models=models,
     ci_bootstrap=True,
     alpha=0.05,  # 95% confidence
 )
 
-print(report[['model', 'estimator', 'V_hat', 'ci_lower', 'ci_upper']])
+print(artifact.report[['model', 'estimator', 'V_hat', 'ci_lower', 'ci_upper']])
 ```
 
 **Key Features:**
