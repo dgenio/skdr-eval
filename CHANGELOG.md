@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-12
+
+### Removed
+- **Breaking: 2-tuple return from `evaluate_sklearn_models` / `evaluate_pairwise_models`.** Both top-level entry points now return a single `EvaluationArtifact` instead of `(report, detailed_results)`. Migrate by unpacking `artifact.report` and `artifact.detailed`. ([#22], [#23], [#27], [#28], [#30])
+
+### Added
+- **`EvaluationArtifact` (new in `skdr_eval.reporting`)** — bundled return type carrying `report`, `detailed`, `warnings`, `sensitivity`, `diagnostics`, and `metadata`. ([#22], [#23], [#27])
+- **Support-health warnings** ([#22]) — `support_health` and `diagnostic_warnings` columns on every report, plus a dedicated `artifact.warnings` DataFrame. Severity is one of `"ok"`, `"caution"`, `"high_risk"`, computed from `LOW_ESS`, `EXTREME_CLIP`, `LOW_MATCH_RATE`, and `POOR_OVERLAP` codes. Defaults are grounded in Owen (2013) and Kang & Schafer (2007); tune via `support_thresholds=SupportHealthThresholds(...)`.
+- **First-class propensity diagnostics** ([#23]) — `artifact.diagnostics[model]` exposes the existing `PropensityDiagnostics` from every evaluation run with no extra call.
+- **Clip-grid sensitivity** ([#27]) — `artifact.sensitivity` summarizes per-(model, estimator) `V_min`/`V_max`/`V_range`, the MSE-argmin clip, DR/SNDR agreement at the chosen clip, and a `stable` flag. This is a heuristic stability indicator; CI-overlap variants are tracked in #62.
+- **JSON & HTML export** ([#28]) — `EvaluationArtifact.to_json`, `to_html`, and `export(formats=...)`. Versioned schema (`SCHEMA_VERSION = "1.0.0"`) backed by Pydantic v2. Top-level `skdr_eval.export_results` and `skdr_eval.load_artifact_json` helpers.
+- **Stakeholder evaluation cards** ([#30]) — `EvaluationArtifact.card(model_name)` and the top-level `skdr_eval.render_evaluation_card` render a single-model HTML card with headline `V̂`, CI, trust banner, interpretation, inline clip-sensitivity sparkline, all-estimator table, and propensity diagnostics. Use `EvaluationArtifact.save_card(path, model_name)` to write to disk.
+- **New public symbols** exported from `skdr_eval`: `EvaluationArtifact`, `SupportHealthThresholds`, `ArtifactSchema`, `SCHEMA_VERSION`, `attach_warnings`, `build_evaluation_artifact`, `summarize_sensitivity`, `render_evaluation_card`, `export_results`, `load_artifact_json`.
+
+### Changed
+- **`evaluate_sklearn_models` and `evaluate_pairwise_models` accept `support_thresholds=SupportHealthThresholds(...)`** to customize warning sensitivity.
+- **`jinja2>=3.1`, `pydantic>=2.0`, `matplotlib>=3.5` are now required dependencies.** `matplotlib` was previously optional (`[viz]` extra) and is now required for card rendering; it remains available via `[viz]` for back-compat with users pinning the extra.
+
+### Statistical scope (read me)
+- This release **does not change** the DR/SNDR estimator math, the influence-function variance formulas, the bootstrap, or the `q_hat` shape. The warnings, sensitivity, and card outputs read the existing per-clip grid and per-decision diagnostics. Known limitations of the underlying metrics remain tracked in #58, #60, and #62.
+
+### Tests
+- New `tests/test_reporting_artifact.py` (31 tests) covering artifact construction, warning thresholds (healthy, low ESS caution / high-risk escalation, extreme clip, low match rate, poor overlap), sensitivity invariants, JSON round-trip via Pydantic, HTML rendering, card rendering, and pairwise integration.
+- Updated existing tests (`test_dr_sndr_smoke.py`, `test_api.py`, `test_bootstrap_integration.py`, `test_pairwise_api.py`) to unpack via `artifact.report` and `artifact.detailed`.
+
+[#22]: https://github.com/dgenio/skdr-eval/issues/22
+[#23]: https://github.com/dgenio/skdr-eval/issues/23
+[#27]: https://github.com/dgenio/skdr-eval/issues/27
+[#28]: https://github.com/dgenio/skdr-eval/issues/28
+[#30]: https://github.com/dgenio/skdr-eval/issues/30
+
 ## [0.5.0] - 2026-04-08
 
 ### Removed

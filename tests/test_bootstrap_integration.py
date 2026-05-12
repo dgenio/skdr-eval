@@ -43,17 +43,17 @@ class TestBootstrapIntegration:
         }
 
         # Test without bootstrap CI
-        report_no_ci, _ = skdr_eval.evaluate_sklearn_models(
+        report_no_ci = skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models=models,
             fit_models=True,
             n_splits=3,
             ci_bootstrap=False,
             random_state=42,
-        )
+        ).report
 
         # Test with bootstrap CI
-        report_with_ci, _ = skdr_eval.evaluate_sklearn_models(
+        report_with_ci = skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models=models,
             fit_models=True,
@@ -61,7 +61,7 @@ class TestBootstrapIntegration:
             ci_bootstrap=True,
             alpha=0.05,
             random_state=42,
-        )
+        ).report
 
         # Check that CI columns are added
         assert "ci_lower" not in report_no_ci.columns
@@ -89,7 +89,7 @@ class TestBootstrapIntegration:
         }
 
         # Test without bootstrap CI using fit_models=True to fit models internally
-        report_no_ci, _ = skdr_eval.evaluate_pairwise_models(
+        report_no_ci = skdr_eval.evaluate_pairwise_models(
             logs_df=logs_df,
             op_daily_df=op_daily_df,
             models=models,
@@ -100,10 +100,10 @@ class TestBootstrapIntegration:
             ci_bootstrap=False,
             fit_models=True,
             random_state=42,
-        )
+        ).report
 
         # Test with bootstrap CI, using fit_models=True
-        report_with_ci, _ = skdr_eval.evaluate_pairwise_models(
+        report_with_ci = skdr_eval.evaluate_pairwise_models(
             logs_df=logs_df,
             op_daily_df=op_daily_df,
             models=models,
@@ -115,7 +115,7 @@ class TestBootstrapIntegration:
             alpha=0.05,
             fit_models=True,
             random_state=42,
-        )
+        ).report
 
         # Check that CI columns are added
         assert "ci_lower" not in report_no_ci.columns
@@ -136,24 +136,24 @@ class TestBootstrapIntegration:
         models = {"rf": RandomForestRegressor(n_estimators=10, random_state=42)}
 
         # Test 90% CI
-        report_90, _ = skdr_eval.evaluate_sklearn_models(
+        report_90 = skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models=models,
             fit_models=True,
             ci_bootstrap=True,
             alpha=0.1,
             random_state=42,
-        )
+        ).report
 
         # Test 95% CI
-        report_95, _ = skdr_eval.evaluate_sklearn_models(
+        report_95 = skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models=models,
             fit_models=True,
             ci_bootstrap=True,
             alpha=0.05,
             random_state=42,
-        )
+        ).report
 
         # 90% CI should be narrower than 95% CI
         for i in range(len(report_90)):
@@ -167,21 +167,21 @@ class TestBootstrapIntegration:
         models = {"rf": RandomForestRegressor(n_estimators=10, random_state=42)}
 
         # Run twice with same random_state
-        report1, _ = skdr_eval.evaluate_sklearn_models(
+        report1 = skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models=models,
             fit_models=True,
             ci_bootstrap=True,
             random_state=42,
-        )
+        ).report
 
-        report2, _ = skdr_eval.evaluate_sklearn_models(
+        report2 = skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models=models,
             fit_models=True,
             ci_bootstrap=True,
             random_state=42,
-        )
+        ).report
 
         # Results should be identical
         pd.testing.assert_frame_equal(report1, report2)
@@ -192,13 +192,13 @@ class TestBootstrapIntegration:
         models = {"rf": RandomForestRegressor(n_estimators=5, random_state=42)}
 
         # This should not raise an exception even with small dataset
-        report, _ = skdr_eval.evaluate_sklearn_models(
+        report = skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models=models,
             fit_models=True,
             ci_bootstrap=True,
             random_state=42,
-        )
+        ).report
 
         # Should have CI columns
         assert "ci_lower" in report.columns
@@ -215,22 +215,22 @@ class TestBootstrapIntegration:
         models = {"rf": RandomForestRegressor(n_estimators=50, random_state=42)}
 
         # Get bootstrap CI
-        report_bootstrap, _ = skdr_eval.evaluate_sklearn_models(
+        report_bootstrap = skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models=models,
             fit_models=True,
             ci_bootstrap=True,
             random_state=42,
-        )
+        ).report
 
         # Get normal approximation CI
-        _report_normal, _ = skdr_eval.evaluate_sklearn_models(
+        _report_normal = skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models=models,
             fit_models=True,
             ci_bootstrap=False,
             random_state=42,
-        )
+        ).report
 
         # Compute normal approximation manually
         for i in range(len(report_bootstrap)):
@@ -281,13 +281,13 @@ class TestBootstrapIntegration:
         models = {"rf": RandomForestRegressor(n_estimators=20, random_state=42)}
 
         # Test bootstrap CI with time-series data
-        report, _ = skdr_eval.evaluate_sklearn_models(
+        report = skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models=models,
             fit_models=True,
             ci_bootstrap=True,
             random_state=42,
-        )
+        ).report
 
         # Should work without errors
         assert "ci_lower" in report.columns
@@ -309,14 +309,14 @@ class TestBootstrapIntegration:
 
         # Test with different clipping thresholds to cover both branches
         for clip_threshold in [2.0, 5.0, float("inf")]:
-            report, _ = skdr_eval.evaluate_sklearn_models(
+            report = skdr_eval.evaluate_sklearn_models(
                 logs=logs,
                 models=models,
                 fit_models=True,
                 ci_bootstrap=True,
                 clip_grid=(clip_threshold,),  # Use specific clip threshold
                 random_state=42,
-            )
+            ).report
 
             # Should have CI columns
             assert "ci_lower" in report.columns
@@ -336,14 +336,14 @@ class TestBootstrapIntegration:
         models = {"rf": RandomForestRegressor(n_estimators=3, random_state=42)}
 
         # Test with very small dataset that might trigger fallbacks
-        report, _ = skdr_eval.evaluate_sklearn_models(
+        report = skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models=models,
             fit_models=True,
             ci_bootstrap=True,
             n_splits=2,  # Small number of splits
             random_state=42,
-        )
+        ).report
 
         # Should still work and have CI columns
         assert "ci_lower" in report.columns
@@ -435,7 +435,7 @@ class TestBootstrapCISimulationProof:
         logs, _, _ = skdr_eval.make_synth_logs(n=2000, n_ops=3, seed=42)
         model = RandomForestRegressor(n_estimators=30, random_state=42)
 
-        report, _ = skdr_eval.evaluate_sklearn_models(
+        report = skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models={"rf": model},
             fit_models=True,
@@ -443,7 +443,7 @@ class TestBootstrapCISimulationProof:
             ci_bootstrap=True,
             alpha=0.05,
             random_state=42,
-        )
+        ).report
 
         dr_rows = report[report["estimator"] == "DR"]
         assert len(dr_rows) > 0, "No DR rows in report"

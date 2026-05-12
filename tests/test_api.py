@@ -157,13 +157,15 @@ def test_evaluate_sklearn_models_signature():
     logs, _, _ = skdr_eval.make_synth_logs(n=200, n_ops=3, seed=3)
     models = {"rf": RandomForestRegressor(n_estimators=10, random_state=0)}
 
-    report, detailed_results = skdr_eval.evaluate_sklearn_models(
+    _artifact = skdr_eval.evaluate_sklearn_models(
         logs=logs,
         models=models,
         fit_models=True,
         n_splits=3,
         random_state=0,
     )
+
+    report, detailed_results = _artifact.report, _artifact.detailed
 
     # Check return types
     assert isinstance(report, pd.DataFrame)

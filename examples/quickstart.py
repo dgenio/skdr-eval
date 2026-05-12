@@ -39,7 +39,7 @@ def main():
     print("\n3. Evaluating models with DR and SNDR...")
     print("   (This may take a moment...)")
 
-    report, detailed_results = skdr_eval.evaluate_sklearn_models(
+    artifact = skdr_eval.evaluate_sklearn_models(
         logs=logs,
         models=models,
         fit_models=True,
@@ -49,6 +49,12 @@ def main():
         policy_train="pre_split",
         policy_train_frac=0.8,
     )
+
+    # 0.6.0: evaluate_sklearn_models returns a single EvaluationArtifact bundling
+    # the report DataFrame, per-model DRResult map, warnings, clip-grid
+    # sensitivity, and propensity diagnostics.
+    report = artifact.report
+    detailed_results = artifact.detailed
 
     # 4. Display results
     print("\n4. Results Summary")
@@ -147,12 +153,36 @@ def main():
         print(f"  P-score Q10: {dr_row['pscore_q10']:.6f}")
         print(f"  ESS: {dr_row['ESS']:.1f}")
 
+    # 8. Trust signals from the artifact
+    print("\n8. Trust signals (from artifact.warnings)")
+    print("-" * 50)
+    print(artifact.warnings.to_string(index=False))
+
+    # 9. Clip-grid sensitivity summary
+    print("\n9. Clip-grid sensitivity (from artifact.sensitivity)")
+    print("-" * 50)
+    print(artifact.sensitivity.to_string(index=False))
+
+    # 10. Export evaluation artifacts
+    print("\n10. Export artifacts")
+    print("-" * 50)
+    written = artifact.export("artifacts/quickstart", formats=["json", "html"])
+    print(f"   Wrote JSON: {written['json']}")
+    print(f"   Wrote HTML: {written['html']}")
+
+    # 11. Render a stakeholder card for the best model
+    card_path = artifact.save_card(
+        f"artifacts/quickstart_{best_model_name}_card.html",
+        best_model_name,
+    )
+    print(f"   Wrote card: {card_path}")
+
     print("\nQuickstart example completed!")
     print("\nNext steps:")
     print("- Try different models or hyperparameters")
     print("- Experiment with different clip_grid values")
     print("- Use bootstrap confidence intervals with ci_bootstrap=True")
-    print("- Explore the detailed_results for more insights")
+    print("- Inspect artifact.diagnostics for propensity-quality details")
 
 
 if __name__ == "__main__":

@@ -40,7 +40,7 @@ def test_pairwise_regression_basic():
         model.fit(X, y)
 
     # Run pairwise evaluation
-    report, detailed_results = evaluate_pairwise_models(
+    _artifact = evaluate_pairwise_models(
         logs_df=logs_df,
         op_daily_df=op_daily_df,
         models=models,
@@ -51,6 +51,7 @@ def test_pairwise_regression_basic():
         strategy="direct",  # Force direct strategy for small data
         random_state=42,
     )
+    report, detailed_results = _artifact.report, _artifact.detailed
 
     # Basic checks
     assert isinstance(report, pd.DataFrame)
@@ -107,7 +108,7 @@ def test_pairwise_binary_basic():
         model.fit(X, y)
 
     # Run pairwise evaluation
-    report, _ = evaluate_pairwise_models(
+    report = evaluate_pairwise_models(
         logs_df=logs_df,
         op_daily_df=op_daily_df,
         models=models,
@@ -117,7 +118,7 @@ def test_pairwise_binary_basic():
         n_splits=2,
         strategy="direct",
         random_state=42,
-    )
+    ).report
 
     # Basic checks
     assert isinstance(report, pd.DataFrame)
@@ -151,7 +152,7 @@ def test_pairwise_autoscale_strategy():
     models["ridge"].fit(X, y)
 
     # Test auto strategy (should select direct for small data)
-    report, _ = evaluate_pairwise_models(
+    report = evaluate_pairwise_models(
         logs_df=small_logs,
         op_daily_df=small_ops,
         models=models,
@@ -160,12 +161,12 @@ def test_pairwise_autoscale_strategy():
         direction="min",
         strategy="auto",
         random_state=42,
-    )
+    ).report
 
     assert len(report) > 0
 
     # Test explicit direct strategy
-    report_direct, _ = evaluate_pairwise_models(
+    report_direct = evaluate_pairwise_models(
         logs_df=small_logs,
         op_daily_df=small_ops,
         models=models,
@@ -174,7 +175,7 @@ def test_pairwise_autoscale_strategy():
         direction="min",
         strategy="direct",
         random_state=42,
-    )
+    ).report
 
     assert len(report_direct) > 0
 
@@ -198,7 +199,7 @@ def test_pairwise_propensity_auto(monkeypatch: pytest.MonkeyPatch) -> None:
     y = logs_df["service_time"].values
     models["ridge"].fit(X, y)
 
-    report, detailed_results = evaluate_pairwise_models(
+    _artifact = evaluate_pairwise_models(
         logs_df=logs_df,
         op_daily_df=op_daily_df,
         models=models,
@@ -210,6 +211,8 @@ def test_pairwise_propensity_auto(monkeypatch: pytest.MonkeyPatch) -> None:
         propensity="auto",
         random_state=42,
     )
+
+    report, detailed_results = _artifact.report, _artifact.detailed
 
     assert isinstance(report, pd.DataFrame)
     assert len(report) > 0
@@ -260,7 +263,7 @@ def test_pairwise_with_eligibility():
     models["ridge"].fit(X, y)
 
     # Run evaluation with eligibility
-    report, _ = evaluate_pairwise_models(
+    report = evaluate_pairwise_models(
         logs_df=logs_df,
         op_daily_df=op_daily_df,
         models=models,
@@ -269,7 +272,7 @@ def test_pairwise_with_eligibility():
         direction="min",
         elig_col="elig_mask",
         random_state=42,
-    )
+    ).report
 
     assert len(report) > 0
     assert (report["ESS"] > 0).all()
@@ -319,7 +322,7 @@ def test_pairwise_fit_models_true():
     }
 
     # Run evaluation with fit_models=True
-    report, detailed_results = evaluate_pairwise_models(
+    _artifact = evaluate_pairwise_models(
         logs_df=logs_df,
         op_daily_df=op_daily_df,
         models=models,
@@ -331,6 +334,7 @@ def test_pairwise_fit_models_true():
         fit_models=True,  # Let the function fit the models
         random_state=42,
     )
+    report, detailed_results = _artifact.report, _artifact.detailed
 
     # Verify results are valid
     assert isinstance(report, pd.DataFrame)
@@ -360,7 +364,7 @@ def test_pairwise_stream_topk_strategy():
     models["ridge"].fit(X, y)
 
     # Run evaluation with stream_topk strategy
-    report, detailed_results = evaluate_pairwise_models(
+    _artifact = evaluate_pairwise_models(
         logs_df=logs_df,
         op_daily_df=op_daily_df,
         models=models,
@@ -372,6 +376,7 @@ def test_pairwise_stream_topk_strategy():
         topk=5,  # Keep top 5 operators per client
         random_state=42,
     )
+    report, detailed_results = _artifact.report, _artifact.detailed
 
     # Verify results are valid
     assert isinstance(report, pd.DataFrame)
@@ -652,7 +657,7 @@ def test_pairwise_pre_split_holds_out_evaluation_data():
 
     models = {"ridge": Ridge(random_state=42)}
     # pre_split should fit on first 75% of days, evaluate on remaining 25%
-    report, _ = evaluate_pairwise_models(
+    report = evaluate_pairwise_models(
         logs_df=logs_df,
         op_daily_df=op_daily_df,
         models=models,
@@ -665,7 +670,7 @@ def test_pairwise_pre_split_holds_out_evaluation_data():
         policy_train="pre_split",
         policy_train_frac=0.75,
         random_state=42,
-    )
+    ).report
 
     # Evaluation succeeded with held-out data
     assert isinstance(report, pd.DataFrame)

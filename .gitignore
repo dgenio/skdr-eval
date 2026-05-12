@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Evaluation artifacts written by examples/quickstart*.py
+artifacts/
+
 # C extensions
 *.so
 

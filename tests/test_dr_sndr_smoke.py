@@ -20,7 +20,7 @@ def test_dr_sndr_smoke():
     }
 
     # Evaluate models
-    report, detailed_results = skdr_eval.evaluate_sklearn_models(
+    _artifact = skdr_eval.evaluate_sklearn_models(
         logs=logs,
         models=models,
         fit_models=True,
@@ -28,6 +28,7 @@ def test_dr_sndr_smoke():
         n_splits=3,
         random_state=7,
     )
+    report, detailed_results = _artifact.report, _artifact.detailed
 
     # Check that report has expected structure
     assert isinstance(report, pd.DataFrame)
@@ -105,13 +106,13 @@ def test_dr_sndr_values_reasonable():
         "simple_rf": RandomForestRegressor(n_estimators=10, random_state=42),
     }
 
-    report, _ = skdr_eval.evaluate_sklearn_models(
+    report = skdr_eval.evaluate_sklearn_models(
         logs=logs,
         models=models,
         fit_models=True,
         n_splits=3,
         random_state=42,
-    )
+    ).report
 
     # Service times should be positive and reasonable
     service_times = logs["service_time"]
@@ -149,7 +150,7 @@ def test_clip_selection():
     ]
 
     for clip_grid in clip_grids:
-        report, detailed_results = skdr_eval.evaluate_sklearn_models(
+        _artifact = skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models=models,
             fit_models=True,
@@ -157,6 +158,7 @@ def test_clip_selection():
             n_splits=3,
             random_state=123,
         )
+        report, detailed_results = _artifact.report, _artifact.detailed
 
         # Check that selected clips are from the grid
         for _, row in report.iterrows():
@@ -188,13 +190,13 @@ def test_edge_cases():
     }
 
     # Should still work with small dataset
-    report, _ = skdr_eval.evaluate_sklearn_models(
+    report = skdr_eval.evaluate_sklearn_models(
         logs=logs_small,
         models=models,
         fit_models=True,
         n_splits=2,  # Reduce splits for small dataset
         random_state=999,
-    )
+    ).report
 
     assert len(report) == 2  # DR and SNDR
     assert (report["ESS"] >= 0).all()
