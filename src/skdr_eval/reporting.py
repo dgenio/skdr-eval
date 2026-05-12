@@ -409,13 +409,16 @@ class _SensitivityRowSchema(BaseModel):
 
 
 class _DiagnosticsPayloadSchema(BaseModel):
-    overlap_ratio: float
-    balance_ratio: float
-    calibration_score: float
-    discrimination_score: float
-    log_loss_score: float
-    statistics: dict[str, float]
-    balance_stats: dict[str, float]
+    # Non-finite diagnostic values are coerced to ``None`` by ``_jsonable``
+    # (matches the report / sensitivity schemas) so that the emitted JSON
+    # stays RFC-8259 compliant even if a diagnostic field is ill-defined.
+    overlap_ratio: float | None
+    balance_ratio: float | None
+    calibration_score: float | None
+    discrimination_score: float | None
+    log_loss_score: float | None
+    statistics: dict[str, float | None]
+    balance_stats: dict[str, float | None]
 
 
 class ArtifactSchema(BaseModel):
@@ -440,14 +443,30 @@ class ArtifactSchema(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
+def _fmt_num(value: Any, spec: str = "%.4g", default: str = "—") -> str:
+    """Jinja-friendly numeric formatter that handles ``None`` gracefully.
+
+    ``_jsonable`` coerces non-finite floats (NaN, ±inf) to ``None`` so the
+    artifact JSON stays RFC-8259 compliant. Template cells still need a
+    readable representation: this filter renders ``None`` as ``default``
+    (use ``"∞"`` on known clip columns) and otherwise applies the printf
+    ``spec`` to the value.
+    """
+    if value is None:
+        return default
+    return str(spec % value)
+
+
 def _template_env() -> Environment:
     """Build the Jinja2 environment, resolving template path via the package."""
     template_dir = _resources.files("skdr_eval").joinpath("templates")
-    return Environment(
+    env = Environment(
         loader=FileSystemLoader(str(template_dir)),
         autoescape=select_autoescape(["html", "xml"]),
         keep_trailing_newline=True,
     )
+    env.filters["fmt_num"] = _fmt_num
+    return env
 
 
 # --------------------------------------------------------------------------- #
@@ -494,15 +513,22 @@ def _normalize_report_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _diag_to_payload(diag: PropensityDiagnostics) -> dict[str, Any]:
-    """Convert a :class:`PropensityDiagnostics` to a JSON-safe payload dict."""
+    """Convert a :class:`PropensityDiagnostics` to a JSON-safe payload dict.
+
+    Every numeric field flows through :func:`_jsonable` so non-finite values
+    (NaN, ±inf) are coerced to ``None`` and the resulting payload round-trips
+    through RFC-8259 strict JSON parsers.
+    """
     return {
-        "overlap_ratio": float(diag.overlap_ratio),
-        "balance_ratio": float(diag.balance_ratio),
-        "calibration_score": float(diag.calibration_score),
-        "discrimination_score": float(diag.discrimination_score),
-        "log_loss_score": float(diag.log_loss_score),
-        "statistics": {str(k): float(v) for k, v in diag.statistics.items()},
-        "balance_stats": {str(k): float(v) for k, v in diag.balance_stats.items()},
+        "overlap_ratio": _jsonable(float(diag.overlap_ratio)),
+        "balance_ratio": _jsonable(float(diag.balance_ratio)),
+        "calibration_score": _jsonable(float(diag.calibration_score)),
+        "discrimination_score": _jsonable(float(diag.discrimination_score)),
+        "log_loss_score": _jsonable(float(diag.log_loss_score)),
+        "statistics": {str(k): _jsonable(float(v)) for k, v in diag.statistics.items()},
+        "balance_stats": {
+            str(k): _jsonable(float(v)) for k, v in diag.balance_stats.items()
+        },
     }
 
 

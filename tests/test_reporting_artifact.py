@@ -487,6 +487,44 @@ def test_to_json_clip_inf_serializes_as_null(tmp_path: Path):
     assert all(r.clip is None for r in loaded.report)
 
 
+def _force_inf_clip(art: EvaluationArtifact) -> None:
+    """Mutate an artifact so every chosen clip is ``inf`` for render coverage."""
+    for row in art.detailed.values():
+        for est_name in list(row):
+            row[est_name].clip = float("inf")
+    art.report["clip"] = float("inf")
+    if "chosen_clip" in art.sensitivity.columns:
+        art.sensitivity["chosen_clip"] = float("inf")
+    if "argmin_MSE_clip" in art.sensitivity.columns:
+        art.sensitivity["argmin_MSE_clip"] = float("inf")
+
+
+def test_to_html_str_with_inf_clip_renders_sentinel(tmp_path: Path):
+    """HTML render must not crash when ``clip`` columns are the inf sentinel.
+
+    Before the ``fmt_num`` filter, ``"%.4g"|format(None)`` raised ``TypeError``
+    once ``_jsonable`` coerced ``inf`` to ``None``. This pins that branch.
+    """
+    art = _run_eval()
+    _force_inf_clip(art)
+    html_str = art.to_html_str()
+    # No crash, and the sentinel is rendered where clip would have been.
+    assert "<title>skdr-eval evaluation report</title>" in html_str
+    assert "∞" in html_str
+    # And no leftover ``None`` literal in the rendered numeric cells.
+    assert ">None<" not in html_str
+
+
+def test_card_with_inf_clip_renders_sentinel():
+    """Card render must not crash when ``clip`` columns are the inf sentinel."""
+    art = _run_eval()
+    _force_inf_clip(art)
+    card = art.card("HGB", headline_estimator="SNDR")
+    assert "HGB" in card
+    assert "∞" in card
+    assert ">None<" not in card
+
+
 def test_diagnostics_are_independent_per_model():
     """Mutating one model's diagnostics must not leak to other models."""
     logs, _, _ = skdr_eval.make_synth_logs(n=400, n_ops=3, seed=7)

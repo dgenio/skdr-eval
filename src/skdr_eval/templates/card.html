@@ -30,13 +30,13 @@
   <div class="meta">{{ task_summary }}</div>
 
   <h2>Headline result ({{ headline_estimator }})</h2>
-  <div class="headline">V&#770; = {{ "%.4g"|format(headline_v) }}</div>
+  <div class="headline">V&#770; = {{ headline_v|fmt_num }}</div>
   <div class="ci">
     {% if headline_ci_lower is not none and headline_ci_upper is not none %}
-      {{ ci_label }}: [{{ "%.4g"|format(headline_ci_lower) }}, {{ "%.4g"|format(headline_ci_upper) }}]
-      &middot; SE = {{ "%.4g"|format(headline_se) }}
+      {{ ci_label }}: [{{ headline_ci_lower|fmt_num }}, {{ headline_ci_upper|fmt_num }}]
+      &middot; SE = {{ headline_se|fmt_num }}
     {% else %}
-      SE = {{ "%.4g"|format(headline_se) }} (no bootstrap CI)
+      SE = {{ headline_se|fmt_num }} (no bootstrap CI)
     {% endif %}
   </div>
   <div style="margin-top: 8px;">
@@ -61,11 +61,11 @@
     {% for row in estimator_rows %}
       <tr>
         <td>{{ row.estimator }}</td>
-        <td class="numeric">{{ "%.4g"|format(row.V_hat) }}</td>
-        <td class="numeric">{{ "%.4g"|format(row.SE_if) }}</td>
-        <td class="numeric">{{ "%.4g"|format(row.clip) }}</td>
-        <td class="numeric">{{ "%.4g"|format(row.ESS) }}</td>
-        <td class="numeric">{{ "%.3f"|format(row.match_rate) }}</td>
+        <td class="numeric">{{ row.V_hat|fmt_num }}</td>
+        <td class="numeric">{{ row.SE_if|fmt_num }}</td>
+        <td class="numeric">{{ row.clip|fmt_num(default="∞") }}</td>
+        <td class="numeric">{{ row.ESS|fmt_num }}</td>
+        <td class="numeric">{{ row.match_rate|fmt_num(spec="%.3f") }}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -75,11 +75,11 @@
   <h2>Propensity diagnostics</h2>
   <table>
     <tbody>
-      <tr><th>overlap_ratio</th><td class="numeric">{{ "%.3f"|format(diagnostics.overlap_ratio) }}</td></tr>
-      <tr><th>balance_ratio</th><td class="numeric">{{ "%.3f"|format(diagnostics.balance_ratio) }}</td></tr>
-      <tr><th>calibration_score</th><td class="numeric">{{ "%.3f"|format(diagnostics.calibration_score) }}</td></tr>
-      <tr><th>discrimination_score</th><td class="numeric">{{ "%.3f"|format(diagnostics.discrimination_score) }}</td></tr>
-      <tr><th>log_loss_score</th><td class="numeric">{{ "%.3f"|format(diagnostics.log_loss_score) }}</td></tr>
+      <tr><th>overlap_ratio</th><td class="numeric">{{ diagnostics.overlap_ratio|fmt_num(spec="%.3f") }}</td></tr>
+      <tr><th>balance_ratio</th><td class="numeric">{{ diagnostics.balance_ratio|fmt_num(spec="%.3f") }}</td></tr>
+      <tr><th>calibration_score</th><td class="numeric">{{ diagnostics.calibration_score|fmt_num(spec="%.3f") }}</td></tr>
+      <tr><th>discrimination_score</th><td class="numeric">{{ diagnostics.discrimination_score|fmt_num(spec="%.3f") }}</td></tr>
+      <tr><th>log_loss_score</th><td class="numeric">{{ diagnostics.log_loss_score|fmt_num(spec="%.3f") }}</td></tr>
     </tbody>
   </table>
   {% endif %}

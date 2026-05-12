@@ -37,18 +37,18 @@
     <tr>
       <td>{{ row.model }}</td>
       <td>{{ row.estimator }}</td>
-      <td class="numeric">{{ "%.4g"|format(row.V_hat) }}</td>
-      <td class="numeric">{{ "%.4g"|format(row.SE_if) }}</td>
+      <td class="numeric">{{ row.V_hat|fmt_num }}</td>
+      <td class="numeric">{{ row.SE_if|fmt_num }}</td>
       <td class="numeric">
         {%- if row.ci_lower is not none and row.ci_upper is not none -%}
-          [{{ "%.4g"|format(row.ci_lower) }}, {{ "%.4g"|format(row.ci_upper) }}]
+          [{{ row.ci_lower|fmt_num }}, {{ row.ci_upper|fmt_num }}]
         {%- else -%}
           &mdash;
         {%- endif -%}
       </td>
-      <td class="numeric">{{ "%.4g"|format(row.clip) }}</td>
-      <td class="numeric">{{ "%.4g"|format(row.ESS) }}</td>
-      <td class="numeric">{{ "%.3f"|format(row.match_rate) }}</td>
+      <td class="numeric">{{ row.clip|fmt_num(default="∞") }}</td>
+      <td class="numeric">{{ row.ESS|fmt_num }}</td>
+      <td class="numeric">{{ row.match_rate|fmt_num(spec="%.3f") }}</td>
       <td class="health-{{ row.support_health or 'ok' }}">{{ row.support_health or "ok" }}</td>
       <td><span class="code">{{ row.diagnostic_warnings or "" }}</span></td>
     </tr>
@@ -86,11 +86,11 @@
     <tr>
       <td>{{ row.model }}</td>
       <td>{{ row.estimator }}</td>
-      <td class="numeric">{{ "%.4g"|format(row.V_min) }}</td>
-      <td class="numeric">{{ "%.4g"|format(row.V_max) }}</td>
-      <td class="numeric">{{ "%.4g"|format(row.V_range) }}</td>
-      <td class="numeric">{{ "%.4g"|format(row.chosen_clip) }}</td>
-      <td class="numeric">{{ "%.4g"|format(row.argmin_MSE_clip) }}</td>
+      <td class="numeric">{{ row.V_min|fmt_num }}</td>
+      <td class="numeric">{{ row.V_max|fmt_num }}</td>
+      <td class="numeric">{{ row.V_range|fmt_num }}</td>
+      <td class="numeric">{{ row.chosen_clip|fmt_num(default="∞") }}</td>
+      <td class="numeric">{{ row.argmin_MSE_clip|fmt_num(default="∞") }}</td>
       <td>{{ "yes" if row.dr_sndr_agree else "no" }}</td>
       <td>{{ "yes" if row.stable else "no" }}</td>
     </tr>
@@ -109,11 +109,11 @@
   {% for model, diag in diagnostics.items() %}
     <tr>
       <td>{{ model }}</td>
-      <td class="numeric">{{ "%.3f"|format(diag.overlap_ratio) }}</td>
-      <td class="numeric">{{ "%.3f"|format(diag.balance_ratio) }}</td>
-      <td class="numeric">{{ "%.3f"|format(diag.calibration_score) }}</td>
-      <td class="numeric">{{ "%.3f"|format(diag.discrimination_score) }}</td>
-      <td class="numeric">{{ "%.3f"|format(diag.log_loss_score) }}</td>
+      <td class="numeric">{{ diag.overlap_ratio|fmt_num(spec="%.3f") }}</td>
+      <td class="numeric">{{ diag.balance_ratio|fmt_num(spec="%.3f") }}</td>
+      <td class="numeric">{{ diag.calibration_score|fmt_num(spec="%.3f") }}</td>
+      <td class="numeric">{{ diag.discrimination_score|fmt_num(spec="%.3f") }}</td>
+      <td class="numeric">{{ diag.log_loss_score|fmt_num(spec="%.3f") }}</td>
     </tr>
   {% endfor %}
   </tbody>
