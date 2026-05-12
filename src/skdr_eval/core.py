@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Literal, Protocol
 
 if TYPE_CHECKING:
-    from .reporting import EvaluationArtifact
+    from .reporting import EvaluationArtifact, SupportHealthThresholds
 
 import numpy as np
 import pandas as pd
@@ -1009,7 +1009,7 @@ def evaluate_sklearn_models(
     alpha: float = 0.05,
     policy_train: str = "all",
     policy_train_frac: float = 0.85,
-    support_thresholds: Any = None,
+    support_thresholds: "SupportHealthThresholds | None" = None,
 ) -> "EvaluationArtifact":
     """Evaluate sklearn models using DR and SNDR estimators.
 
@@ -1591,7 +1591,7 @@ def evaluate_pairwise_models(
     elig_col: str | None = "elig_mask",
     random_state: int = 0,
     outcome_estimator: str | Callable[[], Any] = "hgb",
-    support_thresholds: Any = None,
+    support_thresholds: "SupportHealthThresholds | None" = None,
 ) -> "EvaluationArtifact":
     """Evaluate pairwise models using autoscale strategy.
 
@@ -1673,6 +1673,9 @@ def evaluate_pairwise_models(
         Random seed
     outcome_estimator : str | Callable[[], Any]
         Outcome model estimator
+    support_thresholds : SupportHealthThresholds, optional
+        Thresholds for support-health warnings attached to the returned
+        artifact. See :class:`skdr_eval.reporting.SupportHealthThresholds`.
 
     Returns
     -------

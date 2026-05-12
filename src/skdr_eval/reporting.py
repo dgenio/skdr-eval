@@ -26,7 +26,7 @@ Default warning thresholds are grounded in published guidance (see
 from __future__ import annotations
 
 import base64
-import html
+import copy
 import importlib.resources as _resources
 import io
 import json
@@ -362,20 +362,24 @@ def summarize_sensitivity(
 
 
 class _ReportRowSchema(BaseModel):
+    # Numeric fields are ``float | None`` because :func:`_jsonable` serializes
+    # non-finite floats (NaN / ±inf) as ``null`` for RFC-8259 compliance. The
+    # ``clip = inf`` "no clipping" sentinel is therefore wired as ``null`` in
+    # the JSON; downstream consumers should treat null clips as unbounded.
     model_config = ConfigDict(extra="allow")
     model: str
     estimator: str
-    V_hat: float
-    SE_if: float
-    clip: float
-    ESS: float
-    tail_mass: float
-    MSE_est: float
-    match_rate: float
-    min_pscore: float
-    pscore_q10: float
-    pscore_q05: float
-    pscore_q01: float
+    V_hat: float | None
+    SE_if: float | None
+    clip: float | None
+    ESS: float | None
+    tail_mass: float | None
+    MSE_est: float | None
+    match_rate: float | None
+    min_pscore: float | None
+    pscore_q10: float | None
+    pscore_q05: float | None
+    pscore_q01: float | None
     ci_lower: float | None = None
     ci_upper: float | None = None
     support_health: str | None = None
@@ -390,14 +394,16 @@ class _WarningRowSchema(BaseModel):
 
 
 class _SensitivityRowSchema(BaseModel):
+    # See _ReportRowSchema: clip / chosen_clip / argmin_MSE_clip can be the
+    # ``inf`` "no clipping" sentinel, serialized as ``null``.
     model: str
     estimator: str
-    V_min: float
-    V_max: float
-    V_range: float
-    chosen_clip: float
-    chosen_V: float
-    argmin_MSE_clip: float
+    V_min: float | None
+    V_max: float | None
+    V_range: float | None
+    chosen_clip: float | None
+    chosen_V: float | None
+    argmin_MSE_clip: float | None
     dr_sndr_agree: bool
     stable: bool
 
@@ -450,7 +456,13 @@ def _template_env() -> Environment:
 
 
 def _jsonable(value: Any) -> Any:
-    """Coerce numpy/pandas scalars to JSON-friendly Python primitives."""
+    """Coerce numpy/pandas scalars to JSON-friendly Python primitives.
+
+    Non-finite floats (``NaN``, ``+inf``, ``-inf``) become ``None`` so the
+    emitted JSON stays RFC-8259 compliant. ``clip = inf`` (the "no clipping"
+    sentinel) is therefore serialized as ``null``; downstream consumers
+    should treat null clips as the unbounded operating point.
+    """
     if isinstance(value, np.ndarray):
         return [_jsonable(x) for x in value.tolist()]
     if isinstance(value, pd.Timestamp):
@@ -462,7 +474,7 @@ def _jsonable(value: Any) -> Any:
         # Continue to the float / finiteness branch with the coerced primitive.
         value = coerced
     if isinstance(value, float) and not np.isfinite(value):
-        return None if np.isnan(value) else value
+        return None
     return value
 
 
@@ -502,10 +514,10 @@ def _compute_diagnostics(
     """Compute per-model propensity diagnostics, sharing one fit across models.
 
     The propensity model is fitted once per evaluation run (not per model
-    being evaluated), so the resulting :class:`PropensityDiagnostics` is the
-    same for every model in the run; we simply replicate the reference so
-    callers can look up by model name. Returns an empty dict if propensities
-    are missing or diagnostics fail.
+    being evaluated), so we compute it once and then deep-copy it per model
+    so callers mutating ``artifact.diagnostics[m].statistics`` for one model
+    do not silently affect every other model in the run. Returns an empty
+    dict if propensities are missing or diagnostics fail.
     """
     if propensities is None or actions is None or len(model_names) == 0:
         return {}
@@ -514,7 +526,7 @@ def _compute_diagnostics(
     except (DataValidationError, ConfigurationError, ValueError) as exc:
         logger.warning("Propensity diagnostics failed (%s); omitting.", exc)
         return {}
-    return dict.fromkeys(model_names, shared)
+    return {name: copy.deepcopy(shared) for name in model_names}
 
 
 def _detailed_to_jsonable(
@@ -671,12 +683,10 @@ class EvaluationArtifact:
             warnings_rows=warnings_rows,
             sensitivity_rows=sensitivity_rows,
             diagnostics=diagnostics_payload,
-            metadata_json=html.escape(
-                json.dumps(
-                    {k: _jsonable(v) for k, v in self.metadata.items()},
-                    indent=2,
-                    sort_keys=True,
-                )
+            metadata_json=json.dumps(
+                {k: _jsonable(v) for k, v in self.metadata.items()},
+                indent=2,
+                sort_keys=True,
             ),
         )
 
@@ -825,9 +835,16 @@ class EvaluationArtifact:
         Parameters
         ----------
         path : str or Path
-            Directory or file prefix. When multiple formats are requested,
-            ``path`` is treated as a stem and ``.json`` / ``.html`` are
-            appended.
+            Path semantics:
+
+            - If ``path`` already has a suffix (e.g. ``run.json``), the
+              suffix is replaced per format: ``run.json`` becomes
+              ``run.json`` and ``run.html``.
+            - If ``path`` is an existing directory **or** ends in a path
+              separator, files are written as ``<path>/artifact.<fmt>``.
+            - Otherwise ``path`` is treated as a stem and ``.<fmt>`` is
+              appended directly: ``"artifacts/run"`` produces
+              ``artifacts/run.json`` and ``artifacts/run.html``.
         formats : list of {"json", "html"}, optional
             Defaults to both.
 
@@ -847,9 +864,21 @@ class EvaluationArtifact:
             )
 
         p = Path(path)
+        # Trailing-separator hint must be checked on the original string,
+        # since Path() normalizes the trailing slash away.
+        explicit_dir = isinstance(path, str) and (
+            path.endswith("/") or path.endswith("\\")
+        )
+        treat_as_dir = explicit_dir or (p.exists() and p.is_dir())
+
         written: dict[str, Path] = {}
         for fmt in formats:
-            target = p.with_suffix(f".{fmt}") if p.suffix else p / f"artifact.{fmt}"
+            if treat_as_dir:
+                target = p / f"artifact.{fmt}"
+            elif p.suffix:
+                target = p.with_suffix(f".{fmt}")
+            else:
+                target = p.with_suffix(f".{fmt}")
             if fmt == "json":
                 written["json"] = self.to_json(target)
             elif fmt == "html":

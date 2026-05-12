@@ -7,8 +7,10 @@ the public attach-warnings / sensitivity / export / card helpers.
 from __future__ import annotations
 
 import json
+import math
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pandas as pd
 import pytest
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -26,7 +28,9 @@ from skdr_eval.reporting import (
     ArtifactSchema,
     EvaluationArtifact,
     SupportHealthThresholds,
+    _jsonable,
     attach_warnings,
+    build_evaluation_artifact,
     load_artifact_json,
     render_evaluation_card,
     summarize_sensitivity,
@@ -443,3 +447,198 @@ def test_evaluate_pairwise_models_returns_artifact():
     assert "support_health" in art.report.columns
     # Diagnostics may be empty if propensity sample is small; just check type.
     assert isinstance(art.diagnostics, dict)
+
+
+# --------------------------------------------------------------------------- #
+# Regression tests for review-fix commits                                     #
+# --------------------------------------------------------------------------- #
+
+
+def test_jsonable_serializes_infinity_as_null():
+    """Non-finite floats (``inf``, ``-inf``, ``NaN``) must serialize as JSON null."""
+    assert _jsonable(float("inf")) is None
+    assert _jsonable(float("-inf")) is None
+    assert _jsonable(math.nan) is None
+    assert _jsonable(np.float64("inf")) is None
+    assert _jsonable(np.float64("nan")) is None
+    # Finite floats and ints pass through.
+    assert _jsonable(1.5) == 1.5
+    assert _jsonable(np.float64(2.5)) == 2.5
+    assert _jsonable(np.int64(3)) == 3
+    assert _jsonable(np.bool_(True)) is True
+
+
+def test_to_json_clip_inf_serializes_as_null(tmp_path: Path):
+    """``clip = inf`` (the no-clipping sentinel) must serialize as JSON null."""
+    art = _run_eval()
+    # Force the chosen clip to inf so the wire-format gets exercised.
+    for row in art.detailed.values():
+        for est_name in list(row):
+            row[est_name].clip = float("inf")
+    # Mirror into the report DataFrame.
+    art.report["clip"] = float("inf")
+
+    payload = json.loads(art.to_json_str())
+    for row in payload["report"]:
+        assert row["clip"] is None, "clip=inf must serialize as null in JSON"
+
+    # The Pydantic schema must accept the null clip without error.
+    loaded = ArtifactSchema.model_validate(payload)
+    assert all(r.clip is None for r in loaded.report)
+
+
+def test_diagnostics_are_independent_per_model():
+    """Mutating one model's diagnostics must not leak to other models."""
+    logs, _, _ = skdr_eval.make_synth_logs(n=400, n_ops=3, seed=7)
+    models = {
+        "A": HistGradientBoostingRegressor(max_iter=10, random_state=7),
+        "B": HistGradientBoostingRegressor(max_iter=10, random_state=7),
+    }
+    art = skdr_eval.evaluate_sklearn_models(
+        logs=logs, models=models, fit_models=True, n_splits=3, random_state=7
+    )
+    assert {"A", "B"}.issubset(art.diagnostics)
+    diag_a = art.diagnostics["A"]
+    diag_b = art.diagnostics["B"]
+    assert diag_a is not diag_b, "diagnostics objects must be distinct per model"
+    # Mutating one must not affect the other.
+    diag_a.statistics["mutated"] = 999.0
+    assert "mutated" not in diag_b.statistics
+
+
+def test_to_html_metadata_section_not_double_escaped(tmp_path: Path):
+    """``metadata_json`` must be auto-escaped by Jinja exactly once."""
+    art = _run_eval()
+    art.metadata["note"] = '"quoted" & <tag>'
+    html_str = art.to_html_str()
+    # Jinja autoescape converts " -> &#34; and & -> &amp; (one pass only).
+    # Double-escaping would produce &amp;quot;, &amp;amp;, &amp;lt; etc.
+    assert "&amp;quot;" not in html_str
+    assert "&amp;amp;" not in html_str
+    assert "&amp;lt;" not in html_str
+
+
+def test_export_treats_suffixless_path_as_stem(tmp_path: Path):
+    """``"run"`` (no suffix, no trailing sep) -> ``run.json`` / ``run.html``."""
+    art = _run_eval()
+    written = art.export(tmp_path / "run", formats=["json", "html"])
+    assert written["json"] == tmp_path / "run.json"
+    assert written["html"] == tmp_path / "run.html"
+    assert written["json"].exists()
+    assert written["html"].exists()
+
+
+def test_export_writes_inside_existing_directory(tmp_path: Path):
+    """When ``path`` is an existing directory, write ``artifact.<fmt>`` inside."""
+    art = _run_eval()
+    written = art.export(tmp_path, formats=["json"])
+    assert written["json"] == tmp_path / "artifact.json"
+    assert written["json"].exists()
+
+
+def test_export_replaces_existing_suffix(tmp_path: Path):
+    """When ``path`` already has a suffix, the suffix is replaced per format."""
+    art = _run_eval()
+    written = art.export(str(tmp_path / "run.json"), formats=["json", "html"])
+    assert written["json"] == tmp_path / "run.json"
+    assert written["html"] == tmp_path / "run.html"
+
+
+def test_export_trailing_slash_means_directory(tmp_path: Path):
+    """A trailing path separator forces directory semantics."""
+    target = str(tmp_path / "outdir") + "/"
+    art = _run_eval()
+    written = art.export(target, formats=["json"])
+    assert written["json"] == tmp_path / "outdir" / "artifact.json"
+    assert written["json"].exists()
+
+
+def test_to_json_str_round_trips_without_path():
+    """``to_json_str`` returns serialized JSON without writing to disk."""
+    art = _run_eval()
+    s = art.to_json_str(indent=None)
+    payload = json.loads(s)
+    assert payload["schema_version"] == SCHEMA_VERSION
+    assert payload["skdr_eval_version"] == art.metadata["skdr_eval_version"]
+
+
+def test_to_html_str_returns_self_contained_html():
+    art = _run_eval()
+    src = art.to_html_str()
+    assert src.startswith("<!DOCTYPE html>")
+    assert "</html>" in src
+
+
+def test_save_card_writes_to_disk(tmp_path: Path):
+    art = _run_eval()
+    out = art.save_card(tmp_path / "card.html", "HGB")
+    assert out == tmp_path / "card.html"
+    contents = out.read_text()
+    assert "HGB" in contents
+    assert "Headline result" in contents
+
+
+def test_summarize_sensitivity_empty_detailed():
+    out = summarize_sensitivity({})
+    assert out.empty
+
+
+def test_load_artifact_json_round_trip(tmp_path: Path):
+    art = _run_eval()
+    p = art.to_json(tmp_path / "run.json")
+    schema = load_artifact_json(p)
+    assert isinstance(schema, ArtifactSchema)
+    assert len(schema.report) == len(art.report)
+
+
+def test_build_evaluation_artifact_without_propensities():
+    """``build_evaluation_artifact(propensities=None)`` returns no diagnostics."""
+    art_full = _run_eval()
+    art = build_evaluation_artifact(
+        report=art_full.report.drop(
+            columns=["support_health", "diagnostic_warnings"], errors="ignore"
+        ),
+        detailed=art_full.detailed,
+        n_samples=400,
+        propensities=None,
+        actions=None,
+    )
+    assert art.diagnostics == {}
+    # Without random_state / alpha args, those keys are absent from metadata.
+    assert "random_state" not in art.metadata
+    assert "alpha" not in art.metadata
+
+
+def test_build_evaluation_artifact_handles_failing_diagnostics():
+    """Diagnostics that raise should be logged and omitted, not propagated."""
+    art_full = _run_eval()
+    # Pass too few samples so comprehensive_propensity_diagnostics raises
+    # InsufficientDataError; the factory should catch it and return {}.
+    art = build_evaluation_artifact(
+        report=art_full.report.drop(
+            columns=["support_health", "diagnostic_warnings"], errors="ignore"
+        ),
+        detailed=art_full.detailed,
+        n_samples=400,
+        propensities=np.array([[0.5, 0.5]]),
+        actions=np.array([0]),
+    )
+    assert art.diagnostics == {}
+
+
+def test_card_handles_missing_diagnostics():
+    """Card should render even when ``artifact.diagnostics`` is empty."""
+    art_full = _run_eval()
+    art = build_evaluation_artifact(
+        report=art_full.report.drop(
+            columns=["support_health", "diagnostic_warnings"], errors="ignore"
+        ),
+        detailed=art_full.detailed,
+        n_samples=400,
+        propensities=None,
+        actions=None,
+    )
+    card = art.card("HGB")
+    assert "HGB" in card
+    # Without diagnostics, the "Propensity diagnostics" subsection is omitted.
+    assert "Propensity diagnostics" not in card
