@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Breaking: `induce_policy_from_sklearn` dropped the unused `idx` parameter.** Callers should remove the final `eval_design.idx` argument. The function is now fully vectorized — one `model.predict` call per invocation instead of `O(n_samples × n_eligible_ops)` calls. ([#46])
+- **`induce_policy_stream_topk` is now fully day-vectorized.** The surrogate runs once per client-chunk (was once per client) and the function accepts a new `chunk_pairs` parameter controlling the per-day client-axis batch size. Output policies are unchanged on fixed seeds. ([#61], [#63])
+- **`induce_policy(strategy="stream_topk", chunk_pairs=...)` is no longer a no-op.** The value is now forwarded into the streaming top-K loop and caps the size of the per-chunk feature matrix to `chunk_pairs * 4 bytes * n_features`. ([#61])
+
+### Tests
+- New parity and call-count tests for both rewrites: `test_induce_policy_from_sklearn_vectorized_matches_scalar_reference`, `test_induce_policy_from_sklearn_issues_single_predict_call`, `test_stream_topk_surrogate_predict_call_count_per_day`, `test_stream_topk_chunk_pairs_controls_batching_and_preserves_policy`, `test_stream_topk_chunk_pairs_forwarded_through_induce_policy`.
+
+[#46]: https://github.com/dgenio/skdr-eval/issues/46
+[#61]: https://github.com/dgenio/skdr-eval/issues/61
+[#63]: https://github.com/dgenio/skdr-eval/issues/63
+
 ## [0.6.0] - 2026-05-12
 
 ### Removed

@@ -529,6 +529,46 @@ def _surrogate_features(
     return np.hstack([X_cli, X_op]).astype(np.float32)
 
 
+def _build_day_elig_mask(
+    day_clients: pd.DataFrame,
+    day_ops: pd.DataFrame,
+    elig_col: str | None,
+    operator_id_col: str,
+) -> np.ndarray:
+    """Build a (n_day_clients, n_day_ops) boolean eligibility mask.
+
+    Mirrors the per-client semantics previously in ``induce_policy_stream_topk``:
+    if ``elig_col`` is missing on the design, or a client's value is not a
+    list/tuple, the client is treated as eligible for every operator on the day.
+    """
+    n_clients = len(day_clients)
+    n_ops = len(day_ops)
+
+    if elig_col is None or elig_col not in day_clients.columns:
+        return np.ones((n_clients, n_ops), dtype=bool)
+
+    op_id_to_pos: dict[Any, int] = {
+        op_id: i for i, op_id in enumerate(day_ops[operator_id_col].values)
+    }
+    mask = np.zeros((n_clients, n_ops), dtype=bool)
+    elig_values = day_clients[elig_col].to_list()
+    for client_pos, raw_value in enumerate(elig_values):
+        if hasattr(raw_value, "iloc"):
+            elig_value = raw_value.iloc[0] if len(raw_value) > 0 else []
+        else:
+            elig_value = raw_value
+        if isinstance(elig_value, (list, tuple)):
+            for op_id in elig_value:
+                pos = op_id_to_pos.get(op_id)
+                if pos is not None:
+                    mask[client_pos, pos] = True
+        else:
+            # Non-list values (NaN, scalar, etc.) fall back to "all eligible"
+            # to match the prior per-client behavior.
+            mask[client_pos, :] = True
+    return mask
+
+
 def induce_policy_stream_topk(
     models: dict[str, Any],
     design: PairwiseDesign,
@@ -536,6 +576,7 @@ def induce_policy_stream_topk(
     direction: Literal["min", "max"] = "min",
     topk: int = 20,
     surrogate_model: str = "hgb",
+    chunk_pairs: int = 2_000_000,
     random_state: int = 0,
 ) -> dict[str, np.ndarray]:
     """Induce policies using streaming + top-K prefiltering strategy.
@@ -544,6 +585,14 @@ def induce_policy_stream_topk(
     prefilter to the top-K most promising operators per decision, then runs the
     full models only on those K candidates. This reduces computation for large
     operator pools while maintaining good policy quality.
+
+    The implementation is fully day-vectorized: for each day, a single
+    ``(n_chunk * n_day_ops, n_features)`` feature matrix is built and the
+    surrogate runs **once per chunk** (not once per client), satisfying both
+    the per-decision throughput goal (#46) and the surrogate hoist (#63).
+    Clients are processed in client-axis chunks of size
+    ``max(1, chunk_pairs // n_day_ops)``, giving ``chunk_pairs`` real meaning
+    for this strategy (#61).
 
     **Surrogate choice matters for personalization.** A naive linear model on
     concatenated [cli | op] features is degenerate: for a fixed client the
@@ -579,6 +628,10 @@ def induce_policy_stream_topk(
     surrogate_model : str, default="hgb"
         Surrogate model type for prefiltering. One of "hgb" or
         "ridge_interaction". "ridge" is rejected (degenerate).
+    chunk_pairs : int, default=2_000_000
+        Soft cap on the size of the ``(clients * day_ops)`` feature matrix
+        held in memory per surrogate / full-model predict call. The chunk
+        size in clients is ``max(1, chunk_pairs // n_day_ops)``.
     random_state : int, default=0
         Random seed for the surrogate model.
 
@@ -589,7 +642,7 @@ def induce_policy_stream_topk(
     """
     logger.info(
         f"Using streaming + top-K strategy with topk={topk}, "
-        f"surrogate={surrogate_model}"
+        f"surrogate={surrogate_model}, chunk_pairs={chunk_pairs}"
     )
 
     # Fail fast if any model is unfitted (validate once before any work)
@@ -607,10 +660,10 @@ def induce_policy_stream_topk(
         f"Surrogate {surrogate_model!r} fitted on {len(X_cli_surr)} observed pairs"
     )
 
-    # Step 2: For each day x client, use the surrogate to prefilter to top-K
-    # operators, then score those K with the full models. Prediction errors
-    # propagate (per invariants.md: prefer fail-loud over silent fallback).
+    # Step 2: per-day, fully vectorized top-K prefilter + full-model scoring.
+    # Prediction errors propagate (per invariants.md: prefer fail-loud).
     policies: dict[str, list[str]] = {name: [] for name in models}
+    sentinel = float("inf") if direction == "min" else float("-inf")
 
     for day in sorted(design.ops_all_by_day.keys()):
         day_clients = design.logs_df[design.logs_df[design.day_col] == day]
@@ -632,73 +685,93 @@ def induce_policy_stream_topk(
             )
 
         day_ops = design.day_to_op_df[day]
+        n_day_clients = len(day_clients)
+        n_day_ops = len(day_ops)
 
-        # Vectorize day-level cli features once: row i corresponds to the i-th
-        # client in day_clients (positional index, not pandas index).
         day_cli_arr = day_clients[design.cli_features].to_numpy(dtype=np.float32)
+        day_op_arr = day_ops[design.op_features].to_numpy(dtype=np.float32)
+        day_op_ids = day_ops[design.operator_id_col].values
 
-        # Initialize day decisions for all models
+        # (n_day_clients, n_day_ops) boolean eligibility mask
+        elig_mask = _build_day_elig_mask(
+            day_clients, day_ops, design.elig_col, design.operator_id_col
+        )
+
+        # Per-client eligibility must be non-empty (matches prior fail-loud
+        # behavior). Surface the first offending client position.
+        elig_counts = elig_mask.sum(axis=1)
+        empty_rows = np.where(elig_counts == 0)[0]
+        if empty_rows.size > 0:
+            raise DataValidationError(
+                "No eligible operators for client; cannot induce a "
+                "policy. Check eligibility masks for empty rows.",
+                details={
+                    "day": str(day),
+                    "client_position": int(empty_rows[0]),
+                    "strategy": "stream_topk",
+                },
+            )
+
+        # Effective top-K is bounded by the operator pool size on the day.
+        k = min(topk, n_day_ops)
+
+        # Client-axis chunk size. The grid for one chunk is
+        # (chunk_size * n_day_ops, n_features); chunk_pairs caps that area.
+        chunk_size = max(1, chunk_pairs // max(1, n_day_ops))
+
         day_decisions: dict[str, list[str]] = {name: [] for name in models}
 
-        # Process clients in order and collect decisions on-the-fly
-        for client_pos, (_, client_row) in enumerate(day_clients.iterrows()):
-            # Get eligible operators
-            if design.elig_col and design.elig_col in client_row:
-                elig_ops_raw = client_row[design.elig_col]
-                if hasattr(elig_ops_raw, "iloc"):
-                    elig_ops_raw = elig_ops_raw.iloc[0] if len(elig_ops_raw) > 0 else []
-                if isinstance(elig_ops_raw, (list, tuple)):
-                    eligible_ops_df = day_ops[
-                        day_ops[design.operator_id_col].isin(elig_ops_raw)
-                    ]
-                else:
-                    eligible_ops_df = day_ops
-            else:
-                eligible_ops_df = day_ops
+        for chunk_start in range(0, n_day_clients, chunk_size):
+            chunk_end = min(chunk_start + chunk_size, n_day_clients)
+            n_chunk = chunk_end - chunk_start
+            cli_chunk = day_cli_arr[chunk_start:chunk_end]
+            elig_chunk = elig_mask[chunk_start:chunk_end]
 
-            if len(eligible_ops_df) == 0:
-                # Empty eligibility for this client. Per invariants.md, fail
-                # loud rather than silently substituting the first operator.
-                raise DataValidationError(
-                    "No eligible operators for client; cannot induce a "
-                    "policy. Check eligibility masks for empty rows.",
-                    details={
-                        "day": str(day),
-                        "client_position": int(client_pos),
-                        "strategy": "stream_topk",
-                    },
+            # Build the (n_chunk * n_day_ops, n_cli + n_op) cross-product
+            # matrix once per chunk. Surrogate runs *once* on this matrix.
+            X_cli_grid = np.repeat(cli_chunk, n_day_ops, axis=0)
+            X_op_grid = np.tile(day_op_arr, (n_chunk, 1))
+            X_surr_grid = _surrogate_features(feature_mode, X_cli_grid, X_op_grid)
+            surr_preds = surrogate.predict(X_surr_grid).reshape(n_chunk, n_day_ops)
+
+            # Mask ineligible (client, op) cells with the sentinel so they
+            # are never picked by argpartition / argmin.
+            surr_preds = np.where(elig_chunk, surr_preds, sentinel)
+
+            # Per-client top-K indices into day_op_arr. argpartition is
+            # O(n_day_ops) per row; correctness does not depend on the order
+            # within the K block because the full model re-scores them.
+            if direction == "min":
+                topk_idx_per_client = np.argpartition(surr_preds, k - 1, axis=1)[:, :k]
+            else:
+                topk_idx_per_client = np.argpartition(surr_preds, -k, axis=1)[:, -k:]
+
+            # Build the top-K feature matrix for the full models:
+            # (n_chunk * k, n_cli + n_op). Order: client-major, then top-K.
+            cli_rep_topk = np.repeat(cli_chunk, k, axis=0)
+            op_topk_idx_flat = topk_idx_per_client.reshape(-1)
+            op_topk_grid = day_op_arr[op_topk_idx_flat]
+            X_topk = np.hstack([cli_rep_topk, op_topk_grid]).astype(np.float32)
+
+            # Eligibility for the selected top-K cells (used to mask any
+            # ineligible carry-overs from clients with fewer than K eligible
+            # ops — argpartition will have picked sentinel-cells for them).
+            client_row_idx = np.arange(n_chunk)[:, None]
+            full_elig_topk = elig_chunk[client_row_idx, topk_idx_per_client]
+
+            for model_name, model in models.items():
+                full_preds = model.predict(X_topk).reshape(n_chunk, k)
+                # Re-apply eligibility mask after the full-model predict.
+                full_preds = np.where(full_elig_topk, full_preds, sentinel)
+                if direction == "min":
+                    best_in_topk = np.argmin(full_preds, axis=1)
+                else:
+                    best_in_topk = np.argmax(full_preds, axis=1)
+                best_op_idx = topk_idx_per_client[np.arange(n_chunk), best_in_topk]
+                day_decisions[model_name].extend(
+                    str(x) for x in day_op_ids[best_op_idx]
                 )
 
-            # Slice the precomputed day-level cli row (no per-client list comp)
-            cli_vals = day_cli_arr[client_pos]
-            op_vals = eligible_ops_df[design.op_features].values.astype(np.float32)
-            X_cli_elig = np.tile(cli_vals, (len(eligible_ops_df), 1))
-
-            # Surrogate uses interaction-aware features so ranking varies per client
-            X_surr_elig = _surrogate_features(feature_mode, X_cli_elig, op_vals)
-            surr_preds = surrogate.predict(X_surr_elig)
-            k = min(topk, len(eligible_ops_df))
-            if direction == "min":
-                topk_idx = np.argpartition(surr_preds, k - 1)[:k]
-            else:
-                topk_idx = np.argpartition(surr_preds, -k)[-k:]
-
-            topk_ops_df = eligible_ops_df.iloc[topk_idx]
-            op_vals_k = topk_ops_df[design.op_features].values.astype(np.float32)
-            # Full models use concatenated features (matches their training)
-            X_topk = np.hstack([np.tile(cli_vals, (k, 1)), op_vals_k])
-            topk_op_ids = topk_ops_df[design.operator_id_col].values
-
-            # Score top-K with each full model and collect decisions
-            for model_name, model in models.items():
-                full_preds = model.predict(X_topk)
-                if direction == "min":
-                    best_local = np.argmin(full_preds)
-                else:
-                    best_local = np.argmax(full_preds)
-                day_decisions[model_name].append(str(topk_op_ids[best_local]))
-
-        # Extend policies with day decisions
         for model_name in models:
             policies[model_name].extend(day_decisions[model_name])
 
@@ -731,11 +804,10 @@ def induce_policy(
     topk : int
         Number of top operators for stream_topk strategy
     chunk_pairs : int
-        Maximum pairs per chunk. Used by the ``"direct"`` and ``"stream"``
-        strategies; **ignored** by ``"stream_topk"`` (which is per-client and
-        does not chunk along the pairs axis). See
-        https://github.com/dgenio/skdr-eval/issues for the chunked-stream_topk
-        follow-up.
+        Soft cap on the size of the candidate-pair feature matrix held in
+        memory per predict call. ``"direct"`` and ``"stream"`` chunk along
+        the pairs axis; ``"stream_topk"`` chunks along the client axis with
+        ``chunk_size = max(1, chunk_pairs // n_day_ops)``.
     metric_col : str
         Target metric column name; required when strategy is "stream_topk"
     surrogate_model : str, default="hgb"
@@ -770,6 +842,7 @@ def induce_policy(
             direction,
             topk,
             surrogate_model=surrogate_model,
+            chunk_pairs=chunk_pairs,
             random_state=random_state,
         )
     else:

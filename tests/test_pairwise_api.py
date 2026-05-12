@@ -8,6 +8,7 @@ from sklearn.exceptions import NotFittedError
 from sklearn.linear_model import LogisticRegression, Ridge
 
 from skdr_eval import evaluate_pairwise_models, make_pairwise_synth
+from skdr_eval import pairwise as pairwise_mod
 from skdr_eval.exceptions import DataValidationError
 from skdr_eval.pairwise import (
     PairwiseDesign,
@@ -737,6 +738,136 @@ def test_pairwise_pre_split_zero_eval_rows_raises():
             policy_train="pre_split",
             policy_train_frac=0.85,
         )
+
+
+def test_stream_topk_surrogate_predict_call_count_per_day(monkeypatch):
+    """#63: surrogate.predict must be called O(n_chunks_per_day), not O(n_clients).
+
+    With a chunk_pairs cap large enough to hold the whole day's grid in one
+    call, the surrogate must be invoked exactly once per day. This is the
+    hoist-from-per-client-to-day-level contract.
+    """
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=3, n_clients_day=40, n_ops=8, seed=42
+    )
+    design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
+
+    feature_cols = design.cli_features + design.op_features
+    X = design.logs_df[feature_cols].values
+    y = design.logs_df["service_time"].values
+    model = Ridge(random_state=0)
+    model.fit(X, y)
+
+    # Wrap the surrogate's predict so we can count its invocations without
+    # touching the full model. This is the hoist-from-per-client-to-day
+    # contract for #63.
+    original_fit_surrogate = pairwise_mod._fit_surrogate
+    surrogate_calls: list[int] = []
+
+    def counting_fit_surrogate(*args, **kwargs):
+        surrogate, mode = original_fit_surrogate(*args, **kwargs)
+        original_predict = surrogate.predict
+
+        def counting_predict(X_):
+            surrogate_calls.append(len(X_))
+            return original_predict(X_)
+
+        surrogate.predict = counting_predict  # type: ignore[method-assign]
+        return surrogate, mode
+
+    monkeypatch.setattr(pairwise_mod, "_fit_surrogate", counting_fit_surrogate)
+
+    induce_policy_stream_topk(
+        models={"ridge": model},
+        design=design,
+        metric_col="service_time",
+        topk=3,
+        surrogate_model="ridge_interaction",
+        chunk_pairs=10_000_000,  # large enough to fit each day in one chunk
+    )
+
+    # 3 days, 1 surrogate predict per day = 3 calls total.
+    assert len(surrogate_calls) == 3, (
+        f"Expected one surrogate.predict per day; got {len(surrogate_calls)} "
+        f"calls with sizes {surrogate_calls}"
+    )
+    # Each call must cover the full (n_clients_day * n_day_ops) grid.
+    assert all(size == 40 * 8 for size in surrogate_calls), (
+        f"Each per-day surrogate call should score n_clients_day*n_day_ops="
+        f"320 rows; got sizes {surrogate_calls}"
+    )
+
+
+def test_stream_topk_chunk_pairs_controls_batching_and_preserves_policy():
+    """#61: chunk_pairs must actually chunk along clients without changing output.
+
+    Running stream_topk with a tiny chunk_pairs (forces multiple chunks per day)
+    and a huge chunk_pairs (one chunk per day) must produce *identical* policies.
+    This is the parity guarantee for the chunked rewrite.
+    """
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=2, n_clients_day=25, n_ops=6, seed=123
+    )
+    design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
+
+    feature_cols = design.cli_features + design.op_features
+    X = design.logs_df[feature_cols].values
+    y = design.logs_df["service_time"].values
+    model = Ridge(random_state=0)
+    model.fit(X, y)
+
+    common = {
+        "models": {"ridge": model},
+        "design": design,
+        "metric_col": "service_time",
+        "topk": 3,
+        "surrogate_model": "ridge_interaction",
+        "random_state": 0,
+    }
+    # Tiny chunk → chunk_size == max(1, 24 // 6) == 4 clients per chunk
+    tiny = induce_policy_stream_topk(**common, chunk_pairs=24)
+    # Huge chunk → one chunk per day
+    huge = induce_policy_stream_topk(**common, chunk_pairs=10_000_000)
+
+    np.testing.assert_array_equal(tiny["ridge"], huge["ridge"])
+
+
+def test_stream_topk_chunk_pairs_forwarded_through_induce_policy(monkeypatch):
+    """induce_policy(strategy='stream_topk', chunk_pairs=...) must forward the value."""
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=1, n_clients_day=20, n_ops=6, seed=42
+    )
+    design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
+
+    feature_cols = design.cli_features + design.op_features
+    X = design.logs_df[feature_cols].values
+    y = design.logs_df["service_time"].values
+    model = Ridge(random_state=0)
+    model.fit(X, y)
+
+    captured: dict[str, int] = {}
+    original_stream_topk = pairwise_mod.induce_policy_stream_topk
+
+    def spy_stream_topk(*args, **kwargs):
+        captured["chunk_pairs"] = kwargs.get("chunk_pairs")
+        return original_stream_topk(*args, **kwargs)
+
+    monkeypatch.setattr(pairwise_mod, "induce_policy_stream_topk", spy_stream_topk)
+
+    pairwise_mod.induce_policy(
+        models={"ridge": model},
+        design=design,
+        strategy="stream_topk",
+        metric_col="service_time",
+        topk=2,
+        chunk_pairs=12345,
+        surrogate_model="ridge_interaction",
+    )
+
+    assert captured["chunk_pairs"] == 12345, (
+        f"induce_policy did not forward chunk_pairs to stream_topk; "
+        f"got {captured.get('chunk_pairs')!r}"
+    )
 
 
 def test_stream_topk_day_with_no_operators_raises():

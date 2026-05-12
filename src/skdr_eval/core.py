@@ -612,9 +612,12 @@ def induce_policy_from_sklearn(
     X_base: np.ndarray,
     ops_all: list[str],
     elig: np.ndarray,
-    idx: dict[str, int],  # noqa: ARG001
 ) -> np.ndarray:
     """Induce policy from sklearn model by predicting service times.
+
+    Vectorized: builds a single stacked ``(sum_i n_elig_i, n_features + n_ops)``
+    feature matrix and issues **one** ``model.predict`` call instead of the
+    per-(sample, eligible-op) python loop (closes #46).
 
     Parameters
     ----------
@@ -626,8 +629,6 @@ def induce_policy_from_sklearn(
         All operator names.
     elig : np.ndarray
         Eligibility matrix.
-    idx : Dict[str, int]
-        Operator name to index mapping.
 
     Returns
     -------
@@ -669,53 +670,55 @@ def induce_policy_from_sklearn(
 
         n_samples, _ = X_base.shape
         n_ops = len(ops_all)
-        policy_probs = np.zeros((n_samples, n_ops))
+        elig_bool = elig.astype(bool)
 
-        for i in range(n_samples):
-            try:
-                eligible_ops = np.where(elig[i])[0]
-                pred_times: list[float] = []
+        # Sample / op index pairs for every eligible (sample, op) cell. Order
+        # is row-major: sample_idx_flat == np.repeat(arange(n), elig.sum(1)).
+        sample_idx_flat, op_idx_flat = np.nonzero(elig_bool)
 
-                # Predict service time for each eligible operator
-                for op_idx in eligible_ops:
-                    # Create feature vector with this operator's one-hot
-                    action_onehot = np.zeros(n_ops)
-                    action_onehot[op_idx] = 1
-                    x_with_action = np.concatenate([X_base[i], action_onehot])
+        policy_probs = np.zeros((n_samples, n_ops), dtype=np.float64)
 
-                    # Predict service time
-                    pred_time = model.predict(x_with_action.reshape(1, -1))[0]
-                    if not np.isfinite(pred_time):
-                        raise PolicyInductionError(
-                            f"Non-finite prediction for sample {i}, operator {op_idx}"
-                        )
-                    pred_times.append(pred_time)
+        if sample_idx_flat.size > 0:
+            # Build [X_base[sample] | one_hot(op)] in a single allocation.
+            X_repeated = X_base[sample_idx_flat]
+            onehot = np.zeros((sample_idx_flat.size, n_ops), dtype=X_base.dtype)
+            onehot[np.arange(sample_idx_flat.size), op_idx_flat] = 1
+            X_stacked = np.concatenate([X_repeated, onehot], axis=1)
 
-                # Convert to probabilities (lower time = higher probability)
-                if len(pred_times) > 0:
-                    pred_times_array = np.array(pred_times)
-                    if np.any(pred_times_array < 0):
-                        logger.warning(
-                            f"Negative predictions for sample {i}, using absolute values"
-                        )
-                        pred_times_array = np.abs(pred_times_array)
-
-                    policy_probs[i, eligible_ops] = 1.0 / (pred_times_array + 1e-8)
-                    policy_probs[i] /= policy_probs[i].sum()
-                else:
-                    # No eligible operators - uniform distribution
-                    policy_probs[i] = 1.0 / n_ops
-
-            except Exception as e:
+            # ONE predict call covers every eligible (sample, op) pair.
+            preds = np.asarray(model.predict(X_stacked))
+            if not np.all(np.isfinite(preds)):
+                bad = int(np.argmax(~np.isfinite(preds)))
                 raise PolicyInductionError(
-                    f"Error inducing policy for sample {i}: {e!s}"
-                ) from e
+                    f"Non-finite prediction for sample "
+                    f"{int(sample_idx_flat[bad])}, operator "
+                    f"{int(op_idx_flat[bad])}"
+                )
+            if np.any(preds < 0):
+                logger.warning(
+                    "Negative predictions encountered; using absolute values"
+                )
+                preds = np.abs(preds)
+
+            # Scatter 1 / (pred + eps) back into the dense policy matrix.
+            policy_probs[sample_idx_flat, op_idx_flat] = 1.0 / (preds + 1e-8)
+
+        # Samples with no eligible operators get a uniform distribution
+        # across *all* ops (matches the prior scalar behavior).
+        no_elig = ~elig_bool.any(axis=1)
+        if no_elig.any():
+            policy_probs[no_elig] = 1.0 / n_ops
+
+        # Row-normalize. Rows with at least one eligible op sum to >0 because
+        # 1/(pred+eps) is strictly positive after the abs() above; rows that
+        # got the uniform fallback already sum to 1.
+        row_sums = policy_probs.sum(axis=1, keepdims=True)
+        policy_probs = policy_probs / row_sums
 
         # Validate output
         validate_probabilities(policy_probs, "policy_probs")
 
-        result: np.ndarray = np.array(policy_probs, dtype=np.float64)
-        return result
+        return policy_probs
 
     except Exception as e:
         if isinstance(
@@ -1130,7 +1133,6 @@ def evaluate_sklearn_models(
             eval_design.X_base,
             eval_design.ops_all,
             eval_design.elig,
-            eval_design.idx,
         )
 
         # Compute DR/SNDR values

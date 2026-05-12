@@ -219,3 +219,100 @@ def test_evaluate_sklearn_models_empty_models_raises():
             n_splits=2,
             random_state=42,
         )
+
+
+def test_induce_policy_from_sklearn_vectorized_matches_scalar_reference():
+    """#46: vectorized induce_policy_from_sklearn matches a scalar reference.
+
+    The vectorized implementation must produce *identical* policy_probs as a
+    per-sample, per-eligible-op reference loop (the original implementation
+    style). This is the parity guarantee for the perf rewrite.
+    """
+    rng = np.random.RandomState(0)
+    n_samples = 8
+    n_features = 3
+    n_ops = 5
+    ops_all = [f"op{i}" for i in range(n_ops)]
+    X_base = rng.randn(n_samples, n_features).astype(np.float64)
+    # Mix of fully eligible / partially eligible / no-eligible rows
+    elig = rng.randint(0, 2, size=(n_samples, n_ops))
+    elig[0] = 1  # fully eligible
+    elig[1] = 0  # no eligible ops at all (uniform fallback)
+    elig[2] = [1, 0, 0, 0, 0]  # single eligible op
+
+    class _DeterministicModel:
+        """Deterministic, finite, strictly positive predictions."""
+
+        def fit(self, X, y):  # required by validate_sklearn_estimator
+            return self
+
+        def predict(self, X):
+            # Linear function of features + op-index encoded in one-hot block.
+            base = X[:, :n_features].sum(axis=1)
+            op_part = X[:, n_features:] @ (np.arange(n_ops) + 1.0)
+            return np.abs(base) + op_part + 0.1  # strictly > 0, finite
+
+    model = _DeterministicModel()
+
+    def scalar_reference(model, X_base, ops_all, elig):
+        n_samples, _ = X_base.shape
+        n_ops = len(ops_all)
+        probs = np.zeros((n_samples, n_ops))
+        for i in range(n_samples):
+            eligible_ops = np.where(elig[i])[0]
+            if eligible_ops.size == 0:
+                probs[i] = 1.0 / n_ops
+                continue
+            preds = []
+            for op_idx in eligible_ops:
+                onehot = np.zeros(n_ops, dtype=X_base.dtype)
+                onehot[op_idx] = 1
+                x = np.concatenate([X_base[i], onehot])
+                preds.append(float(model.predict(x.reshape(1, -1))[0]))
+            arr = np.asarray(preds)
+            probs[i, eligible_ops] = 1.0 / (arr + 1e-8)
+            probs[i] /= probs[i].sum()
+        return probs
+
+    vectorized = skdr_eval.induce_policy_from_sklearn(model, X_base, ops_all, elig)
+    reference = scalar_reference(model, X_base, ops_all, elig)
+
+    # Identical up to floating-point: same arithmetic, same order.
+    np.testing.assert_allclose(vectorized, reference, rtol=0, atol=1e-12)
+
+
+def test_induce_policy_from_sklearn_issues_single_predict_call():
+    """#46: vectorized path must issue exactly one model.predict call."""
+    rng = np.random.RandomState(1)
+    n_samples = 6
+    n_features = 2
+    n_ops = 4
+    ops_all = [f"op{i}" for i in range(n_ops)]
+    X_base = rng.randn(n_samples, n_features)
+    elig = rng.randint(0, 2, size=(n_samples, n_ops))
+    elig[0] = 1
+    elig[-1] = 1
+
+    class _CountingModel:
+        def __init__(self):
+            self.calls: list[int] = []
+
+        def fit(self, X, y):  # required by validate_sklearn_estimator
+            return self
+
+        def predict(self, X):
+            self.calls.append(len(X))
+            return np.full(len(X), 0.5, dtype=np.float64)
+
+    model = _CountingModel()
+    skdr_eval.induce_policy_from_sklearn(model, X_base, ops_all, elig)
+
+    assert len(model.calls) == 1, (
+        f"Expected exactly one model.predict call (vectorized); "
+        f"got {len(model.calls)} with sizes {model.calls}"
+    )
+    # The single call must cover every eligible (sample, op) pair.
+    assert model.calls[0] == int(elig.sum()), (
+        f"Single predict call should cover {int(elig.sum())} eligible pairs; "
+        f"got {model.calls[0]}"
+    )
