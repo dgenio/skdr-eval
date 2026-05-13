@@ -573,9 +573,7 @@ def _build_day_elig_mask(
             },
         )
 
-    op_id_to_pos: dict[Any, int] = {
-        op_id: i for i, op_id in enumerate(day_op_ids)
-    }
+    op_id_to_pos: dict[Any, int] = {op_id: i for i, op_id in enumerate(day_op_ids)}
     mask = np.zeros((n_clients, n_ops), dtype=bool)
     elig_values = day_clients[elig_col].to_list()
     for client_pos, raw_value in enumerate(elig_values):
