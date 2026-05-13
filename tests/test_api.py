@@ -1,11 +1,14 @@
 """Test API imports and basic functionality."""
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
 from sklearn.ensemble import RandomForestRegressor
 
 import skdr_eval
+from skdr_eval.exceptions import PolicyInductionError
 
 
 def test_imports():
@@ -316,3 +319,106 @@ def test_induce_policy_from_sklearn_issues_single_predict_call():
         f"Single predict call should cover {int(elig.sum())} eligible pairs; "
         f"got {model.calls[0]}"
     )
+
+
+def test_induce_policy_from_sklearn_raises_on_non_finite_predictions():
+    """Non-finite predictions must surface as ``PolicyInductionError`` (#46 audit).
+
+    The vectorized rewrite of ``induce_policy_from_sklearn`` issues a single
+    ``model.predict`` call; if any cell of the result is non-finite the helper
+    must fail loud per ``docs/agent-context/invariants.md``, naming the
+    offending (sample, operator) so the caller can localize the bad row.
+    """
+    rng = np.random.RandomState(11)
+    n_samples = 4
+    n_features = 2
+    n_ops = 3
+    ops_all = [f"op{i}" for i in range(n_ops)]
+    X_base = rng.randn(n_samples, n_features)
+    elig = np.ones((n_samples, n_ops), dtype=int)
+
+    class _NaNModel:
+        def fit(self, X, y):
+            return self
+
+        def predict(self, X):
+            preds = np.zeros(len(X), dtype=np.float64)
+            # NaN somewhere in the middle so np.argmax(~isfinite) points at
+            # a real sample/op index pair, not row 0.
+            preds[len(X) // 2] = np.nan
+            return preds
+
+    with pytest.raises(PolicyInductionError, match="Non-finite prediction"):
+        skdr_eval.induce_policy_from_sklearn(_NaNModel(), X_base, ops_all, elig)
+
+
+def test_induce_policy_from_sklearn_handles_negative_predictions(caplog):
+    """Negative predictions trigger the abs-fallback warning, not a raise.
+
+    A regression model can produce a small negative service-time prediction
+    on the eligible-pair grid; the policy is still computed as
+    ``1 / (|pred| + eps)`` and a warning is emitted so the operator can see
+    the model is misbehaving. Covers the negative-pred branch of #46.
+    """
+    rng = np.random.RandomState(12)
+    n_samples = 4
+    n_features = 2
+    n_ops = 3
+    ops_all = [f"op{i}" for i in range(n_ops)]
+    X_base = rng.randn(n_samples, n_features)
+    elig = np.ones((n_samples, n_ops), dtype=int)
+
+    class _NegativeModel:
+        def fit(self, X, y):
+            return self
+
+        def predict(self, X):
+            return np.full(len(X), -1.0, dtype=np.float64)
+
+    with caplog.at_level(logging.WARNING, logger="skdr_eval"):
+        policy = skdr_eval.induce_policy_from_sklearn(
+            _NegativeModel(), X_base, ops_all, elig
+        )
+
+    assert "Negative predictions" in caplog.text, (
+        f"Expected the negative-prediction warning; got: {caplog.text!r}"
+    )
+    # All preds collapse to -1 -> abs -> 1 -> uniform 1/n_ops per row.
+    np.testing.assert_allclose(policy.sum(axis=1), 1.0, atol=1e-9)
+    np.testing.assert_allclose(
+        policy, np.full((n_samples, n_ops), 1.0 / n_ops), atol=1e-9
+    )
+
+
+def test_induce_policy_from_sklearn_uniform_fallback_for_no_eligible_samples():
+    """Samples with zero eligible ops get the uniform 1/n_ops distribution.
+
+    Matches the prior scalar behavior. Covers the ``if no_elig.any():`` branch
+    of the vectorized rewrite (#46).
+    """
+    rng = np.random.RandomState(13)
+    n_samples = 4
+    n_features = 2
+    n_ops = 3
+    ops_all = [f"op{i}" for i in range(n_ops)]
+    X_base = rng.randn(n_samples, n_features)
+    elig = np.ones((n_samples, n_ops), dtype=int)
+    # Row 1 has no eligible operators — should fall back to uniform.
+    elig[1] = 0
+
+    class _ConstModel:
+        def fit(self, X, y):
+            return self
+
+        def predict(self, X):
+            return np.full(len(X), 0.5, dtype=np.float64)
+
+    policy = skdr_eval.induce_policy_from_sklearn(_ConstModel(), X_base, ops_all, elig)
+
+    # Eligible rows: uniform over their eligible ops (all 1s -> uniform across all).
+    expected_eligible_row = np.full(n_ops, 1.0 / n_ops)
+    np.testing.assert_allclose(policy[0], expected_eligible_row, atol=1e-9)
+    np.testing.assert_allclose(policy[2], expected_eligible_row, atol=1e-9)
+    np.testing.assert_allclose(policy[3], expected_eligible_row, atol=1e-9)
+    # Ineligible row: uniform 1/n_ops fallback.
+    np.testing.assert_allclose(policy[1], np.full(n_ops, 1.0 / n_ops), atol=1e-9)
