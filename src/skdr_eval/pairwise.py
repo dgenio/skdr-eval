@@ -540,6 +540,14 @@ def _build_day_elig_mask(
     Mirrors the per-client semantics previously in ``induce_policy_stream_topk``:
     if ``elig_col`` is missing on the design, or a client's value is not a
     list/tuple, the client is treated as eligible for every operator on the day.
+
+    Precondition: ``day_ops[operator_id_col]`` must be unique within the day.
+    Duplicate operator IDs surface ambiguous features for the same operator
+    (the surrogate / full model would score the same ``operator_id`` more than
+    once with different feature rows) and are treated as a data-quality error
+    per ``docs/agent-context/invariants.md`` (prefer fail-loud). The historical
+    ``isin(...)`` path coincidentally marked every duplicate row as eligible;
+    the day-vectorized path raises instead.
     """
     n_clients = len(day_clients)
     n_ops = len(day_ops)
@@ -547,8 +555,26 @@ def _build_day_elig_mask(
     if elig_col is None or elig_col not in day_clients.columns:
         return np.ones((n_clients, n_ops), dtype=bool)
 
+    day_op_ids = day_ops[operator_id_col].values
+    # Fail-loud on duplicate operator IDs within a day. The dict-based
+    # eligibility lookup below would silently drop earlier duplicate positions
+    # (last-write-wins), which diverges from the prior ``isin(...)`` semantics
+    # *and* hides what is almost certainly a data-quality issue upstream.
+    if len(np.unique(day_op_ids)) != len(day_op_ids):
+        unique_ids, counts = np.unique(day_op_ids, return_counts=True)
+        duplicates = unique_ids[counts > 1]
+        raise DataValidationError(
+            "Duplicate operator IDs within a day are not supported for "
+            "stream_topk eligibility. Deduplicate op_daily_df upstream.",
+            details={
+                "n_duplicate_ids": int(duplicates.size),
+                "sample_duplicate_ids": [str(x) for x in duplicates[:5].tolist()],
+                "strategy": "stream_topk",
+            },
+        )
+
     op_id_to_pos: dict[Any, int] = {
-        op_id: i for i, op_id in enumerate(day_ops[operator_id_col].values)
+        op_id: i for i, op_id in enumerate(day_op_ids)
     }
     mask = np.zeros((n_clients, n_ops), dtype=bool)
     elig_values = day_clients[elig_col].to_list()

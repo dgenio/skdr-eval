@@ -900,5 +900,46 @@ def test_stream_topk_day_with_no_operators_raises():
         )
 
 
+def test_stream_topk_duplicate_operator_ids_per_day_raises():
+    """Duplicate operator IDs within a day must fail loud (PR #66 review).
+
+    The day-vectorized eligibility mask in ``_build_day_elig_mask`` builds a
+    ``dict[operator_id -> position]`` to look up eligible columns. Duplicate
+    operator IDs on the same day would silently drop the earlier duplicate
+    rows from eligibility (last-write-wins on the dict) and diverge from the
+    prior ``isin(...)`` semantics. The surrogate would also score the same
+    ``operator_id`` more than once with different feature rows, which is
+    ambiguous data. Per ``docs/agent-context/invariants.md``, prefer fail-loud.
+    """
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=1, n_clients_day=10, n_ops=5, seed=42
+    )
+
+    # Inject a duplicate operator row for the only day. Same operator_id, but
+    # a different op_* feature row — exactly the ambiguity the precondition
+    # is designed to surface.
+    day_value = op_daily_df["arrival_day"].iloc[0]
+    duplicate_row = op_daily_df.iloc[[0]].copy()
+    op_daily_df_dup = pd.concat([op_daily_df, duplicate_row], ignore_index=True)
+    assert (op_daily_df_dup["arrival_day"] == day_value).sum() >= 2
+
+    feature_cols = [col for col in logs_df.columns if col.startswith(("cli_", "op_"))]
+    X = logs_df[feature_cols].values
+    y = logs_df["service_time"].values
+    model = Ridge(random_state=42)
+    model.fit(X, y)
+
+    design = PairwiseDesign.from_dataframes(logs_df, op_daily_df_dup)
+
+    with pytest.raises(DataValidationError, match="Duplicate operator IDs"):
+        induce_policy_stream_topk(
+            models={"ridge": model},
+            design=design,
+            metric_col="service_time",
+            topk=2,
+            surrogate_model="ridge_interaction",
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

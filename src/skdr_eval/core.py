@@ -711,9 +711,11 @@ def induce_policy_from_sklearn(
 
         # Row-normalize. Rows with at least one eligible op sum to >0 because
         # 1/(pred+eps) is strictly positive after the abs() above; rows that
-        # got the uniform fallback already sum to 1.
+        # got the uniform fallback already sum to 1. Use in-place division so
+        # mypy keeps the ndarray dtype (`a / b` would surface as Any under the
+        # current numpy stubs and trip ``no-any-return`` on the return below).
         row_sums = policy_probs.sum(axis=1, keepdims=True)
-        policy_probs = policy_probs / row_sums
+        policy_probs /= row_sums
 
         # Validate output
         validate_probabilities(policy_probs, "policy_probs")

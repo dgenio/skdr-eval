@@ -12,12 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`induce_policy_stream_topk` is now fully day-vectorized.** The surrogate runs once per client-chunk (was once per client) and the function accepts a new `chunk_pairs` parameter controlling the per-day client-axis batch size. Output policies are unchanged on fixed seeds. ([#61], [#63])
 - **`induce_policy(strategy="stream_topk", chunk_pairs=...)` is no longer a no-op.** The value is now forwarded into the streaming top-K loop and caps the size of the per-chunk feature matrix to `chunk_pairs * 4 bytes * n_features`. ([#61])
 
+### Fixed
+- **`induce_policy_stream_topk` now raises `DataValidationError` on duplicate `operator_id` rows within a day.** The day-vectorized eligibility mask uses a `dict[operator_id -> position]`, which would otherwise silently drop earlier duplicate positions (last-write-wins) and diverge from the prior `isin(...)` semantics. Surface the ambiguity instead of papering over it, consistent with the fail-loud bias in `docs/agent-context/invariants.md`. ([#66] review)
+
 ### Tests
 - New parity and call-count tests for both rewrites: `test_induce_policy_from_sklearn_vectorized_matches_scalar_reference`, `test_induce_policy_from_sklearn_issues_single_predict_call`, `test_stream_topk_surrogate_predict_call_count_per_day`, `test_stream_topk_chunk_pairs_controls_batching_and_preserves_policy`, `test_stream_topk_chunk_pairs_forwarded_through_induce_policy`.
+- New `test_stream_topk_duplicate_operator_ids_per_day_raises` covering the fail-loud precondition added to `_build_day_elig_mask` (PR #66 review).
 
 [#46]: https://github.com/dgenio/skdr-eval/issues/46
 [#61]: https://github.com/dgenio/skdr-eval/issues/61
 [#63]: https://github.com/dgenio/skdr-eval/issues/63
+[#66]: https://github.com/dgenio/skdr-eval/pull/66
 
 ## [0.6.0] - 2026-05-12
 
