@@ -122,22 +122,21 @@ def test_induce_policy_from_sklearn_validation():
     X_base = np.random.randn(5, 3)
     ops_all = ["op1", "op2"]
     elig = np.array([[1, 1], [1, 0], [0, 1], [1, 1], [0, 0]])
-    idx = {"op1": 0, "op2": 1}
 
     with pytest.raises(ModelValidationError):
-        skdr_eval.induce_policy_from_sklearn(BadModel(), X_base, ops_all, elig, idx)
+        skdr_eval.induce_policy_from_sklearn(BadModel(), X_base, ops_all, elig)
 
     # Test mismatched array dimensions
     model = RandomForestRegressor(random_state=42)
     X_base = np.random.randn(5, 3)
     elig = np.array([[1, 1], [1, 0]])  # Wrong shape
     with pytest.raises(DataValidationError):
-        skdr_eval.induce_policy_from_sklearn(model, X_base, ops_all, elig, idx)
+        skdr_eval.induce_policy_from_sklearn(model, X_base, ops_all, elig)
 
     # Test invalid eligibility values
     elig = np.array([[1, 1], [1, 2], [0, 1], [1, 1], [0, 0]])  # Contains 2
     with pytest.raises(DataValidationError):
-        skdr_eval.induce_policy_from_sklearn(model, X_base, ops_all, elig, idx)
+        skdr_eval.induce_policy_from_sklearn(model, X_base, ops_all, elig)
 
 
 def test_validation_utilities():

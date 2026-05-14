@@ -8,9 +8,11 @@ from sklearn.exceptions import NotFittedError
 from sklearn.linear_model import LogisticRegression, Ridge
 
 from skdr_eval import evaluate_pairwise_models, make_pairwise_synth
+from skdr_eval import pairwise as pairwise_mod
 from skdr_eval.exceptions import DataValidationError
 from skdr_eval.pairwise import (
     PairwiseDesign,
+    _build_day_elig_mask,
     _fit_surrogate,
     _surrogate_features,
     induce_policy_stream_topk,
@@ -739,6 +741,136 @@ def test_pairwise_pre_split_zero_eval_rows_raises():
         )
 
 
+def test_stream_topk_surrogate_predict_call_count_per_day(monkeypatch):
+    """#63: surrogate.predict must be called O(n_chunks_per_day), not O(n_clients).
+
+    With a chunk_pairs cap large enough to hold the whole day's grid in one
+    call, the surrogate must be invoked exactly once per day. This is the
+    hoist-from-per-client-to-day-level contract.
+    """
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=3, n_clients_day=40, n_ops=8, seed=42
+    )
+    design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
+
+    feature_cols = design.cli_features + design.op_features
+    X = design.logs_df[feature_cols].values
+    y = design.logs_df["service_time"].values
+    model = Ridge(random_state=0)
+    model.fit(X, y)
+
+    # Wrap the surrogate's predict so we can count its invocations without
+    # touching the full model. This is the hoist-from-per-client-to-day
+    # contract for #63.
+    original_fit_surrogate = pairwise_mod._fit_surrogate
+    surrogate_calls: list[int] = []
+
+    def counting_fit_surrogate(*args, **kwargs):
+        surrogate, mode = original_fit_surrogate(*args, **kwargs)
+        original_predict = surrogate.predict
+
+        def counting_predict(X_):
+            surrogate_calls.append(len(X_))
+            return original_predict(X_)
+
+        surrogate.predict = counting_predict  # type: ignore[method-assign]
+        return surrogate, mode
+
+    monkeypatch.setattr(pairwise_mod, "_fit_surrogate", counting_fit_surrogate)
+
+    induce_policy_stream_topk(
+        models={"ridge": model},
+        design=design,
+        metric_col="service_time",
+        topk=3,
+        surrogate_model="ridge_interaction",
+        chunk_pairs=10_000_000,  # large enough to fit each day in one chunk
+    )
+
+    # 3 days, 1 surrogate predict per day = 3 calls total.
+    assert len(surrogate_calls) == 3, (
+        f"Expected one surrogate.predict per day; got {len(surrogate_calls)} "
+        f"calls with sizes {surrogate_calls}"
+    )
+    # Each call must cover the full (n_clients_day * n_day_ops) grid.
+    assert all(size == 40 * 8 for size in surrogate_calls), (
+        f"Each per-day surrogate call should score n_clients_day*n_day_ops="
+        f"320 rows; got sizes {surrogate_calls}"
+    )
+
+
+def test_stream_topk_chunk_pairs_controls_batching_and_preserves_policy():
+    """#61: chunk_pairs must actually chunk along clients without changing output.
+
+    Running stream_topk with a tiny chunk_pairs (forces multiple chunks per day)
+    and a huge chunk_pairs (one chunk per day) must produce *identical* policies.
+    This is the parity guarantee for the chunked rewrite.
+    """
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=2, n_clients_day=25, n_ops=6, seed=123
+    )
+    design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
+
+    feature_cols = design.cli_features + design.op_features
+    X = design.logs_df[feature_cols].values
+    y = design.logs_df["service_time"].values
+    model = Ridge(random_state=0)
+    model.fit(X, y)
+
+    common = {
+        "models": {"ridge": model},
+        "design": design,
+        "metric_col": "service_time",
+        "topk": 3,
+        "surrogate_model": "ridge_interaction",
+        "random_state": 0,
+    }
+    # Tiny chunk → chunk_size == max(1, 24 // 6) == 4 clients per chunk
+    tiny = induce_policy_stream_topk(**common, chunk_pairs=24)
+    # Huge chunk → one chunk per day
+    huge = induce_policy_stream_topk(**common, chunk_pairs=10_000_000)
+
+    np.testing.assert_array_equal(tiny["ridge"], huge["ridge"])
+
+
+def test_stream_topk_chunk_pairs_forwarded_through_induce_policy(monkeypatch):
+    """induce_policy(strategy='stream_topk', chunk_pairs=...) must forward the value."""
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=1, n_clients_day=20, n_ops=6, seed=42
+    )
+    design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
+
+    feature_cols = design.cli_features + design.op_features
+    X = design.logs_df[feature_cols].values
+    y = design.logs_df["service_time"].values
+    model = Ridge(random_state=0)
+    model.fit(X, y)
+
+    captured: dict[str, int] = {}
+    original_stream_topk = pairwise_mod.induce_policy_stream_topk
+
+    def spy_stream_topk(*args, **kwargs):
+        captured["chunk_pairs"] = kwargs.get("chunk_pairs")
+        return original_stream_topk(*args, **kwargs)
+
+    monkeypatch.setattr(pairwise_mod, "induce_policy_stream_topk", spy_stream_topk)
+
+    pairwise_mod.induce_policy(
+        models={"ridge": model},
+        design=design,
+        strategy="stream_topk",
+        metric_col="service_time",
+        topk=2,
+        chunk_pairs=12345,
+        surrogate_model="ridge_interaction",
+    )
+
+    assert captured["chunk_pairs"] == 12345, (
+        f"induce_policy did not forward chunk_pairs to stream_topk; "
+        f"got {captured.get('chunk_pairs')!r}"
+    )
+
+
 def test_stream_topk_day_with_no_operators_raises():
     """A day with clients but no operator candidates must fail loud.
 
@@ -767,6 +899,235 @@ def test_stream_topk_day_with_no_operators_raises():
             metric_col="service_time",
             topk=2,
         )
+
+
+def test_stream_topk_duplicate_operator_ids_per_day_raises():
+    """Duplicate operator IDs within a day must fail loud (PR #66 review).
+
+    The day-vectorized eligibility mask in ``_build_day_elig_mask`` builds a
+    ``dict[operator_id -> position]`` to look up eligible columns. Duplicate
+    operator IDs on the same day would silently drop the earlier duplicate
+    rows from eligibility (last-write-wins on the dict) and diverge from the
+    prior ``isin(...)`` semantics. The surrogate would also score the same
+    ``operator_id`` more than once with different feature rows, which is
+    ambiguous data. Per ``docs/agent-context/invariants.md``, prefer fail-loud.
+    """
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=1, n_clients_day=10, n_ops=5, seed=42
+    )
+
+    # Inject a duplicate operator row for the only day. Same operator_id, but
+    # a different op_* feature row — exactly the ambiguity the precondition
+    # is designed to surface.
+    day_value = op_daily_df["arrival_day"].iloc[0]
+    duplicate_row = op_daily_df.iloc[[0]].copy()
+    op_daily_df_dup = pd.concat([op_daily_df, duplicate_row], ignore_index=True)
+    assert (op_daily_df_dup["arrival_day"] == day_value).sum() >= 2
+
+    feature_cols = [col for col in logs_df.columns if col.startswith(("cli_", "op_"))]
+    X = logs_df[feature_cols].values
+    y = logs_df["service_time"].values
+    model = Ridge(random_state=42)
+    model.fit(X, y)
+
+    design = PairwiseDesign.from_dataframes(logs_df, op_daily_df_dup)
+
+    with pytest.raises(DataValidationError, match="Duplicate operator IDs"):
+        induce_policy_stream_topk(
+            models={"ridge": model},
+            design=design,
+            metric_col="service_time",
+            topk=2,
+            surrogate_model="ridge_interaction",
+        )
+
+
+def test_build_day_elig_mask_no_elig_col_returns_all_eligible():
+    """`elig_col=None` returns an all-True mask shaped (n_clients, n_ops)."""
+    day_clients = pd.DataFrame({"client_id": [1, 2, 3]})
+    day_ops = pd.DataFrame({"operator_id": ["a", "b"]})
+
+    mask = _build_day_elig_mask(
+        day_clients, day_ops, elig_col=None, operator_id_col="operator_id"
+    )
+
+    assert mask.shape == (3, 2)
+    assert mask.dtype == bool
+    assert mask.all(), "All cells should be eligible when elig_col is None"
+
+
+def test_build_day_elig_mask_missing_elig_col_returns_all_eligible():
+    """`elig_col` set but absent from columns also yields the all-True mask."""
+    day_clients = pd.DataFrame({"client_id": [1, 2]})
+    day_ops = pd.DataFrame({"operator_id": ["a", "b", "c"]})
+
+    mask = _build_day_elig_mask(
+        day_clients,
+        day_ops,
+        elig_col="elig_mask",  # not present on day_clients
+        operator_id_col="operator_id",
+    )
+
+    assert mask.shape == (2, 3)
+    assert mask.all()
+
+
+def test_build_day_elig_mask_scalar_value_falls_back_to_all_eligible():
+    """Non-list elig values (NaN, scalar) fall back to all-eligible.
+
+    Matches the historical per-client semantics: only proper list/tuple
+    eligibility lists are honored; anything else defaults to "all ops are
+    eligible" for that client. Covers the ``else`` branch of the
+    ``isinstance(elig_value, (list, tuple))`` check in ``_build_day_elig_mask``.
+    """
+    day_clients = pd.DataFrame(
+        {
+            "client_id": [1, 2, 3],
+            "elig_mask": pd.Series([["a"], float("nan"), ["b"]], dtype=object),
+        }
+    )
+    day_ops = pd.DataFrame({"operator_id": ["a", "b", "c"]})
+
+    mask = _build_day_elig_mask(
+        day_clients,
+        day_ops,
+        elig_col="elig_mask",
+        operator_id_col="operator_id",
+    )
+
+    assert mask.shape == (3, 3)
+    # Row 0: only 'a' is eligible.
+    np.testing.assert_array_equal(mask[0], [True, False, False])
+    # Row 1: NaN -> all eligible.
+    assert mask[1].all()
+    # Row 2: only 'b' is eligible.
+    np.testing.assert_array_equal(mask[2], [False, True, False])
+
+
+def test_build_day_elig_mask_series_cell_value_unwraps_via_iloc():
+    """A pandas Series elig cell is unwrapped via ``.iloc[0]``.
+
+    Defensive against ``client_row[elig_col]`` ever returning a Series (e.g.,
+    when the column appears more than once on the source frame). Covers the
+    ``hasattr(raw_value, "iloc")`` branch in ``_build_day_elig_mask``.
+    """
+    elig_cells = [pd.Series([["a", "c"]]), pd.Series([["b"]])]
+    day_clients = pd.DataFrame(
+        {
+            "client_id": [1, 2],
+            "elig_mask": pd.Series(elig_cells, dtype=object),
+        }
+    )
+    day_ops = pd.DataFrame({"operator_id": ["a", "b", "c"]})
+
+    mask = _build_day_elig_mask(
+        day_clients,
+        day_ops,
+        elig_col="elig_mask",
+        operator_id_col="operator_id",
+    )
+
+    assert mask.shape == (2, 3)
+    np.testing.assert_array_equal(mask[0], [True, False, True])
+    np.testing.assert_array_equal(mask[1], [False, True, False])
+
+
+def test_build_day_elig_mask_empty_series_falls_back_to_empty_list():
+    """An empty Series cell (``len == 0``) collapses to ``[]`` -> all-False row."""
+    elig_cells = [pd.Series([], dtype=object), pd.Series([["b"]])]
+    day_clients = pd.DataFrame(
+        {
+            "client_id": [1, 2],
+            "elig_mask": pd.Series(elig_cells, dtype=object),
+        }
+    )
+    day_ops = pd.DataFrame({"operator_id": ["a", "b"]})
+
+    mask = _build_day_elig_mask(
+        day_clients,
+        day_ops,
+        elig_col="elig_mask",
+        operator_id_col="operator_id",
+    )
+
+    assert mask.shape == (2, 2)
+    # Row 0: empty Series -> [] -> no operators eligible.
+    np.testing.assert_array_equal(mask[0], [False, False])
+    # Row 1: ['b'] -> only 'b' eligible.
+    np.testing.assert_array_equal(mask[1], [False, True])
+
+
+def test_stream_topk_direction_max_runs_end_to_end():
+    """Smoke test for the ``direction="max"`` argpartition / argmax branches.
+
+    The min path is exercised by ``test_stream_topk_personalization_recovery``;
+    this covers the symmetric max-direction branches (top-K selection and
+    best-in-top-K selection) in ``induce_policy_stream_topk``.
+    """
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=2, n_clients_day=15, n_ops=6, seed=42
+    )
+    design = PairwiseDesign.from_dataframes(logs_df, op_daily_df)
+
+    feature_cols = design.cli_features + design.op_features
+    X = design.logs_df[feature_cols].values
+    y = design.logs_df["service_time"].values
+    model = Ridge(random_state=0)
+    model.fit(X, y)
+
+    policy_max = induce_policy_stream_topk(
+        models={"ridge": model},
+        design=design,
+        metric_col="service_time",
+        direction="max",
+        topk=3,
+        surrogate_model="ridge_interaction",
+        random_state=0,
+    )
+
+    # One decision per client; values are operator IDs as strings.
+    assert "ridge" in policy_max
+    assert len(policy_max["ridge"]) == len(design.logs_df)
+    assert all(isinstance(op, str) for op in policy_max["ridge"])
+
+
+def test_stream_topk_skips_day_with_no_clients():
+    """A day present in ``op_daily_df`` but absent from ``logs_df`` is skipped.
+
+    Covers the ``if len(day_clients) == 0: continue`` branch in
+    ``induce_policy_stream_topk``. ``PairwiseDesign.from_dataframes`` builds
+    ``ops_all_by_day`` from ``op_daily_df``, so we keep both days of operators
+    but filter ``logs_df`` to a single day's clients — the other day's
+    operators stay enumerable but have zero matching clients.
+    """
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=2, n_clients_day=10, n_ops=4, seed=42
+    )
+    keep_day = sorted(logs_df["arrival_day"].unique())[1]
+    logs_df_one_day = logs_df[logs_df["arrival_day"] == keep_day].reset_index(drop=True)
+
+    design = PairwiseDesign.from_dataframes(logs_df_one_day, op_daily_df)
+    assert len(design.ops_all_by_day) == 2, (
+        "Both days should still appear in ops_all_by_day"
+    )
+
+    feature_cols = design.cli_features + design.op_features
+    X = design.logs_df[feature_cols].values
+    y = design.logs_df["service_time"].values
+    model = Ridge(random_state=0)
+    model.fit(X, y)
+
+    policy = induce_policy_stream_topk(
+        models={"ridge": model},
+        design=design,
+        metric_col="service_time",
+        topk=2,
+        surrogate_model="ridge_interaction",
+        random_state=0,
+    )
+
+    # Only the kept day's clients should have decisions.
+    assert len(policy["ridge"]) == len(logs_df_one_day)
 
 
 if __name__ == "__main__":

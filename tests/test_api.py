@@ -1,11 +1,14 @@
 """Test API imports and basic functionality."""
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
 from sklearn.ensemble import RandomForestRegressor
 
 import skdr_eval
+from skdr_eval.exceptions import PolicyInductionError
 
 
 def test_imports():
@@ -219,3 +222,203 @@ def test_evaluate_sklearn_models_empty_models_raises():
             n_splits=2,
             random_state=42,
         )
+
+
+def test_induce_policy_from_sklearn_vectorized_matches_scalar_reference():
+    """#46: vectorized induce_policy_from_sklearn matches a scalar reference.
+
+    The vectorized implementation must produce *identical* policy_probs as a
+    per-sample, per-eligible-op reference loop (the original implementation
+    style). This is the parity guarantee for the perf rewrite.
+    """
+    rng = np.random.RandomState(0)
+    n_samples = 8
+    n_features = 3
+    n_ops = 5
+    ops_all = [f"op{i}" for i in range(n_ops)]
+    X_base = rng.randn(n_samples, n_features).astype(np.float64)
+    # Mix of fully eligible / partially eligible / no-eligible rows
+    elig = rng.randint(0, 2, size=(n_samples, n_ops))
+    elig[0] = 1  # fully eligible
+    elig[1] = 0  # no eligible ops at all (uniform fallback)
+    elig[2] = [1, 0, 0, 0, 0]  # single eligible op
+
+    class _DeterministicModel:
+        """Deterministic, finite, strictly positive predictions."""
+
+        def fit(self, X, y):  # required by validate_sklearn_estimator
+            return self
+
+        def predict(self, X):
+            # Linear function of features + op-index encoded in one-hot block.
+            base = X[:, :n_features].sum(axis=1)
+            op_part = X[:, n_features:] @ (np.arange(n_ops) + 1.0)
+            return np.abs(base) + op_part + 0.1  # strictly > 0, finite
+
+    model = _DeterministicModel()
+
+    def scalar_reference(model, X_base, ops_all, elig):
+        n_samples, _ = X_base.shape
+        n_ops = len(ops_all)
+        probs = np.zeros((n_samples, n_ops))
+        for i in range(n_samples):
+            eligible_ops = np.where(elig[i])[0]
+            if eligible_ops.size == 0:
+                probs[i] = 1.0 / n_ops
+                continue
+            preds = []
+            for op_idx in eligible_ops:
+                onehot = np.zeros(n_ops, dtype=X_base.dtype)
+                onehot[op_idx] = 1
+                x = np.concatenate([X_base[i], onehot])
+                preds.append(float(model.predict(x.reshape(1, -1))[0]))
+            arr = np.asarray(preds)
+            probs[i, eligible_ops] = 1.0 / (arr + 1e-8)
+            probs[i] /= probs[i].sum()
+        return probs
+
+    vectorized = skdr_eval.induce_policy_from_sklearn(model, X_base, ops_all, elig)
+    reference = scalar_reference(model, X_base, ops_all, elig)
+
+    # Identical up to floating-point: same arithmetic, same order.
+    np.testing.assert_allclose(vectorized, reference, rtol=0, atol=1e-12)
+
+
+def test_induce_policy_from_sklearn_issues_single_predict_call():
+    """#46: vectorized path must issue exactly one model.predict call."""
+    rng = np.random.RandomState(1)
+    n_samples = 6
+    n_features = 2
+    n_ops = 4
+    ops_all = [f"op{i}" for i in range(n_ops)]
+    X_base = rng.randn(n_samples, n_features)
+    elig = rng.randint(0, 2, size=(n_samples, n_ops))
+    elig[0] = 1
+    elig[-1] = 1
+
+    class _CountingModel:
+        def __init__(self):
+            self.calls: list[int] = []
+
+        def fit(self, X, y):  # required by validate_sklearn_estimator
+            return self
+
+        def predict(self, X):
+            self.calls.append(len(X))
+            return np.full(len(X), 0.5, dtype=np.float64)
+
+    model = _CountingModel()
+    skdr_eval.induce_policy_from_sklearn(model, X_base, ops_all, elig)
+
+    assert len(model.calls) == 1, (
+        f"Expected exactly one model.predict call (vectorized); "
+        f"got {len(model.calls)} with sizes {model.calls}"
+    )
+    # The single call must cover every eligible (sample, op) pair.
+    assert model.calls[0] == int(elig.sum()), (
+        f"Single predict call should cover {int(elig.sum())} eligible pairs; "
+        f"got {model.calls[0]}"
+    )
+
+
+def test_induce_policy_from_sklearn_raises_on_non_finite_predictions():
+    """Non-finite predictions must surface as ``PolicyInductionError`` (#46 audit).
+
+    The vectorized rewrite of ``induce_policy_from_sklearn`` issues a single
+    ``model.predict`` call; if any cell of the result is non-finite the helper
+    must fail loud per ``docs/agent-context/invariants.md``, naming the
+    offending (sample, operator) so the caller can localize the bad row.
+    """
+    rng = np.random.RandomState(11)
+    n_samples = 4
+    n_features = 2
+    n_ops = 3
+    ops_all = [f"op{i}" for i in range(n_ops)]
+    X_base = rng.randn(n_samples, n_features)
+    elig = np.ones((n_samples, n_ops), dtype=int)
+
+    class _NaNModel:
+        def fit(self, X, y):
+            return self
+
+        def predict(self, X):
+            preds = np.zeros(len(X), dtype=np.float64)
+            # NaN somewhere in the middle so np.argmax(~isfinite) points at
+            # a real sample/op index pair, not row 0.
+            preds[len(X) // 2] = np.nan
+            return preds
+
+    with pytest.raises(PolicyInductionError, match="Non-finite prediction"):
+        skdr_eval.induce_policy_from_sklearn(_NaNModel(), X_base, ops_all, elig)
+
+
+def test_induce_policy_from_sklearn_handles_negative_predictions(caplog):
+    """Negative predictions trigger the abs-fallback warning, not a raise.
+
+    A regression model can produce a small negative service-time prediction
+    on the eligible-pair grid; the policy is still computed as
+    ``1 / (|pred| + eps)`` and a warning is emitted so the operator can see
+    the model is misbehaving. Covers the negative-pred branch of #46.
+    """
+    rng = np.random.RandomState(12)
+    n_samples = 4
+    n_features = 2
+    n_ops = 3
+    ops_all = [f"op{i}" for i in range(n_ops)]
+    X_base = rng.randn(n_samples, n_features)
+    elig = np.ones((n_samples, n_ops), dtype=int)
+
+    class _NegativeModel:
+        def fit(self, X, y):
+            return self
+
+        def predict(self, X):
+            return np.full(len(X), -1.0, dtype=np.float64)
+
+    with caplog.at_level(logging.WARNING, logger="skdr_eval"):
+        policy = skdr_eval.induce_policy_from_sklearn(
+            _NegativeModel(), X_base, ops_all, elig
+        )
+
+    assert "Negative predictions" in caplog.text, (
+        f"Expected the negative-prediction warning; got: {caplog.text!r}"
+    )
+    # All preds collapse to -1 -> abs -> 1 -> uniform 1/n_ops per row.
+    np.testing.assert_allclose(policy.sum(axis=1), 1.0, atol=1e-9)
+    np.testing.assert_allclose(
+        policy, np.full((n_samples, n_ops), 1.0 / n_ops), atol=1e-9
+    )
+
+
+def test_induce_policy_from_sklearn_uniform_fallback_for_no_eligible_samples():
+    """Samples with zero eligible ops get the uniform 1/n_ops distribution.
+
+    Matches the prior scalar behavior. Covers the ``if no_elig.any():`` branch
+    of the vectorized rewrite (#46).
+    """
+    rng = np.random.RandomState(13)
+    n_samples = 4
+    n_features = 2
+    n_ops = 3
+    ops_all = [f"op{i}" for i in range(n_ops)]
+    X_base = rng.randn(n_samples, n_features)
+    elig = np.ones((n_samples, n_ops), dtype=int)
+    # Row 1 has no eligible operators — should fall back to uniform.
+    elig[1] = 0
+
+    class _ConstModel:
+        def fit(self, X, y):
+            return self
+
+        def predict(self, X):
+            return np.full(len(X), 0.5, dtype=np.float64)
+
+    policy = skdr_eval.induce_policy_from_sklearn(_ConstModel(), X_base, ops_all, elig)
+
+    # Eligible rows: uniform over their eligible ops (all 1s -> uniform across all).
+    expected_eligible_row = np.full(n_ops, 1.0 / n_ops)
+    np.testing.assert_allclose(policy[0], expected_eligible_row, atol=1e-9)
+    np.testing.assert_allclose(policy[2], expected_eligible_row, atol=1e-9)
+    np.testing.assert_allclose(policy[3], expected_eligible_row, atol=1e-9)
+    # Ineligible row: uniform 1/n_ops fallback.
+    np.testing.assert_allclose(policy[1], np.full(n_ops, 1.0 / n_ops), atol=1e-9)
