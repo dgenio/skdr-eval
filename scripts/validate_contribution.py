@@ -16,7 +16,7 @@ from typing import Optional
 # Configuration constants
 COVERAGE_THRESHOLD = 80
 CODE_DIRS = ("src/", "tests/", "examples/")
-PROTECTED_BRANCHES = ("main", "develop")
+PROTECTED_BRANCHES = ("main",)
 CONVENTIONAL_PREFIXES = (
     "feat:",
     "fix:",

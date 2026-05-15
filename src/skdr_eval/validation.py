@@ -15,6 +15,10 @@ from .exceptions import (
 
 logger = logging.getLogger("skdr_eval")
 
+# Pairwise-schema columns. In strict mode, presence in a single-action logs
+# DataFrame indicates the caller likely meant validate_pairwise_inputs.
+_PAIRWISE_KNOWN_COLUMNS = frozenset({"arrival_day", "client_id", "operator_id"})
+
 
 def validate_dataframe(
     df: pd.DataFrame,
@@ -112,7 +116,9 @@ def validate_numpy_array(
             raise DataValidationError(
                 f"{name} has {len(arr.shape)} dimensions, expected {len(expected_shape)}"
             )
-        for i, (actual, expected) in enumerate(zip(arr.shape, expected_shape)):
+        for i, (actual, expected) in enumerate(
+            zip(arr.shape, expected_shape, strict=False)
+        ):
             if expected is not None and actual != expected:
                 raise DataValidationError(
                     f"{name} dimension {i} has size {actual}, expected {expected}"
@@ -382,3 +388,235 @@ def validate_random_state(
             raise DataValidationError(
                 f"{name} must be non-negative, got {random_state}"
             )
+
+
+def _columns_with_prefix(df: pd.DataFrame, prefix: str) -> list[str]:
+    if not prefix:
+        return []
+    return [c for c in df.columns if c.startswith(prefix)]
+
+
+def validate_logs(
+    logs: pd.DataFrame,
+    *,
+    cli_pref: str = "cli_",
+    st_pref: str = "st_",
+    strict: bool = False,
+) -> None:
+    """Validate a single-action logs DataFrame for ``evaluate_sklearn_models``.
+
+    Performs a fast, surface-level check that ``logs`` carries the canonical
+    schema consumed by :func:`skdr_eval.build_design`:
+
+    - required columns ``arrival_ts``, ``action``, ``service_time``;
+    - at least one eligibility column matching ``*_elig``;
+    - at least one feature column matching ``cli_pref`` or ``st_pref``;
+    - every ``action`` value is present as an ``*_elig`` operator;
+    - feature, outcome, eligibility, and timestamp columns are finite numeric.
+
+    Parameters
+    ----------
+    logs : pd.DataFrame
+        Decision logs to validate.
+    cli_pref : str, default="cli_"
+        Prefix for client feature columns.
+    st_pref : str, default="st_"
+        Prefix for service-time feature columns.
+    strict : bool, default=False
+        When True, additionally require:
+
+        - ``arrival_ts`` is monotonically non-decreasing (time order);
+        - no column from the pairwise schema leaks in
+          (``client_id``/``operator_id``/``arrival_day``);
+        - every operator listed as eligible appears at least once in ``action``.
+
+        Strict mode is intended for preflight checks; downstream functions
+        only require the non-strict invariants.
+
+    Raises
+    ------
+    DataValidationError
+        If any non-strict invariant is violated.
+    InsufficientDataError
+        If ``logs`` is empty.
+    """
+    validate_dataframe(
+        logs,
+        "logs",
+        required_columns=["arrival_ts", "action", "service_time"],
+        min_rows=1,
+    )
+
+    elig_cols = [c for c in logs.columns if c.endswith("_elig")]
+    if not elig_cols:
+        raise DataValidationError(
+            "logs has no eligibility columns (expected at least one '*_elig')"
+        )
+
+    feature_cols = _columns_with_prefix(logs, cli_pref) + _columns_with_prefix(
+        logs, st_pref
+    )
+    if not feature_cols:
+        raise DataValidationError(
+            f"logs has no feature columns with prefixes '{cli_pref}' or '{st_pref}'"
+        )
+
+    ops_all = [c.removesuffix("_elig") for c in elig_cols]
+    invalid_actions = set(logs["action"]) - set(ops_all)
+    if invalid_actions:
+        raise DataValidationError(
+            f"logs.action contains values not present as '*_elig' columns: "
+            f"{sorted(invalid_actions)} (eligible operators: {sorted(ops_all)})"
+        )
+
+    elig_values = logs[elig_cols].to_numpy()
+    if not np.all(np.isin(elig_values, [0, 1])):
+        raise DataValidationError(
+            "logs eligibility columns must contain only 0/1 values"
+        )
+
+    feature_values = logs[feature_cols].to_numpy(dtype=float, copy=False)
+    validate_finite_values(feature_values, "logs[feature_cols]")
+
+    service_time = logs["service_time"].to_numpy(dtype=float, copy=False)
+    validate_finite_values(service_time, "logs.service_time")
+
+    arrival_ts = pd.to_datetime(logs["arrival_ts"], errors="coerce")
+    if arrival_ts.isna().any():
+        raise DataValidationError(
+            "logs.arrival_ts contains values that cannot be parsed as timestamps"
+        )
+
+    if strict:
+        if not arrival_ts.is_monotonic_increasing:
+            raise DataValidationError(
+                "strict: logs.arrival_ts is not monotonically non-decreasing"
+            )
+
+        leaked = _PAIRWISE_KNOWN_COLUMNS & set(logs.columns)
+        if leaked:
+            raise DataValidationError(
+                f"strict: logs has pairwise-schema columns {sorted(leaked)}; "
+                "use validate_pairwise_inputs instead"
+            )
+
+        eligible_anywhere = {
+            op for op, col in zip(ops_all, elig_cols, strict=False) if logs[col].any()
+        }
+        observed_actions = set(logs["action"])
+        unobserved_eligible = eligible_anywhere - observed_actions
+        if unobserved_eligible:
+            raise DataValidationError(
+                f"strict: operators eligible but never chosen as action: "
+                f"{sorted(unobserved_eligible)}"
+            )
+
+
+def validate_pairwise_inputs(
+    logs_df: pd.DataFrame,
+    op_daily_df: pd.DataFrame,
+    *,
+    metric_col: str,
+    day_col: str = "arrival_day",
+    client_id_col: str = "client_id",
+    operator_id_col: str = "operator_id",
+    elig_col: str | None = "elig_mask",
+    cli_pref: str = "cli_",
+    op_pref: str = "op_",
+    strict: bool = False,
+) -> None:
+    """Validate inputs for :func:`skdr_eval.evaluate_pairwise_models`.
+
+    Parameters
+    ----------
+    logs_df : pd.DataFrame
+        Observed decisions. Must contain ``day_col``, ``client_id_col``,
+        ``operator_id_col``, ``metric_col``, at least one ``cli_pref`` feature,
+        and the optional eligibility column ``elig_col``.
+    op_daily_df : pd.DataFrame
+        Daily operator snapshots. Must contain ``day_col``, ``operator_id_col``,
+        and at least one ``op_pref`` feature.
+    metric_col : str
+        Target column on ``logs_df``.
+    day_col, client_id_col, operator_id_col, elig_col, cli_pref, op_pref : str
+        Schema knobs matching ``evaluate_pairwise_models``.
+    strict : bool, default=False
+        When True, additionally require:
+
+        - every ``(operator_id, day)`` pair observed in ``logs_df`` also
+          appears in ``op_daily_df``;
+        - if ``elig_col`` is present, every chosen ``operator_id`` is
+          contained in the corresponding eligibility list.
+
+    Raises
+    ------
+    DataValidationError
+        If any non-strict invariant is violated.
+    InsufficientDataError
+        If either input is empty.
+    """
+    required_logs = [day_col, client_id_col, operator_id_col, metric_col]
+    validate_dataframe(logs_df, "logs_df", required_columns=required_logs, min_rows=1)
+
+    required_daily = [day_col, operator_id_col]
+    validate_dataframe(
+        op_daily_df, "op_daily_df", required_columns=required_daily, min_rows=1
+    )
+
+    cli_cols = _columns_with_prefix(logs_df, cli_pref)
+    if not cli_cols:
+        raise DataValidationError(
+            f"logs_df has no client feature columns with prefix '{cli_pref}'"
+        )
+
+    op_cols = _columns_with_prefix(op_daily_df, op_pref)
+    if not op_cols:
+        raise DataValidationError(
+            f"op_daily_df has no operator feature columns with prefix '{op_pref}'"
+        )
+
+    if elig_col is not None and elig_col in logs_df.columns:
+        sample = logs_df[elig_col].dropna()
+        if not sample.empty and not isinstance(sample.iloc[0], (list, tuple, set)):
+            raise DataValidationError(
+                f"logs_df[{elig_col!r}] must contain list/tuple/set values, "
+                f"got {type(sample.iloc[0]).__name__}"
+            )
+
+    metric_values = logs_df[metric_col].to_numpy(dtype=float, copy=False)
+    validate_finite_values(metric_values, f"logs_df[{metric_col!r}]")
+
+    cli_values = logs_df[cli_cols].to_numpy(dtype=float, copy=False)
+    validate_finite_values(cli_values, "logs_df[cli_*]")
+
+    op_values = op_daily_df[op_cols].to_numpy(dtype=float, copy=False)
+    validate_finite_values(op_values, "op_daily_df[op_*]")
+
+    if strict:
+        logs_pairs = set(zip(logs_df[operator_id_col], logs_df[day_col], strict=False))
+        daily_pairs = set(
+            zip(op_daily_df[operator_id_col], op_daily_df[day_col], strict=False)
+        )
+        missing = logs_pairs - daily_pairs
+        if missing:
+            sample_missing = sorted(missing)[:5]
+            raise DataValidationError(
+                f"strict: {len(missing)} (operator, day) pairs in logs_df "
+                f"missing from op_daily_df (sample: {sample_missing})"
+            )
+
+        if elig_col is not None and elig_col in logs_df.columns:
+            max_examples = 5
+            bad_rows: list[int] = []
+            for idx, (chosen, eligible) in enumerate(
+                zip(logs_df[operator_id_col], logs_df[elig_col], strict=False)
+            ):
+                if isinstance(eligible, (list, tuple, set)) and chosen not in eligible:
+                    bad_rows.append(idx)
+                    if len(bad_rows) >= max_examples:
+                        break
+            if bad_rows:
+                raise DataValidationError(
+                    f"strict: chosen operator_id missing from elig_mask in rows "
+                    f"{bad_rows} (showing up to {max_examples})"
+                )

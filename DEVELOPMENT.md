@@ -20,28 +20,31 @@ make test-cov
 ```
 
 ### Critical Rules (Never Break These)
-1. **NEVER commit directly to `main` or `develop`**
-2. **ALWAYS create feature branches from `develop`**
+1. **NEVER commit directly to `main`**
+2. **ALWAYS create feature branches from `main`**
 3. **ALWAYS run `make check` before creating PR**
 4. **ALWAYS write tests for new functionality**
 5. **ALWAYS update documentation for API changes**
 
-## 🌊 Git Flow Workflow (SOTA Implementation)
+## 🌊 GitHub Flow Workflow
 
 ### Branch Strategy
 ```
-main (production)     ←── release/v1.2.0 ←── hotfix/critical-bug
-  ↑                                              ↑
-  └── develop (integration) ←── feature/new-algo ←── feature/bug-fix
+main (production, always deployable)
+  ↑
+  └── feature/new-algo ←── feature/bug-fix
+  └── hotfix/critical-security-fix
 ```
+
+Short-lived feature branches off `main`; merge back via PR.
 
 ### Step-by-Step Development Process
 
 #### 1. Start New Feature
 ```bash
-# Always start from develop
-git checkout develop
-git pull origin develop
+# Always start from main
+git checkout main
+git pull origin main
 git checkout -b feature/descriptive-name
 
 # Example naming conventions:
@@ -86,7 +89,7 @@ make test-cov                 # Tests with coverage report
 git push origin feature/descriptive-name
 
 # Create PR with template:
-# - Target: develop branch
+# - Target: main branch
 # - Fill ALL template sections
 # - Link related issues
 # - Add screenshots/examples if UI changes
@@ -237,13 +240,12 @@ if not data:
 ### PR Requirements
 - ✅ All CI checks pass
 - ✅ At least 1 approval from maintainer
-- ✅ Branch is up-to-date with develop
+- ✅ Branch is up-to-date with main
 - ✅ No merge conflicts
 - ✅ PR template fully completed
 
 ### Branch Protection Rules
-- **main**: Requires PR + 2 approvals + CI pass
-- **develop**: Requires PR + 1 approval + CI pass
+- **main**: Requires PR + 1 approval + CI pass
 - **feature/***: No restrictions (for development)
 
 ## 📦 Release Process (Semantic Versioning)
@@ -255,24 +257,22 @@ if not data:
 
 ### Release Steps (Maintainers Only)
 ```bash
-# 1. Create release branch
-git checkout develop
+# 1. Cut a release branch from main
+git checkout main
+git pull origin main
 git checkout -b release/v1.2.0
 
 # 2. Update version and changelog
 # Edit pyproject.toml, CHANGELOG.md
 
-# 3. Create PR to main
+# 3. Open PR back to main
 # After approval and merge:
 
 # 4. Tag and publish
 git checkout main
+git pull origin main
 git tag v1.2.0
 git push origin v1.2.0
-
-# 5. Merge back to develop
-git checkout develop
-git merge main
 ```
 
 ## 🛠️ Development Environment Setup
@@ -352,10 +352,10 @@ git add .
 git commit
 
 # Branch out of sync
-git checkout develop
-git pull origin develop
+git checkout main
+git pull origin main
 git checkout feature/branch
-git rebase develop          # Or merge develop
+git rebase main             # Or merge main
 ```
 
 ## 📊 Performance Guidelines
@@ -398,7 +398,7 @@ Before submitting any PR, ensure:
 - [ ] **Documentation**: Public APIs have proper docstrings
 - [ ] **Types**: All functions have type hints
 - [ ] **Commits**: Follow conventional commit format
-- [ ] **Branch**: Created from `develop`, targets `develop`
+- [ ] **Branch**: Created from `main`, targets `main`
 - [ ] **PR**: Template fully completed with clear description
 
 ## 🤝 Getting Help

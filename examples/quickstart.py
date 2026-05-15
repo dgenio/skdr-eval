@@ -15,6 +15,9 @@ def main():
     print("\n1. Generating synthetic service logs...")
     logs, ops_all, _ = skdr_eval.make_synth_logs(n=5000, n_ops=5, seed=42)
 
+    # Preflight: confirm the logs schema is what evaluate_sklearn_models expects.
+    skdr_eval.validate_logs(logs)
+
     print(f"   Generated {len(logs)} log entries")
     print(f"   Operators: {list(ops_all)}")
     print(

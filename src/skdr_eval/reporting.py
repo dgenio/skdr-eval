@@ -32,7 +32,7 @@ import io
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -1076,7 +1076,7 @@ def build_evaluation_artifact(
     metadata: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "skdr_eval_version": _pkg_version,
-        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
         "evaluator": evaluator,
         "n_samples": int(n_samples),
     }

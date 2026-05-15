@@ -1,8 +1,9 @@
 """Statistical testing utilities for skdr-eval library."""
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 import numpy as np
 from scipy import stats

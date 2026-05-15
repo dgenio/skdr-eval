@@ -289,6 +289,7 @@ def induce_policy_direct(
             zip(
                 unique_first[design.client_id_col].values,
                 unique_first.index.values,
+                strict=False,
             )
         )
 
