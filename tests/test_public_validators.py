@@ -301,9 +301,7 @@ def test_validate_pairwise_inputs_strict_truncates_bad_row_examples():
     # Force every elig_mask to a single-op list that excludes the chosen op.
     for i in range(min(10, len(logs_df))):
         chosen = logs_df.loc[logs_df.index[i], "operator_id"]
-        other = next(
-            op for op in op_daily_df["operator_id"].unique() if op != chosen
-        )
+        other = next(op for op in op_daily_df["operator_id"].unique() if op != chosen)
         logs_df.at[logs_df.index[i], "elig_mask"] = [other]
     with pytest.raises(DataValidationError, match="up to 5"):
         skdr_eval.validate_pairwise_inputs(
