@@ -75,7 +75,7 @@ import skdr_eval
 
 # Which optional extras are installed?
 print(skdr_eval.get_capabilities())
-# {'choice': True, 'viz': True, 'speed': False, 'missing_extras': ['speed']}
+# {'viz': True, 'speed': False, 'missing_extras': ['speed']}
 
 # Validate your logs match the schema evaluate_sklearn_models expects.
 skdr_eval.validate_logs(logs, strict=True)

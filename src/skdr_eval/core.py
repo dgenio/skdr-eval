@@ -87,13 +87,13 @@ def _make_time_series_split(
             f"max_train_size must be a positive integer or None, got {max_train_size!r}"
         )
 
-    # Floor: TimeSeriesSplit produces n_splits folds; require ≥ 2*n_splits
-    # so each fold has at least one train and one test sample.
-    # Additional headroom for explicit test_size / gap.
+    # Feasibility: sklearn's TimeSeriesSplit needs n_samples > n_splits *
+    # test_size + gap. We also enforce the n_splits * 2 floor so every fold
+    # contains at least one train sample even when test_size is implicit.
     effective_test = test_size if test_size is not None else 1
     min_required = max(
         n_splits * 2,
-        n_splits * effective_test + gap + effective_test,
+        n_splits * effective_test + gap + 1,
     )
     if n_samples < min_required:
         raise InsufficientDataError(

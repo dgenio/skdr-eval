@@ -1,9 +1,14 @@
 """Runtime capability detection for skdr-eval optional extras.
 
 Provides a side-effect-free way to discover which optional dependency
-groups (``[choice]``, ``[viz]``, ``[speed]``) are installed, so callers
-and CI smoke checks can short-circuit gracefully when a feature requires
-an extra that was not installed.
+groups (``[viz]``, ``[speed]``) are installed, so callers and CI smoke
+checks can short-circuit gracefully when a feature requires an extra
+that was not installed.
+
+The set of detected capabilities tracks the *truly* optional extras in
+``pyproject.toml``: ``viz`` (``matplotlib``) and ``speed`` (``pyarrow``
++ ``polars``). ``scipy`` is a mandatory dependency, so condlogit
+propensity estimation is always available and is not listed here.
 """
 
 from __future__ import annotations
@@ -13,14 +18,12 @@ import importlib.util
 # Map of capability name -> list of module names whose presence enables it.
 # Capability is True iff *all* listed modules can be located.
 _CAPABILITY_SPECS: dict[str, tuple[str, ...]] = {
-    "choice": ("scipy",),
     "viz": ("matplotlib",),
     "speed": ("pyarrow", "polars"),
 }
 
 # Reverse map for missing-extras reporting.
 _EXTRA_BY_CAPABILITY = {
-    "choice": "choice",
     "viz": "viz",
     "speed": "speed",
 }
@@ -45,19 +48,17 @@ def get_capabilities() -> dict[str, bool | list[str]]:
     dict[str, bool | list[str]]
         Keys:
 
-        - ``"choice"`` (bool): conditional-logit propensity estimation
-          (requires ``scipy``).
         - ``"viz"`` (bool): plotting helpers under ``skdr_eval.visualization``
-          (requires ``matplotlib``).
+          (requires ``matplotlib``; install via ``pip install 'skdr-eval[viz]'``).
         - ``"speed"`` (bool): accelerated I/O paths (requires ``pyarrow``
-          and ``polars``).
+          and ``polars``; install via ``pip install 'skdr-eval[speed]'``).
         - ``"missing_extras"`` (list[str]): pip extras that, if installed,
           would enable currently-disabled capabilities. Stable, sorted.
 
     Examples
     --------
     >>> caps = get_capabilities()  # doctest: +SKIP
-    >>> caps["choice"]              # doctest: +SKIP
+    >>> caps["viz"]                 # doctest: +SKIP
     True
     >>> caps["missing_extras"]      # doctest: +SKIP
     ['speed']

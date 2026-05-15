@@ -28,7 +28,7 @@ def main() -> int:
     print("\nCapabilities")
     print("-" * 50)
     caps = skdr_eval.get_capabilities()
-    for key in ("choice", "viz", "speed"):
+    for key in ("viz", "speed"):
         status = "yes" if caps[key] else "no"
         print(f"  {key:8s} {status}")
     if caps["missing_extras"]:

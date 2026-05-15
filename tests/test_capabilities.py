@@ -9,19 +9,21 @@ from skdr_eval import capabilities as cap_module
 def test_get_capabilities_schema():
     caps = skdr_eval.get_capabilities()
     assert isinstance(caps, dict)
-    for key in ("choice", "viz", "speed"):
+    for key in ("viz", "speed"):
         assert key in caps
         assert isinstance(caps[key], bool)
+    # 'choice' is intentionally absent: scipy is a mandatory dep.
+    assert "choice" not in caps
     assert "missing_extras" in caps
     assert isinstance(caps["missing_extras"], list)
     assert all(isinstance(x, str) for x in caps["missing_extras"])
     assert caps["missing_extras"] == sorted(caps["missing_extras"])
 
 
-def test_choice_capability_matches_scipy_presence():
+def test_viz_capability_matches_matplotlib_presence():
     caps = skdr_eval.get_capabilities()
-    has_scipy = importlib.util.find_spec("scipy") is not None
-    assert caps["choice"] is has_scipy
+    has_matplotlib = importlib.util.find_spec("matplotlib") is not None
+    assert caps["viz"] is has_matplotlib
 
 
 def test_missing_extras_listed_when_module_absent(monkeypatch):
@@ -48,7 +50,6 @@ def test_no_missing_extras_when_all_present(monkeypatch):
     monkeypatch.setattr(cap_module.importlib.util, "find_spec", all_present)
     caps = cap_module.get_capabilities()
     assert caps["missing_extras"] == []
-    assert caps["choice"] is True
     assert caps["viz"] is True
     assert caps["speed"] is True
 
@@ -59,5 +60,5 @@ def test_find_spec_value_error_treated_as_missing(monkeypatch):
 
     monkeypatch.setattr(cap_module.importlib.util, "find_spec", raises)
     caps = cap_module.get_capabilities()
-    assert caps["choice"] is False
-    assert caps["missing_extras"] == sorted(["choice", "viz", "speed"])
+    assert caps["viz"] is False
+    assert caps["missing_extras"] == sorted(["speed", "viz"])

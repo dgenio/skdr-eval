@@ -26,7 +26,7 @@ We use **GitHub Flow**: short-lived feature branches off `main`, merged back via
   - `test (3.13)` - Python 3.13 tests
   - `test (3.14)` - Python 3.14 tests
   - `examples-smoke` - quickstart/preflight examples
-  - `choice-extra-smoke` - smoke under `[choice]` extra
+  - `viz-extra-smoke` - smoke under `[viz]` extra
   - `build` - package build + twine check
 
 #### Additional restrictions
@@ -49,7 +49,7 @@ After setting up branch protection, verify by:
 # Protect main branch
 gh api repos/:owner/:repo/branches/main/protection \
   --method PUT \
-  --field required_status_checks='{"strict":true,"contexts":["test (3.11)","test (3.12)","test (3.13)","test (3.14)","examples-smoke","choice-extra-smoke","build"]}' \
+  --field required_status_checks='{"strict":true,"contexts":["test (3.11)","test (3.12)","test (3.13)","test (3.14)","examples-smoke","viz-extra-smoke","build"]}' \
   --field enforce_admins=true \
   --field required_pull_request_reviews='{"required_approving_review_count":1,"dismiss_stale_reviews":true}' \
   --field restrictions=null

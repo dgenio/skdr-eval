@@ -9,14 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Public preflight validators** — new `skdr_eval.validate_logs(logs, *, cli_pref, st_pref, strict)` and `skdr_eval.validate_pairwise_inputs(logs_df, op_daily_df, *, metric_col, ...)` raise typed `DataValidationError` / `InsufficientDataError` on schema problems before evaluation begins. Strict mode adds monotonic-timestamp and elig-mask sanity checks. ([#24])
-- **`skdr_eval.get_capabilities()`** — side-effect-free detection of optional extras (`choice`, `viz`, `speed`). Returns booleans plus a `missing_extras` list pointing at the install command needed to enable each disabled capability. ([#26])
+- **`skdr_eval.get_capabilities()`** — side-effect-free detection of optional extras (`viz`, `speed`). Returns booleans plus a `missing_extras` list pointing at the install command needed to enable each disabled capability. ([#26])
 - **Temporal split controls** — `gap`, `test_size`, and `max_train_size` keyword-only arguments are now plumbed through `fit_propensity_timecal`, `fit_outcome_crossfit`, `estimate_propensity_pairwise`, `evaluate_sklearn_models`, and `evaluate_pairwise_models`. The new default is `gap=1` (conservative adjacent-row leakage guard). ([#29])
 - **`examples/preflight.py`** — runnable preflight script: capability dump + log + pairwise schema validation.
 
 ### Changed
 - **GitHub Flow.** Dropped the `develop` integration branch. All feature branches now branch off and merge back to `main`. CI no longer triggers on `develop`; branch-protection docs, `CONTRIBUTING.md`, `DEVELOPMENT.md`, and `scripts/validate_contribution.py` updated accordingly. ([#54])
 - **Python matrix tightened.** `requires-python = ">=3.11"`. Python 3.10 dropped from CI; ruff `target-version` bumped to `py311`, mypy `python_version` to `3.11`, black `target-version` to `py311`.
-- **CI smoke jobs.** New `examples-smoke` job runs `examples/preflight.py` and `examples/quickstart.py` under the default install; new `choice-extra-smoke` job installs `.[choice]` and asserts the `choice` capability is enabled. ([#25])
+- **CI smoke jobs.** New `examples-smoke` job runs `examples/preflight.py` and `examples/quickstart.py` under the default install; new `viz-extra-smoke` job installs `.[viz]` and asserts the `viz` capability is enabled. Mirrored locally as `make smoke`. ([#25])
+- **`matplotlib` moved from mandatory dependencies to the `[viz]` optional extra.** It was already wrapped in `try/except ImportError` at every import site, so the extra now reflects reality. Install with `pip install 'skdr-eval[viz]'` for plotting helpers and inline sensitivity sparklines.
 - **Breaking: `induce_policy_from_sklearn` dropped the unused `idx` parameter.** Callers should remove the final `eval_design.idx` argument. The function is now fully vectorized — one `model.predict` call per invocation instead of `O(n_samples × n_eligible_ops)` calls. ([#46])
 - **`induce_policy_stream_topk` is now fully day-vectorized.** The surrogate runs once per client-chunk (was once per client) and the function accepts a new `chunk_pairs` parameter controlling the per-day client-axis batch size. Output policies are unchanged on fixed seeds. ([#61], [#63])
 - **`induce_policy(strategy="stream_topk", chunk_pairs=...)` is no longer a no-op.** The value is now forwarded into the streaming top-K loop and caps the size of the per-chunk feature matrix to `chunk_pairs * 4 bytes * n_features`. ([#61])

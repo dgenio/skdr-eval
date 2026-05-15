@@ -475,17 +475,46 @@ def validate_logs(
             "logs eligibility columns must contain only 0/1 values"
         )
 
+    # Row-wise: the chosen action must be eligible on its own row, otherwise
+    # downstream estimators treat the observed action as outside support.
+    chosen_elig_cols = logs["action"].astype(str) + "_elig"
+    chosen_elig = np.array(
+        [
+            logs.at[idx, col]
+            for idx, col in zip(logs.index, chosen_elig_cols, strict=True)
+        ]
+    )
+    bad_rows = np.where(chosen_elig != 1)[0]
+    if bad_rows.size:
+        sample = bad_rows[:5].tolist()
+        raise DataValidationError(
+            f"{bad_rows.size} rows have a chosen action that is not eligible on "
+            f"its own row (positional indices, up to 5 shown): {sample}"
+        )
+
     feature_values = logs[feature_cols].to_numpy(dtype=float, copy=False)
     validate_finite_values(feature_values, "logs[feature_cols]")
 
     service_time = logs["service_time"].to_numpy(dtype=float, copy=False)
     validate_finite_values(service_time, "logs.service_time")
 
+    # arrival_ts must be numeric or datetime64 -- build_design uses
+    # ``.values.astype(float)`` which silently treats datetime64 as ns-since-
+    # epoch but raises on string columns. Match that contract here so the
+    # preflight cannot be a false negative.
+    ts_dtype = logs["arrival_ts"].dtype
+    if not (
+        pd.api.types.is_numeric_dtype(ts_dtype)
+        or pd.api.types.is_datetime64_any_dtype(ts_dtype)
+    ):
+        raise DataValidationError(
+            f"logs.arrival_ts must be numeric or datetime64, got {ts_dtype} "
+            "(build_design uses .values.astype(float) which rejects string "
+            "timestamps; convert with pd.to_datetime first)"
+        )
     arrival_ts = pd.to_datetime(logs["arrival_ts"], errors="coerce")
     if arrival_ts.isna().any():
-        raise DataValidationError(
-            "logs.arrival_ts contains values that cannot be parsed as timestamps"
-        )
+        raise DataValidationError("logs.arrival_ts contains NaT/NaN values")
 
     if strict:
         if not arrival_ts.is_monotonic_increasing:
@@ -576,11 +605,19 @@ def validate_pairwise_inputs(
         )
 
     if elig_col is not None and elig_col in logs_df.columns:
-        sample = logs_df[elig_col].dropna()
-        if not sample.empty and not isinstance(sample.iloc[0], (list, tuple, set)):
+        max_examples = 5
+        bad_type_rows: list[tuple[int, str]] = []
+        for pos, value in enumerate(logs_df[elig_col]):
+            if value is None or (isinstance(value, float) and np.isnan(value)):
+                continue
+            if not isinstance(value, (list, tuple, set)):
+                bad_type_rows.append((pos, type(value).__name__))
+                if len(bad_type_rows) >= max_examples:
+                    break
+        if bad_type_rows:
             raise DataValidationError(
-                f"logs_df[{elig_col!r}] must contain list/tuple/set values, "
-                f"got {type(sample.iloc[0]).__name__}"
+                f"logs_df[{elig_col!r}] must contain list/tuple/set values; "
+                f"offending (row, dtype) (up to {max_examples}): {bad_type_rows}"
             )
 
     metric_values = logs_df[metric_col].to_numpy(dtype=float, copy=False)
