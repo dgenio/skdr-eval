@@ -1058,6 +1058,7 @@ def _compute_contributions(
 
     dr_contrib = q_pi + w_clip * (Y - q_hat)
 
+    decision_id: np.ndarray
     if eval_log_indices is None:
         decision_id = np.arange(n, dtype=np.int64)
     else:
