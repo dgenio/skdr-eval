@@ -2,7 +2,7 @@
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
@@ -207,6 +207,14 @@ class DRResult:
         1st percentile of propensity scores.
     grid : pd.DataFrame
         Full grid of results across clipping thresholds.
+    contributions : dict[str, np.ndarray] | None, optional
+        Per-decision contributions captured at the selected clip. ``None``
+        unless the evaluator was called with ``keep_contributions=True`` or
+        ``ci_bootstrap=True``. Keys: ``decision_id`` (int row position into
+        the evaluated slice), ``q_pi``, ``q_hat``, ``weight``, ``reward``,
+        ``contribution_to_V``. By construction
+        ``contribution_to_V.mean() == V_hat`` to float64 precision for both
+        DR and SNDR (issue #92).
     """
 
     clip: float
@@ -221,6 +229,7 @@ class DRResult:
     pscore_q05: float
     pscore_q01: float
     grid: pd.DataFrame
+    contributions: dict[str, np.ndarray] | None = field(default=None)
 
 
 def build_design(
@@ -1002,6 +1011,118 @@ def dr_value_with_clip(
     return {"DR": dr_result, "SNDR": sndr_result}
 
 
+# Maximum number of evaluated decisions for which per-decision contributions
+# may be captured. At 5 float64 columns x 100M decisions x 2 estimators this is
+# ~8 GB; a higher value is a deliberate opt-in.
+DEFAULT_MAX_KEPT_CONTRIBUTIONS = 100_000_000
+
+
+def _compute_contributions(
+    propensities: np.ndarray,
+    policy_probs: np.ndarray,
+    Y: np.ndarray,
+    q_hat: np.ndarray,
+    A: np.ndarray,
+    elig: np.ndarray,
+    clip: float,
+    *,
+    eval_log_indices: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Recompute per-decision DR ingredients at a selected clip.
+
+    Returns ``(q_pi, w_clip, dr_contrib, decision_id, matched)`` arrays of
+    length ``n = len(Y)``. ``dr_contrib`` is the textbook DR pseudo-outcome
+    ``q_pi + w_clip * (Y - q_hat)``; ``mean(dr_contrib) == V_DR`` to float64
+    precision. ``decision_id`` is ``eval_log_indices`` if supplied (so
+    callers can join contributions back to the original logs after a
+    pre-split), else ``arange(n)``.
+
+    This helper exists so the new ``keep_contributions`` path (issue #92)
+    and the existing ``ci_bootstrap`` path share one code path — otherwise
+    the identity test ``mean(contribution_to_V) == V_hat`` could drift from
+    the value the bootstrap CI conditions on.
+    """
+    n = len(Y)
+    # q_pi == q_hat when q_hat is 1D; see design note in dr_value_with_clip.
+    q_pi = np.sum(policy_probs * q_hat.reshape(n, -1), axis=1)
+    pi_obs = propensities[np.arange(n), A]
+    A_int = A.astype(int)
+    elig_bool = elig.astype(bool)
+    matched = (pi_obs > 0) & elig_bool[np.arange(n), A_int]
+
+    if clip == float("inf"):
+        w_clip = np.where(pi_obs > 0, 1.0 / pi_obs, 0.0)
+    else:
+        w_clip = np.where(pi_obs > 0, np.minimum(1.0 / pi_obs, clip), 0.0)
+    w_clip[~matched] = 0
+
+    dr_contrib = q_pi + w_clip * (Y - q_hat)
+
+    if eval_log_indices is None:
+        decision_id = np.arange(n, dtype=np.int64)
+    else:
+        decision_id = np.asarray(eval_log_indices, dtype=np.int64)
+        if len(decision_id) != n:
+            raise DataValidationError(
+                f"eval_log_indices length {len(decision_id)} != n_decisions {n}",
+            )
+
+    return q_pi, w_clip, dr_contrib, decision_id, matched
+
+
+def _build_contributions_payload(
+    results: dict[str, "DRResult"],
+    propensities: np.ndarray,
+    policy_probs: np.ndarray,
+    Y: np.ndarray,
+    q_hat: np.ndarray,
+    A: np.ndarray,
+    elig: np.ndarray,
+    *,
+    eval_log_indices: np.ndarray | None,
+) -> dict[str, dict[str, np.ndarray]]:
+    """Build ``{estimator: contributions_dict}`` for every entry in ``results``.
+
+    DR uses the textbook pseudo-outcome ``q_pi + w*(Y - q_hat)`` whose mean
+    is ``V_DR``. SNDR rescales the residual term by ``n / Σw`` so that the
+    per-decision values average to the ratio estimator's ``V_SNDR``
+    (``q_pi.mean() + Σw*(Y-q_hat)/Σw``).
+    """
+    payload: dict[str, dict[str, np.ndarray]] = {}
+    for estimator_name, result in results.items():
+        q_pi, w_clip, dr_contrib, decision_id, _matched = _compute_contributions(
+            propensities,
+            policy_probs,
+            Y,
+            q_hat,
+            A,
+            elig,
+            result.clip,
+            eval_log_indices=eval_log_indices,
+        )
+
+        if estimator_name == "SNDR":
+            w_sum = float(w_clip.sum())
+            n = len(Y)
+            if w_sum > 0:
+                contribution_to_V = q_pi + (n * w_clip / w_sum) * (Y - q_hat)
+            else:
+                # SNDR fallback path matches dr_value_with_clip: q_pi.mean().
+                contribution_to_V = q_pi.copy()
+        else:
+            contribution_to_V = dr_contrib
+
+        payload[estimator_name] = {
+            "decision_id": decision_id,
+            "q_pi": q_pi,
+            "q_hat": np.asarray(q_hat, dtype=np.float64),
+            "weight": w_clip,
+            "reward": np.asarray(Y, dtype=np.float64),
+            "contribution_to_V": contribution_to_V,
+        }
+    return payload
+
+
 def block_bootstrap_ci(
     values_num: np.ndarray,
     values_den: np.ndarray | None,
@@ -1110,6 +1231,8 @@ def evaluate_sklearn_models(
     gap: int = 1,
     test_size: int | None = None,
     max_train_size: int | None = None,
+    keep_contributions: bool = False,
+    max_kept_contributions: int = DEFAULT_MAX_KEPT_CONTRIBUTIONS,
 ) -> "EvaluationArtifact":
     """Evaluate sklearn models using DR and SNDR estimators.
 
@@ -1146,6 +1269,16 @@ def evaluate_sklearn_models(
     support_thresholds : SupportHealthThresholds, optional
         Thresholds for support-health warnings attached to the returned
         artifact. See :class:`skdr_eval.reporting.SupportHealthThresholds`.
+    keep_contributions : bool, default=False
+        If True, attach per-decision DR/SNDR contributions to each
+        :class:`DRResult` under ``contributions`` and make them queryable via
+        :meth:`EvaluationArtifact.contributions` (issue #92). Default is
+        False to preserve the memory profile; ``ci_bootstrap=True``
+        auto-enables capture (the bootstrap path computes the same arrays).
+    max_kept_contributions : int, default=100_000_000
+        Hard cap on the number of evaluated decisions for which per-decision
+        contributions may be captured. Raises :class:`DataValidationError`
+        if ``n_eval`` exceeds this value while contributions are being kept.
 
     Returns
     -------
@@ -1159,6 +1292,9 @@ def evaluate_sklearn_models(
     ------
     ValueError
         If ``models`` is empty or contains ``None`` values.
+    DataValidationError
+        If ``keep_contributions`` (or ``ci_bootstrap``) is requested with
+        more than ``max_kept_contributions`` evaluated decisions.
     """
     if not models:
         raise ValueError("models dict must not be empty")
@@ -1196,6 +1332,22 @@ def evaluate_sklearn_models(
     else:
         train_design = design
         eval_design = design
+        n_train = 0
+
+    # Original-log row positions for the evaluated slice. Carried through to
+    # per-decision contributions so users can join back to ``logs`` (#92).
+    eval_log_indices = np.arange(n_train, n_train + len(eval_design.Y), dtype=np.int64)
+
+    # Contributions capture is implicit when ci_bootstrap=True (the bootstrap
+    # path already recomputes the same arrays).
+    keep_contribs = keep_contributions or ci_bootstrap
+    if keep_contribs and len(eval_log_indices) > max_kept_contributions:
+        raise DataValidationError(
+            f"keep_contributions requested for {len(eval_log_indices)} "
+            f"decisions, exceeding max_kept_contributions="
+            f"{max_kept_contributions}. Raise the cap explicitly or "
+            f"disable keep_contributions / ci_bootstrap.",
+        )
 
     # Fit propensity model
     propensities, _ = fit_propensity_timecal(
@@ -1250,6 +1402,23 @@ def evaluate_sklearn_models(
         )
 
         detailed_results[model_name] = results
+
+        # Attach per-decision contributions (#92). Does not alter the
+        # ci_bootstrap numerics below — that path recomputes its own
+        # ``dr_contrib`` inline to preserve historical CI values.
+        if keep_contribs:
+            contribs_payload = _build_contributions_payload(
+                results,
+                propensities,
+                policy_probs,
+                eval_design.Y,
+                q_hat,
+                eval_design.A,
+                eval_design.elig,
+                eval_log_indices=eval_log_indices,
+            )
+            for est_name, est_payload in contribs_payload.items():
+                results[est_name].contributions = est_payload
 
         # Add to report
         for estimator_name, result in results.items():
@@ -1724,6 +1893,8 @@ def evaluate_pairwise_models(
     gap: int = 1,
     test_size: int | None = None,
     max_train_size: int | None = None,
+    keep_contributions: bool = False,
+    max_kept_contributions: int = DEFAULT_MAX_KEPT_CONTRIBUTIONS,
 ) -> "EvaluationArtifact":
     """Evaluate pairwise models using autoscale strategy.
 
@@ -1808,6 +1979,16 @@ def evaluate_pairwise_models(
     support_thresholds : SupportHealthThresholds, optional
         Thresholds for support-health warnings attached to the returned
         artifact. See :class:`skdr_eval.reporting.SupportHealthThresholds`.
+    keep_contributions : bool, default=False
+        If True, attach per-decision DR/SNDR contributions to each
+        :class:`DRResult` under ``contributions`` and make them queryable
+        via :meth:`EvaluationArtifact.contributions` (issue #92). Default
+        is False to preserve the memory profile; ``ci_bootstrap=True``
+        auto-enables capture (the bootstrap path computes the same arrays).
+    max_kept_contributions : int, default=100_000_000
+        Hard cap on the number of evaluated decisions for which per-decision
+        contributions may be captured. Raises :class:`DataValidationError`
+        if ``n_eval`` exceeds this value while contributions are being kept.
 
     Returns
     -------
@@ -1816,6 +1997,12 @@ def evaluate_pairwise_models(
         ``sensitivity``, ``diagnostics``, and ``metadata``. **Breaking change
         in 0.6.0**: previously returned ``(report, detailed_results)``;
         migrate by unpacking ``artifact.report`` and ``artifact.detailed``.
+
+    Raises
+    ------
+    DataValidationError
+        If ``keep_contributions`` (or ``ci_bootstrap``) is requested with
+        more than ``max_kept_contributions`` evaluated decisions.
     """
 
     logger.info("Starting pairwise evaluation")
@@ -1990,6 +2177,19 @@ def evaluate_pairwise_models(
     # Convert policies to policy probabilities
     max_ops = max(len(ops) for ops in design.ops_all_by_day.values())
 
+    # Per-decision contributions plumbing (#92). pre_split sorts and
+    # re-indexes ``eval_logs_df`` so the original-log mapping is gone — the
+    # decision_id column is the within-evaluation-slice position.
+    keep_contribs = keep_contributions or ci_bootstrap
+    if keep_contribs and len(logs_df) > max_kept_contributions:
+        raise DataValidationError(
+            f"keep_contributions requested for {len(logs_df)} decisions, "
+            f"exceeding max_kept_contributions={max_kept_contributions}. "
+            f"Raise the cap explicitly or disable keep_contributions / "
+            f"ci_bootstrap.",
+        )
+    eval_log_indices_pair = np.arange(len(logs_df), dtype=np.int64)
+
     detailed_results = {}
     report_rows = []
 
@@ -2043,6 +2243,22 @@ def evaluate_pairwise_models(
             )
 
             detailed_results[model_name] = results
+
+            # Attach per-decision contributions (#92). Does not alter the
+            # ci_bootstrap numerics below.
+            if keep_contribs:
+                contribs_payload = _build_contributions_payload(
+                    results,
+                    propensities,
+                    policy_probs,
+                    Y.astype(np.float64),
+                    q_hat,
+                    A,
+                    elig,
+                    eval_log_indices=eval_log_indices_pair,
+                )
+                for est_name, est_payload in contribs_payload.items():
+                    results[est_name].contributions = est_payload
 
             # Add to report
             for estimator_name, result in results.items():
