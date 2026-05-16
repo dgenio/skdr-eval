@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **PSIS Pareto-k support-health diagnostic** ([#80]). Every `DRResult` and report row now carries `pareto_k`, the Generalized-Pareto shape parameter of the unclipped importance-weight tail (Vehtari, Simpson, Gelman, Yao & Gabry 2024, *Pareto Smoothed Importance Sampling*, JMLR 25:1–58). New warning code `HIGH_PARETO_K` fires as `caution` when `k ≥ 0.5` and escalates to `high_risk` when `k ≥ 0.7`. Thresholds tunable via `SupportHealthThresholds(high_pareto_k_caution=..., high_pareto_k=...)`. New public helper `skdr_eval.diagnostics.psis_pareto_k(weights)`.
+- **Propensity calibration diagnostics in card** ([#84]). `PropensityDiagnostics` now exposes 15-bin `ece` (Expected Calibration Error, Naeini, Cooper & Hauskrecht 2015), `brier_score` (multiclass), `reliability_curve`, and `ece_n_bins`. New warning code `MISCAL_PROP` fires as `caution` when `ECE > 0.10` and escalates to `high_risk` when `ECE > 0.20`. Thresholds tunable via `SupportHealthThresholds(miscal_ece=...)`. New public helpers in `skdr_eval.diagnostics`: `compute_propensity_ece`, `compute_propensity_brier`, `compute_propensity_reliability_curve`.
+- New columns in the HTML report/card (`pareto_k`, plus `ECE`/`Brier` on the propensity-diagnostics table) and a `Calibration` block in the card ([#84]).
+
 ### Changed
+- **Schema bump:** `SCHEMA_VERSION` `1.0.0 → 1.1.0`. Additive only — `_ReportRowSchema` and `_DiagnosticsPayloadSchema` use `None` defaults for the new fields, so 1.0.0 payloads load unchanged via `load_artifact_json`.
 - **Breaking: `induce_policy_from_sklearn` dropped the unused `idx` parameter.** Callers should remove the final `eval_design.idx` argument. The function is now fully vectorized — one `model.predict` call per invocation instead of `O(n_samples × n_eligible_ops)` calls. ([#46])
 - **`induce_policy_stream_topk` is now fully day-vectorized.** The surrogate runs once per client-chunk (was once per client) and the function accepts a new `chunk_pairs` parameter controlling the per-day client-axis batch size. Output policies are unchanged on fixed seeds. ([#61], [#63])
 - **`induce_policy(strategy="stream_topk", chunk_pairs=...)` is no longer a no-op.** The value is now forwarded into the streaming top-K loop and caps the size of the per-chunk feature matrix to `chunk_pairs * 4 bytes * n_features`. ([#61])
@@ -16,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`induce_policy_stream_topk` now raises `DataValidationError` on duplicate `operator_id` rows within a day.** The day-vectorized eligibility mask uses a `dict[operator_id -> position]`, which would otherwise silently drop earlier duplicate positions (last-write-wins) and diverge from the prior `isin(...)` semantics. Surface the ambiguity instead of papering over it, consistent with the fail-loud bias in `docs/agent-context/invariants.md`. ([#66] review)
 
 ### Tests
+- New `tests/test_diagnostics_trust.py` with simulation proofs that PSIS Pareto-k recovers known GPD shapes (`k ∈ {0.3, 0.7, 1.2}`), separates light- from heavy-tail weights, and that ECE → 0 under perfectly-calibrated DGPs and clears the 0.10 gate under temperature-distorted propensities. Required by `docs/agent-context/review-checklist.md` for any new statistical primitive.
+- Extended `tests/test_propensity_diagnostics.py` with unit tests for `psis_pareto_k`, `compute_propensity_ece`, `compute_propensity_brier`, and `compute_propensity_reliability_curve` (degenerate inputs, sample floors, hand-computed Brier fixture, backward-compat dataclass construction).
+- Extended `tests/test_reporting_artifact.py` with `HIGH_PARETO_K` / `MISCAL_PROP` threshold matrices, end-to-end column presence, and JSON round-trip coverage of the new fields.
 - New parity and call-count tests for both rewrites: `test_induce_policy_from_sklearn_vectorized_matches_scalar_reference`, `test_induce_policy_from_sklearn_issues_single_predict_call`, `test_stream_topk_surrogate_predict_call_count_per_day`, `test_stream_topk_chunk_pairs_controls_batching_and_preserves_policy`, `test_stream_topk_chunk_pairs_forwarded_through_induce_policy`.
 - New `test_stream_topk_duplicate_operator_ids_per_day_raises` covering the fail-loud precondition added to `_build_day_elig_mask` (PR #66 review).
 
@@ -23,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#61]: https://github.com/dgenio/skdr-eval/issues/61
 [#63]: https://github.com/dgenio/skdr-eval/issues/63
 [#66]: https://github.com/dgenio/skdr-eval/pull/66
+[#80]: https://github.com/dgenio/skdr-eval/issues/80
+[#84]: https://github.com/dgenio/skdr-eval/issues/84
 
 ## [0.6.0] - 2026-05-12
 

@@ -144,6 +144,11 @@ class DRResult:
         1st percentile of propensity scores.
     grid : pd.DataFrame
         Full grid of results across clipping thresholds.
+    pareto_k : float, default ``nan``
+        PSIS Pareto-k shape parameter (#80) estimated on the *unclipped*
+        importance weights of the matched subset. ``k < 0.5`` is reliable,
+        ``0.5 ≤ k < 0.7`` is caution, ``k ≥ 0.7`` is high-risk. ``nan`` when
+        the matched subset is too small to fit a tail.
     """
 
     clip: float
@@ -158,6 +163,7 @@ class DRResult:
     pscore_q05: float
     pscore_q01: float
     grid: pd.DataFrame
+    pareto_k: float = float("nan")
 
 
 def build_design(
@@ -806,6 +812,17 @@ def dr_value_with_clip(
     pscore_q05 = np.percentile(pi_matched, 5)
     pscore_q10 = np.percentile(pi_matched, 10)
 
+    # PSIS Pareto-k (#80): fit on the *unclipped* importance ratios for the
+    # matched subset.  This is the standard PSIS usage — the diagnostic is
+    # supposed to tell you whether the raw weights have a problematic tail,
+    # independent of any clipping the user might apply.  See Vehtari et al.
+    # 2024 (JMLR 25:1-58).  Defer the import to avoid a top-of-module circular
+    # cycle with reporting.py.
+    from .diagnostics import psis_pareto_k  # noqa: PLC0415
+
+    raw_weights_matched = 1.0 / pi_matched
+    pareto_k = psis_pareto_k(raw_weights_matched)
+
     for clip_val in clip_grid:
         # Compute clipped weights with safe division
         if clip_val == float("inf"):
@@ -891,6 +908,7 @@ def dr_value_with_clip(
         pscore_q05=float(pscore_q05),
         pscore_q01=float(pscore_q01),
         grid=grid_df,
+        pareto_k=float(pareto_k),
     )
 
     sndr_result = DRResult(
@@ -906,6 +924,7 @@ def dr_value_with_clip(
         pscore_q05=float(pscore_q05),
         pscore_q01=float(pscore_q01),
         grid=grid_df,
+        pareto_k=float(pareto_k),
     )
 
     return {"DR": dr_result, "SNDR": sndr_result}
@@ -1166,6 +1185,7 @@ def evaluate_sklearn_models(
                 "pscore_q10": result.pscore_q10,
                 "pscore_q05": result.pscore_q05,
                 "pscore_q01": result.pscore_q01,
+                "pareto_k": result.pareto_k,
             }
 
             # Add confidence intervals if requested
@@ -1922,6 +1942,7 @@ def evaluate_pairwise_models(
                     "pscore_q10": result.pscore_q10,
                     "pscore_q05": result.pscore_q05,
                     "pscore_q01": result.pscore_q01,
+                    "pareto_k": result.pareto_k,
                 }
 
                 if ci_bootstrap:

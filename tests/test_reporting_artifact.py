@@ -22,8 +22,10 @@ from skdr_eval.reporting import (
     SUPPORT_HIGH_RISK,
     SUPPORT_OK,
     WARN_EXTREME_CLIP,
+    WARN_HIGH_PARETO_K,
     WARN_LOW_ESS,
     WARN_LOW_MATCH_RATE,
+    WARN_MISCAL_PROP,
     WARN_POOR_OVERLAP,
     ArtifactSchema,
     EvaluationArtifact,
@@ -147,6 +149,8 @@ def _toy_report_row(**overrides):
         "pscore_q10": 0.6,
         "pscore_q05": 0.55,
         "pscore_q01": 0.5,
+        # nan pareto_k → no HIGH_PARETO_K warning (no-signal); overridable.
+        "pareto_k": float("nan"),
     }
     base.update(overrides)
     return base
@@ -234,6 +238,156 @@ def test_attach_warnings_custom_thresholds():
 def test_attach_warnings_rejects_zero_n_samples():
     with pytest.raises(DataValidationError):
         attach_warnings(pd.DataFrame([_toy_report_row()]), n_samples=0)
+
+
+# --------------------------------------------------------------------------- #
+# HIGH_PARETO_K (#80) and MISCAL_PROP (#84) — warning-code tests              #
+# --------------------------------------------------------------------------- #
+
+
+def test_attach_warnings_high_pareto_k_caution():
+    """0.5 ≤ k < 0.7 emits HIGH_PARETO_K as caution."""
+    enriched, warns = attach_warnings(
+        pd.DataFrame([_toy_report_row(pareto_k=0.6)]), n_samples=1000
+    )
+    assert enriched["support_health"].iloc[0] == "caution"
+    assert WARN_HIGH_PARETO_K in warns["warning_codes"].iloc[0]
+
+
+def test_attach_warnings_high_pareto_k_high_risk():
+    """k ≥ 0.7 escalates HIGH_PARETO_K to high_risk."""
+    enriched, warns = attach_warnings(
+        pd.DataFrame([_toy_report_row(pareto_k=0.85)]), n_samples=1000
+    )
+    assert enriched["support_health"].iloc[0] == SUPPORT_HIGH_RISK
+    assert WARN_HIGH_PARETO_K in warns["warning_codes"].iloc[0]
+
+
+def test_attach_warnings_pareto_k_nan_is_no_signal():
+    """nan pareto_k must not emit HIGH_PARETO_K."""
+    enriched, warns = attach_warnings(
+        pd.DataFrame([_toy_report_row(pareto_k=float("nan"))]), n_samples=1000
+    )
+    assert enriched["support_health"].iloc[0] == SUPPORT_OK
+    assert WARN_HIGH_PARETO_K not in warns["warning_codes"].iloc[0]
+
+
+def test_attach_warnings_pareto_k_below_caution_threshold_is_ok():
+    """k < 0.5 is healthy — no warning emitted."""
+    enriched, warns = attach_warnings(
+        pd.DataFrame([_toy_report_row(pareto_k=0.3)]), n_samples=1000
+    )
+    assert enriched["support_health"].iloc[0] == SUPPORT_OK
+    assert WARN_HIGH_PARETO_K not in warns["warning_codes"].iloc[0]
+
+
+def test_attach_warnings_miscal_prop_caution():
+    """ECE in (0.10, 0.20] emits MISCAL_PROP as caution."""
+    enriched, warns = attach_warnings(
+        pd.DataFrame([_toy_report_row(model="m")]),
+        n_samples=1000,
+        model_ece={"m": 0.15},
+    )
+    assert enriched["support_health"].iloc[0] == "caution"
+    assert WARN_MISCAL_PROP in warns["warning_codes"].iloc[0]
+
+
+def test_attach_warnings_miscal_prop_high_risk():
+    """ECE > 0.20 escalates MISCAL_PROP to high_risk."""
+    enriched, warns = attach_warnings(
+        pd.DataFrame([_toy_report_row(model="m")]),
+        n_samples=1000,
+        model_ece={"m": 0.30},
+    )
+    assert enriched["support_health"].iloc[0] == SUPPORT_HIGH_RISK
+    assert WARN_MISCAL_PROP in warns["warning_codes"].iloc[0]
+
+
+def test_attach_warnings_miscal_prop_nan_is_no_signal():
+    """nan / missing ECE must not emit MISCAL_PROP."""
+    enriched, warns = attach_warnings(
+        pd.DataFrame([_toy_report_row(model="m")]),
+        n_samples=1000,
+        model_ece={"m": float("nan")},
+    )
+    assert enriched["support_health"].iloc[0] == SUPPORT_OK
+    assert WARN_MISCAL_PROP not in warns["warning_codes"].iloc[0]
+
+    # Same when the model is simply missing from the ECE map.
+    enriched2, warns2 = attach_warnings(
+        pd.DataFrame([_toy_report_row(model="other")]),
+        n_samples=1000,
+        model_ece={"m": 0.50},  # huge ECE for a different model
+    )
+    assert enriched2["support_health"].iloc[0] == SUPPORT_OK
+    assert WARN_MISCAL_PROP not in warns2["warning_codes"].iloc[0]
+
+
+def test_attach_warnings_thresholds_configurable_pareto_k():
+    """Tightening high_pareto_k thresholds fires the warning at lower k."""
+    thresh = SupportHealthThresholds(high_pareto_k_caution=0.2, high_pareto_k=0.4)
+    enriched, _ = attach_warnings(
+        pd.DataFrame([_toy_report_row(pareto_k=0.45)]),
+        n_samples=1000,
+        thresholds=thresh,
+    )
+    # 0.45 > 0.4 → high_risk under the tightened threshold.
+    assert enriched["support_health"].iloc[0] == SUPPORT_HIGH_RISK
+
+
+def test_attach_warnings_thresholds_configurable_miscal_ece():
+    """Loosening miscal_ece silences MISCAL_PROP on borderline ECE values."""
+    thresh = SupportHealthThresholds(miscal_ece=0.40)
+    enriched, _ = attach_warnings(
+        pd.DataFrame([_toy_report_row(model="m")]),
+        n_samples=1000,
+        thresholds=thresh,
+        model_ece={"m": 0.30},
+    )
+    assert enriched["support_health"].iloc[0] == SUPPORT_OK
+
+
+# --------------------------------------------------------------------------- #
+# End-to-end: report + diagnostics carry the new fields                       #
+# --------------------------------------------------------------------------- #
+
+
+def test_report_includes_pareto_k_column():
+    art = _run_eval()
+    assert "pareto_k" in art.report.columns
+    # With synth data we expect a real number, but the diagnostic may return
+    # nan if the matched-set tail is too short — accept either, just verify
+    # type discipline.
+    for v in art.report["pareto_k"]:
+        if v is not None:
+            assert isinstance(float(v), float)
+
+
+def test_diagnostics_include_ece_and_brier():
+    art = _run_eval()
+    for _model_name, diag in art.diagnostics.items():
+        # Both metrics finite under healthy synth data with n=400.
+        assert math.isfinite(diag.ece), f"ECE not finite: {diag.ece}"
+        assert math.isfinite(diag.brier_score), f"Brier not finite: {diag.brier_score}"
+        assert 0.0 <= diag.ece <= 1.0
+        assert 0.0 <= diag.brier_score <= 2.0  # multiclass Brier upper bound
+        assert len(diag.reliability_curve) == diag.ece_n_bins
+
+
+def test_json_roundtrip_carries_new_fields(tmp_path: Path):
+    art = _run_eval()
+    p = tmp_path / "art.json"
+    art.to_json(p)
+    payload = json.loads(p.read_text())
+    # Pareto-k present on each report row (None when nan via _jsonable).
+    for row in payload["report"]:
+        assert "pareto_k" in row
+    # ECE/Brier present on each diagnostics entry.
+    for _name, diag_payload in payload["diagnostics"].items():
+        assert "ece" in diag_payload
+        assert "brier_score" in diag_payload
+        assert "reliability_curve" in diag_payload
+        assert diag_payload["ece_n_bins"] == 15
 
 
 def test_attach_warnings_rejects_missing_columns():
@@ -414,7 +568,8 @@ def test_schema_json_schema_is_stable():
 
 
 def test_schema_version_pinned():
-    assert SCHEMA_VERSION == "1.0.0"
+    # 1.1.0: additive trust diagnostics (#80 pareto_k, #84 ECE/Brier).
+    assert SCHEMA_VERSION == "1.1.0"
 
 
 # --------------------------------------------------------------------------- #

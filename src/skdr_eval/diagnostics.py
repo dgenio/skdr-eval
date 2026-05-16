@@ -1,6 +1,7 @@
 """Propensity score diagnostics for skdr-eval library."""
 
 import logging
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -19,10 +20,31 @@ _MIN_ACTION_COUNT_DISC = 5  # min samples in a group for discrimination
 _MIN_UNIQUE_LABELS = 2  # min unique binary labels for AUC
 _ZERO_VARIANCE_TOL = 1e-10  # tolerance for zero-variance equality check
 
+# ECE / Brier (#84) — 15-bin standard from Naeini et al. 2015 and Brier 1950.
+_ECE_DEFAULT_N_BINS = 15  # ECE bin count; matches torch.distributions and BBT 2015
+_MIN_ECE_N_BINS = 2  # minimum bin count; below this ECE is degenerate
+_MIN_SAMPLES_RELIABILITY = (
+    30  # min samples for ECE/Brier (more than _LARGE due to bin count)
+)
+_MIN_PARETO_K_TAIL_FRAC = (
+    0.2  # tail fraction targeted by PSIS (Vehtari et al. 2024, eq. 2.3)
+)
+_MAX_PARETO_K_TAIL_LEN = 200  # PSIS caps the tail length at 3 * sqrt(n) — we cap here
+_MIN_SAMPLES_PARETO_K = 25  # below this we cannot estimate a 5-point tail reliably
+_MIN_TAIL_LEN_FOR_GPD_FIT = 2  # GPD profile-likelihood is undefined below 2 exceedances
+
 
 @dataclass
 class PropensityDiagnostics:
-    """Container for propensity score diagnostic results."""
+    """Container for propensity score diagnostic results.
+
+    Notes
+    -----
+    The trust-additions fields (``ece``, ``brier_score``, ``reliability_curve``,
+    ``ece_n_bins``) were introduced for issue #84 and are populated by
+    :func:`comprehensive_propensity_diagnostics`. They default to ``nan`` /
+    empty for backward compatibility when constructed directly.
+    """
 
     overlap_ratio: float
     balance_ratio: float
@@ -34,6 +56,11 @@ class PropensityDiagnostics:
     calibration_curve: list[tuple[float, float]]
     roc_curve: list[tuple[float, float]]
     quantiles: dict[str, float] = field(default_factory=dict)
+    # --- Trust additions (#84): Expected Calibration Error + Brier score. ---
+    ece: float = float("nan")
+    brier_score: float = float("nan")
+    reliability_curve: list[tuple[float, float, int]] = field(default_factory=list)
+    ece_n_bins: int = _ECE_DEFAULT_N_BINS
 
 
 def check_propensity_overlap(propensities: np.ndarray, actions: np.ndarray) -> float:
@@ -405,6 +432,354 @@ def compute_propensity_log_loss(propensities: np.ndarray, actions: np.ndarray) -
     return float(log_loss(y_true, propensities))
 
 
+def compute_propensity_ece(
+    propensities: np.ndarray,
+    actions: np.ndarray,
+    n_bins: int = _ECE_DEFAULT_N_BINS,
+) -> float:
+    """Compute Expected Calibration Error (ECE) for the propensity model.
+
+    Implements the *top-1 confidence* ECE definition from Naeini, Cooper, &
+    Hauskrecht (2015) "Obtaining Well Calibrated Probabilities Using Bayesian
+    Binning" — the same form used by Guo et al. (2017) "On Calibration of
+    Modern Neural Networks":
+
+        conf[i]    = max_a pi(a | x_i)
+        pred[i]    = argmax_a pi(a | x_i)
+        correct[i] = 1 if pred[i] == a_i else 0
+        ECE        = sum_b (|B_b| / n) * |acc(B_b) - conf(B_b)|
+
+    where samples are binned by ``conf``, ``acc(B)`` is the empirical accuracy
+    inside the bin, and ``conf(B)`` is the mean predicted top-1 probability.
+    Under a DGP where actions ~ Categorical(π(· | x)), this ECE collapses to
+    0 in expectation because P(predᵢ = aᵢ | x_i, predᵢ = a) = π(a | x_i),
+    which is the confidence by definition.
+
+    Parameters
+    ----------
+    propensities : np.ndarray
+        Predicted propensities (n_samples, n_actions). Rows need not sum to 1
+        exactly, but each row should be a valid probability vector.
+    actions : np.ndarray
+        Observed action indices (n_samples,). Each entry must be a valid
+        action in ``range(n_actions)``.
+    n_bins : int, default=15
+        Number of equal-width probability bins. The 15-bin default matches the
+        Naeini et al. 2015 and Guo et al. 2017 conventions.
+
+    Returns
+    -------
+    float
+        ECE in [0, 1]. Lower is better; 0 means perfectly calibrated. Returns
+        ``nan`` if the sample is too small (``< _MIN_SAMPLES_RELIABILITY``).
+
+    Notes
+    -----
+    Bin edges span [0, 1]. The last bin is right-closed so samples with
+    ``max(π) = 1.0`` are not silently dropped. Empty bins contribute zero
+    to the sum (per the formula). For binary problems (n_actions=2) this
+    reduces to standard binary classifier ECE.
+    """
+    if len(propensities) != len(actions):
+        raise DataValidationError(
+            f"Propensities length {len(propensities)} doesn't match actions length {len(actions)}"
+        )
+    if n_bins < _MIN_ECE_N_BINS:
+        raise ConfigurationError(f"n_bins must be >= {_MIN_ECE_N_BINS}, got {n_bins}")
+
+    if len(propensities) < _MIN_SAMPLES_RELIABILITY:
+        return float("nan")
+
+    n = len(actions)
+    actions_int = actions.astype(int)
+    confidences = propensities.max(axis=1)
+    predictions = propensities.argmax(axis=1)
+    correctness = (predictions == actions_int).astype(float)
+
+    bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+    ece = 0.0
+    for i in range(n_bins):
+        if i == n_bins - 1:
+            mask = (confidences >= bin_edges[i]) & (confidences <= bin_edges[i + 1])
+        else:
+            mask = (confidences >= bin_edges[i]) & (confidences < bin_edges[i + 1])
+        count = int(mask.sum())
+        if count == 0:
+            continue
+        bin_conf = float(confidences[mask].mean())
+        bin_acc = float(correctness[mask].mean())
+        ece += (count / n) * abs(bin_acc - bin_conf)
+
+    return float(ece)
+
+
+def compute_propensity_brier(propensities: np.ndarray, actions: np.ndarray) -> float:
+    """Compute the multiclass Brier score for the propensity model.
+
+    Multiclass Brier score (Brier 1950; Stanford-Yates form):
+
+        BS = (1/n) · Σ_i Σ_a (π(a | x_i) - 1[a_i = a])²
+
+    Bounded in ``[0, 2]`` for K ≥ 2 actions. Lower is better; 0 means perfect.
+
+    Parameters
+    ----------
+    propensities : np.ndarray
+        Predicted propensities (n_samples, n_actions).
+    actions : np.ndarray
+        Observed action indices (n_samples,).
+
+    Returns
+    -------
+    float
+        Brier score. Returns ``nan`` if the sample is too small.
+    """
+    if len(propensities) != len(actions):
+        raise DataValidationError(
+            f"Propensities length {len(propensities)} doesn't match actions length {len(actions)}"
+        )
+
+    if len(propensities) < _MIN_SAMPLES_SMALL:
+        return float("nan")
+
+    n, k = propensities.shape
+    y_onehot = np.zeros((n, k), dtype=float)
+    y_onehot[np.arange(n), actions.astype(int)] = 1.0
+    sq = (propensities - y_onehot) ** 2
+    return float(sq.sum(axis=1).mean())
+
+
+def compute_propensity_reliability_curve(
+    propensities: np.ndarray,
+    actions: np.ndarray,
+    n_bins: int = _ECE_DEFAULT_N_BINS,
+) -> list[tuple[float, float, int]]:
+    """Compute the top-1 reliability curve underlying :func:`compute_propensity_ece`.
+
+    Returns one row per bin: ``(bin_mean_confidence, bin_accuracy, bin_count)``.
+    Empty bins are returned with ``bin_mean_confidence`` set to the bin centre,
+    ``bin_accuracy = nan``, and ``bin_count = 0`` so plotting code can decide
+    whether to skip them.
+
+    Parameters
+    ----------
+    propensities, actions, n_bins : see :func:`compute_propensity_ece`.
+
+    Returns
+    -------
+    list of (float, float, int)
+        Per-bin reliability triples ``(mean_predicted_top1, empirical_accuracy, count)``.
+    """
+    if len(propensities) != len(actions):
+        raise DataValidationError(
+            f"Propensities length {len(propensities)} doesn't match actions length {len(actions)}"
+        )
+    if n_bins < _MIN_ECE_N_BINS:
+        raise ConfigurationError(f"n_bins must be >= {_MIN_ECE_N_BINS}, got {n_bins}")
+
+    n = len(actions)
+    if n == 0:
+        return []
+
+    actions_int = actions.astype(int)
+    confidences = propensities.max(axis=1)
+    predictions = propensities.argmax(axis=1)
+    correctness = (predictions == actions_int).astype(float)
+    bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+    centres = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+    rows: list[tuple[float, float, int]] = []
+    for i in range(n_bins):
+        if i == n_bins - 1:
+            mask = (confidences >= bin_edges[i]) & (confidences <= bin_edges[i + 1])
+        else:
+            mask = (confidences >= bin_edges[i]) & (confidences < bin_edges[i + 1])
+        count = int(mask.sum())
+        if count == 0:
+            rows.append((float(centres[i]), float("nan"), 0))
+            continue
+        mean_pred = float(confidences[mask].mean())
+        bin_acc = float(correctness[mask].mean())
+        rows.append((mean_pred, bin_acc, count))
+
+    return rows
+
+
+def psis_pareto_k(weights: np.ndarray, min_tail_len: int = 5) -> float:
+    """Estimate the Pareto shape parameter ``k`` of the importance-weight tail.
+
+    Implements the PSIS Pareto-k diagnostic from Vehtari, Simpson, Gelman,
+    Yao, & Gabry (2024) "Pareto Smoothed Importance Sampling" (JMLR 25:1-58),
+    §2.2-2.3:
+
+    1. Sort raw importance weights in ascending order.
+    2. Take the top ``M = min(0.2·n, 3·sqrt(n))`` weights as the tail.
+    3. Subtract the threshold (the largest weight *below* the tail).
+    4. Fit a Generalized Pareto Distribution to those tail exceedances via
+       the profile-likelihood estimator of Zhang & Stephens (2009).
+
+    Returns ``k`` (the GPD shape parameter). The interpretation in the PSIS
+    paper:
+
+    - ``k < 0.5``: importance-sampling estimator has finite variance — trust it.
+    - ``0.5 ≤ k < 0.7``: variance is finite but slow to converge — caution.
+    - ``0.7 ≤ k < 1.0``: variance does not exist — high risk; results likely
+      driven by a few decisions.
+    - ``k ≥ 1.0``: mean of the importance weights does not exist; the
+      estimator is not reliable.
+
+    Parameters
+    ----------
+    weights : np.ndarray
+        Raw (unclipped) importance weights ``1 / π(a_observed | x)`` for the
+        matched subset.  Must be 1-D, non-negative, and finite.
+    min_tail_len : int, default=5
+        Minimum required tail length to attempt the GPD fit. Below this we
+        return ``nan`` (statistically meaningless).
+
+    Returns
+    -------
+    float
+        Estimated Pareto-k shape parameter, or ``nan`` if the weights are
+        degenerate (all equal, too few non-zero, or too few samples).
+    """
+    w = np.asarray(weights, dtype=float).ravel()
+    if w.size == 0:
+        return float("nan")
+    if not np.isfinite(w).all():
+        # The matched-set construction already drops zero-prob rows; any inf
+        # here means an upstream caller forgot to clip — surface that loudly.
+        raise DataValidationError("psis_pareto_k: weights contain non-finite values")
+    if (w < 0).any():
+        raise DataValidationError("psis_pareto_k: weights must be non-negative")
+
+    n = w.size
+    if n < _MIN_SAMPLES_PARETO_K:
+        return float("nan")
+
+    sorted_w = np.sort(w)
+    # Tail length: min(0.2 * n, 3 * sqrt(n)), capped at _MAX_PARETO_K_TAIL_LEN
+    # to keep the GPD fit fast on very large samples (Vehtari et al. §2.3).
+    tail_len = int(min(_MIN_PARETO_K_TAIL_FRAC * n, 3.0 * math.sqrt(n)))
+    tail_len = min(tail_len, _MAX_PARETO_K_TAIL_LEN, n - 1)
+    if tail_len < min_tail_len:
+        return float("nan")
+
+    threshold = sorted_w[-(tail_len + 1)]
+    tail = sorted_w[-tail_len:] - threshold
+
+    # Degenerate tail (e.g., all weights equal at top) — k is undefined.
+    if tail[-1] <= 0:
+        return float("nan")
+
+    return float(_gpd_fit_zhang_stephens(tail))
+
+
+def _gpd_fit_zhang_stephens(exceedances: np.ndarray) -> float:
+    """Estimate the GPD shape parameter k via Zhang & Stephens (2009).
+
+    Implements the profile-likelihood / empirical-Bayes estimator from
+    Zhang & Stephens (2009) "A New and Efficient Estimation Method for the
+    Generalized Pareto Distribution" (Technometrics, 51:3, 316-325). This is
+    the estimator recommended by Vehtari et al. (2024) for PSIS because it is
+    bias-corrected for small samples and stable when ``k -> 0``.
+
+    Notation matches the paper: the exceedances are ``x_1 <= ... <= x_n``, the
+    profile grid is over ``theta`` (with theta = k/sigma) not over ``k``, and
+    ``k`` is recovered from theta_hat via ``k = -mean(log(1 - theta_hat * x_i))``.
+
+    Parameters
+    ----------
+    exceedances : np.ndarray
+        Strictly positive tail exceedances (already threshold-subtracted),
+        sorted ascending.
+
+    Returns
+    -------
+    float
+        Estimated shape parameter ``k``. Sign convention: ``k > 0`` corresponds
+        to a heavy upper tail (the case PSIS warns about). Returns ``nan`` if
+        the fit is numerically degenerate (<= 1 exceedance, all-equal exceedances,
+        or anchor failure).
+    """
+    x = np.asarray(exceedances, dtype=float)
+    n = x.size
+    # Degenerate-input bailout — kept as one return-nan branch so we stay
+    # under ruff's PLR0911 6-return cap.  Conditions: too few exceedances;
+    # threshold-subtraction left no positive value; or the lower-quartile
+    # anchor is zero (the grid would degenerate).
+    if n < _MIN_TAIL_LEN_FOR_GPD_FIT or x[-1] <= 0:
+        return float("nan")
+
+    # Zhang & Stephens (2009) profile-likelihood grid: build m candidate values
+    # of theta and take the posterior-weighted mean.  ``m = 20 + floor(sqrt(n))``
+    # follows the paper's default (Section 3, equation 7).  math.floor / math.ceil
+    # already return ints, so the int(...) wrapping is unnecessary (RUF046).
+    m = 20 + math.floor(math.sqrt(n))
+    # Anchor ``x_star`` per ArviZ / PyMC: x_{ceil(n/4)} (lower quartile of the
+    # tail).  The original paper uses x_{n - floor(sqrt(n))} for the upper
+    # anchor; the lower-quartile variant is numerically more stable because
+    # most theta_j collapse onto 1/x_max with the upper anchor.
+    star_idx = max(1, math.ceil(n / 4)) - 1  # 0-based
+    x_star = x[star_idx]
+    x_max = x[-1]
+    if x_star <= 0:
+        # Fold into the same nan path as the top-of-function guard.
+        return float("nan")
+
+    # Build the theta grid: theta_j = 1/x_max + (1 - sqrt(m/(j-0.5))) / (3*x_star).
+    j = np.arange(1, m + 1, dtype=float)
+    theta = 1.0 / x_max + (1.0 - np.sqrt(m / (j - 0.5))) / (3.0 * x_star)
+
+    # k(theta) = -mean(log(1 - theta * x_i))   (Zhang & Stephens profile MLE for k)
+    # log L(theta) = n * (log(theta / k(theta)) + k(theta) - 1)
+    #                derived by concentrating out sigma; equivalent to Zhang &
+    #                Stephens equation 5 after collecting sigma_hat = k_hat/theta.
+    # In the Zhang & Stephens GPD parametrization ``k < 0`` corresponds to a
+    # heavy upper tail (unbounded support); we negate at the end so the
+    # returned value matches the PSIS convention ``k > 0 = heavy tail``
+    # (Vehtari et al. 2024, Section 2.2).
+    one_minus_tx = 1.0 - np.outer(theta, x)
+    invalid = (one_minus_tx <= 0).any(axis=1)
+    one_minus_tx_safe = np.where(one_minus_tx > 0, one_minus_tx, 1.0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        k_theta = -np.log(one_minus_tx_safe).mean(axis=1)
+        # theta and k_theta always carry the same sign at the MLE (both
+        # negative for heavy tail, both positive for bounded tail) because
+        # k_theta(theta) = -E[log(1 - theta * x)] is a monotone function of
+        # theta passing through 0 at theta = 0.  Their ratio is therefore
+        # non-negative and log is well-defined except at theta = 0 (excluded
+        # from the grid for n >= 2).
+        ratio = np.where(k_theta != 0, theta / k_theta, np.nan)
+        log_lik = n * (np.log(np.where(ratio > 0, ratio, np.nan)) + k_theta - 1.0)
+    log_lik = np.where(invalid, -np.inf, log_lik)
+    log_lik = np.where(np.isfinite(log_lik), log_lik, -np.inf)
+
+    # Combine the "no valid log-likelihood" branches into one nan-return path
+    # so the function stays under ruff's PLR0911 6-return cap.  All three
+    # failure modes — non-finite max, zero total weight, post-fit inside <= 0
+    # — leave theta_hat undefined.
+    log_lik_max = log_lik.max()
+    theta_hat: float | None = None
+    if np.isfinite(log_lik_max):
+        weights = np.exp(log_lik - log_lik_max)
+        total = weights.sum()
+        if total > 0:
+            theta_hat = float((theta * weights).sum() / total)
+    if theta_hat is None:
+        return float("nan")
+
+    if theta_hat == 0.0:
+        return 0.0
+    inside = 1.0 - theta_hat * x
+    if (inside <= 0).any():
+        return float("nan")
+    # Zhang & Stephens convention: k_hat negative iff heavy upper tail.
+    # Convert to PSIS convention (k > 0 iff heavy tail).
+    k_hat_zs = float(-np.log(inside).mean())
+    return -k_hat_zs
+
+
 def comprehensive_propensity_diagnostics(
     propensities: np.ndarray, actions: np.ndarray, n_bins: int = 10
 ) -> PropensityDiagnostics:
@@ -445,6 +820,16 @@ def comprehensive_propensity_diagnostics(
     statistics = compute_propensity_statistics(propensities, actions)
     balance_stats = compute_balance_statistics(propensities, actions)
 
+    # Trust additions (#84): industry-standard ECE + multiclass Brier.
+    # ECE uses 15 bins (BBT 2015 convention); Brier is the standard multiclass
+    # form.  Both fail gracefully (nan) on samples smaller than _MIN_SAMPLES_RELIABILITY
+    # rather than raising — diagnostics should never break an otherwise valid run.
+    ece = compute_propensity_ece(propensities, actions, n_bins=_ECE_DEFAULT_N_BINS)
+    brier_score = compute_propensity_brier(propensities, actions)
+    reliability_curve = compute_propensity_reliability_curve(
+        propensities, actions, n_bins=_ECE_DEFAULT_N_BINS
+    )
+
     return PropensityDiagnostics(
         overlap_ratio=overlap_ratio,
         balance_ratio=balance_ratio,
@@ -455,6 +840,10 @@ def comprehensive_propensity_diagnostics(
         balance_stats=balance_stats,
         calibration_curve=calibration_curve,
         roc_curve=roc_curve,
+        ece=ece,
+        brier_score=brier_score,
+        reliability_curve=reliability_curve,
+        ece_n_bins=_ECE_DEFAULT_N_BINS,
     )
 
 

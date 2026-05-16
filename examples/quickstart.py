@@ -158,6 +158,19 @@ def main():
     print("-" * 50)
     print(artifact.warnings.to_string(index=False))
 
+    # 8a. Trust diagnostics (#80, #84): PSIS Pareto-k + propensity calibration
+    print("\n8a. Trust diagnostics (PSIS Pareto-k + propensity calibration)")
+    print("-" * 50)
+    pareto_cols = [
+        c for c in ("model", "estimator", "pareto_k") if c in artifact.report.columns
+    ]
+    print(artifact.report[pareto_cols].to_string(index=False))
+    for model_name, diag in artifact.diagnostics.items():
+        print(
+            f"   {model_name}: ECE={diag.ece:.4f}  Brier={diag.brier_score:.4f}  "
+            f"(15-bin)"
+        )
+
     # 9. Clip-grid sensitivity summary
     print("\n9. Clip-grid sensitivity (from artifact.sensitivity)")
     print("-" * 50)

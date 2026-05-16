@@ -12,10 +12,15 @@ from skdr_eval.diagnostics import (
     check_propensity_overlap,
     comprehensive_propensity_diagnostics,
     compute_balance_statistics,
+    compute_propensity_brier,
+    compute_propensity_ece,
     compute_propensity_log_loss,
+    compute_propensity_reliability_curve,
     compute_propensity_statistics,
     generate_propensity_report,
+    psis_pareto_k,
 )
+from skdr_eval.exceptions import ConfigurationError, DataValidationError
 
 
 def test_propensity_overlap():
@@ -319,6 +324,150 @@ def test_diagnostics_integration():
     assert 0 <= diagnostics.balance_ratio <= 1
     assert diagnostics.calibration_score >= 0
     assert 0 <= diagnostics.discrimination_score <= 1
+
+
+# --------------------------------------------------------------------------- #
+# Trust-additions (#80 PSIS Pareto-k, #84 ECE/Brier) — unit tests             #
+# --------------------------------------------------------------------------- #
+
+
+def test_psis_pareto_k_returns_nan_when_sample_too_small():
+    """Below the per-tail sample floor, the diagnostic is statistically meaningless."""
+    weights = np.array([1.0, 2.0, 3.0, 4.0, 5.0])  # n=5 < _MIN_SAMPLES_PARETO_K
+    assert not np.isfinite(psis_pareto_k(weights))
+
+
+def test_psis_pareto_k_rejects_non_finite_weights():
+    """Inf / NaN weights are an upstream bug — we surface it rather than silently filter."""
+    rng = np.random.default_rng(0)
+    weights = rng.uniform(1.0, 2.0, size=200)
+    weights[10] = np.inf
+    with pytest.raises(DataValidationError, match="non-finite"):
+        psis_pareto_k(weights)
+
+
+def test_psis_pareto_k_rejects_negative_weights():
+    """Importance weights are 1/π and must be non-negative."""
+    weights = np.array([1.0, 2.0, 3.0, -0.5] * 100)
+    with pytest.raises(DataValidationError, match="non-negative"):
+        psis_pareto_k(weights)
+
+
+def test_psis_pareto_k_light_tail_below_threshold():
+    """Bounded weights (uniform) have a very light tail; PSIS k should be < 0.5."""
+    rng = np.random.default_rng(seed=12)
+    weights = rng.uniform(1.0, 2.0, size=2000)
+    k = psis_pareto_k(weights)
+    assert np.isfinite(k)
+    assert k < 0.5, f"light-tail Pareto-k {k:.3f} should sit well below 0.5"
+
+
+def test_psis_pareto_k_finite_and_one_dimensional_acceptance():
+    """Acceptable input: 1-D, finite, non-negative weights, sufficient sample."""
+    rng = np.random.default_rng(seed=3)
+    weights = rng.uniform(1.0, 5.0, size=500)
+    k = psis_pareto_k(weights)
+    assert np.isfinite(k)
+
+
+def test_compute_propensity_ece_calibrated_low():
+    """ECE on perfectly-calibrated synthetic propensities is at the noise floor."""
+    rng = np.random.default_rng(seed=2024)
+    n = 3000
+    n_actions = 4
+    propensities = rng.dirichlet([1.0] * n_actions, size=n)
+    # Sample actions from the propensities themselves → perfectly calibrated.
+    cdf = np.cumsum(propensities, axis=1)
+    u = rng.uniform(size=(n, 1))
+    actions = (u <= cdf).argmax(axis=1)
+
+    ece = compute_propensity_ece(propensities, actions, n_bins=15)
+    assert 0.0 <= ece <= 0.05, f"calibrated ECE should be small, got {ece:.4f}"
+
+
+def test_compute_propensity_ece_rejects_invalid_n_bins():
+    """``n_bins < 2`` is a misuse and must raise rather than silently return junk."""
+    rng = np.random.default_rng(seed=0)
+    p = rng.dirichlet([1.0, 1.0, 1.0], size=50)
+    a = rng.integers(0, 3, size=50)
+    with pytest.raises(ConfigurationError, match="n_bins must be"):
+        compute_propensity_ece(p, a, n_bins=1)
+
+
+def test_compute_propensity_ece_returns_nan_for_tiny_samples():
+    """Below ``_MIN_SAMPLES_RELIABILITY`` the diagnostic is meaningless."""
+    rng = np.random.default_rng(seed=0)
+    p = rng.dirichlet([1.0, 1.0, 1.0], size=10)
+    a = rng.integers(0, 3, size=10)
+    assert not np.isfinite(compute_propensity_ece(p, a))
+
+
+def test_compute_propensity_brier_hand_computed_value():
+    """Brier score on a hand-computed fixture for byte-exact correctness.
+
+    Two samples, two actions:
+      sample 0: π = [0.8, 0.2], observed A=0 → (0.8-1)² + (0.2-0)² = 0.04 + 0.04 = 0.08
+      sample 1: π = [0.3, 0.7], observed A=1 → (0.3-0)² + (0.7-1)² = 0.09 + 0.09 = 0.18
+    Mean over 2 samples: (0.08 + 0.18) / 2 = 0.13.
+    """
+    propensities = np.array([[0.8, 0.2], [0.3, 0.7]])
+    actions = np.array([0, 1])
+    # Hand-computed Brier — Note: function raises on tiny samples too,
+    # but min for Brier is _MIN_SAMPLES_SMALL=5; replicate 3 times for the floor.
+    propensities = np.tile(propensities, (3, 1))
+    actions = np.tile(actions, 3)
+    brier = compute_propensity_brier(propensities, actions)
+    assert brier == pytest.approx(0.13, abs=1e-12)
+
+
+def test_compute_propensity_reliability_curve_shape():
+    """Reliability curve returns exactly ``n_bins`` rows of (mean_pred, frac, count)."""
+    rng = np.random.default_rng(seed=4)
+    n_bins = 10
+    p = rng.dirichlet([1.0, 1.0], size=200)
+    a = rng.integers(0, 2, size=200)
+    curve = compute_propensity_reliability_curve(p, a, n_bins=n_bins)
+    assert len(curve) == n_bins
+    for mean_pred, _frac, count in curve:
+        assert 0.0 <= mean_pred <= 1.0 or np.isnan(mean_pred)
+        assert isinstance(count, int)
+        assert count >= 0
+
+
+def test_comprehensive_diagnostics_populates_new_fields():
+    """``comprehensive_propensity_diagnostics`` must populate ECE/Brier/reliability."""
+    rng = np.random.default_rng(seed=5)
+    n = 500
+    n_actions = 3
+    p = rng.dirichlet([1.0] * n_actions, size=n)
+    cdf = np.cumsum(p, axis=1)
+    u = rng.uniform(size=(n, 1))
+    a = (u <= cdf).argmax(axis=1)
+
+    diag = comprehensive_propensity_diagnostics(p, a)
+    assert np.isfinite(diag.ece), "ECE should be finite for a reasonable sample"
+    assert np.isfinite(diag.brier_score), "Brier should be finite"
+    assert len(diag.reliability_curve) == diag.ece_n_bins
+    assert diag.ece_n_bins == 15
+
+
+def test_propensity_diagnostics_defaults_are_backward_compatible():
+    """Direct construction without the new fields must still succeed (existing callers)."""
+    diag = PropensityDiagnostics(
+        overlap_ratio=0.8,
+        balance_ratio=0.7,
+        calibration_score=0.9,
+        discrimination_score=0.85,
+        log_loss_score=0.5,
+        statistics={"min_pscore": 0.05},
+        balance_stats={"action_0_count": 100.0},
+        calibration_curve=[(0.5, 0.5)],
+        roc_curve=[(0.0, 0.0), (1.0, 1.0)],
+    )
+    assert np.isnan(diag.ece)
+    assert np.isnan(diag.brier_score)
+    assert diag.reliability_curve == []
+    assert diag.ece_n_bins == 15  # default
 
 
 if __name__ == "__main__":
