@@ -2033,15 +2033,26 @@ def evaluate_pairwise_models(
     # Optional pre_split: fit policy models on training portion, evaluate on
     # held-out tail. This avoids training-on-test leakage when fit_models=True.
     eval_logs_df = logs_df
+    # Track original-log positions for the eval slice so per-decision
+    # contributions can be joined back to the user's input ``logs_df`` via the
+    # documented ``logs.reset_index(names="decision_id")`` pattern. For
+    # ``policy_train="all"``, the eval slice IS the input, so the identity
+    # mapping is correct.
+    eval_log_indices_pair: np.ndarray = np.arange(len(logs_df), dtype=np.int64)
     if fit_models and policy_train == "pre_split":
-        # Sort by day to respect time order, then split chronologically
-        sorted_logs = logs_df.sort_values(by=day_col, kind="stable").reset_index(
-            drop=True
-        )
+        # Sort by day to respect time order, then split chronologically.
+        # Capture the permutation so the eval-slice rows still carry their
+        # positional indices into the user's input ``logs_df`` (issue #92,
+        # acceptance criterion: original log columns are joinable back).
+        positions = logs_df.reset_index(drop=True)
+        sorted_with_pos = positions.sort_values(by=day_col, kind="stable")
+        sort_order = sorted_with_pos.index.to_numpy()
+        sorted_logs = sorted_with_pos.reset_index(drop=True)
         n_total = len(sorted_logs)
         n_train = max(1, int(n_total * policy_train_frac))
         train_logs = sorted_logs.iloc[:n_train].reset_index(drop=True)
         eval_logs_df = sorted_logs.iloc[n_train:].reset_index(drop=True)
+        eval_log_indices_pair = sort_order[n_train:].astype(np.int64)
         if len(eval_logs_df) == 0:
             raise ValueError(
                 f"pre_split left 0 evaluation rows (n_total={n_total}, "
@@ -2184,16 +2195,26 @@ def evaluate_pairwise_models(
 
     # Per-decision contributions plumbing (#92). Opt-in only; ci_bootstrap
     # keeps its own local arrays and does not attach a payload to DRResult.
-    # pre_split sorts and re-indexes ``eval_logs_df`` so the original-log
-    # mapping is gone — the decision_id column is the within-evaluation-slice
-    # position.
+    # ``eval_log_indices_pair`` was established up at the pre_split block and
+    # carries each eval-slice row's positional index into the *original*
+    # ``logs_df`` so users can ``merge(frame, logs.reset_index(names=
+    # "decision_id"))`` against their full input even after a pre_split.
     if keep_contributions and len(logs_df) > max_kept_contributions:
         raise DataValidationError(
             f"keep_contributions requested for {len(logs_df)} decisions, "
             f"exceeding max_kept_contributions={max_kept_contributions}. "
             f"Raise the cap explicitly or disable keep_contributions.",
         )
-    eval_log_indices_pair = np.arange(len(logs_df), dtype=np.int64)
+    # Defensive sanity check: ``logs_df`` was rebound to ``design.logs_df``
+    # above; its length must match the slice ``eval_log_indices_pair`` was
+    # built for. Mismatch would indicate an unexpected re-ordering inside
+    # PairwiseDesign.from_dataframes.
+    if len(eval_log_indices_pair) != len(logs_df):
+        raise DataValidationError(
+            f"internal: eval_log_indices_pair length "
+            f"{len(eval_log_indices_pair)} != design.logs_df length "
+            f"{len(logs_df)}; contributions decision_id would be wrong"
+        )
 
     detailed_results = {}
     report_rows = []

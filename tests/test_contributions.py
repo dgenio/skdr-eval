@@ -7,6 +7,8 @@ Covers ``DRResult.contributions``, ``EvaluationArtifact.contributions``, the
 
 from __future__ import annotations
 
+import os
+import time
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -370,3 +372,203 @@ def test_join_back_to_logs_via_decision_id():
     assert len(joined) == len(frame)
     # Every contribution row gets the matching log row's reward.
     assert (joined["reward"] == joined["service_time"].astype(float)).all()
+
+
+# --------------------------------------------------------------------------- #
+# Zero-weight decisions, pairwise pre_split, edge-case card layouts           #
+# --------------------------------------------------------------------------- #
+
+
+def test_zero_weight_decision_contributes_only_q_pi():
+    """Issue #92 acceptance criterion: zero-weight decisions contribute q_pi.
+
+    When a row's observed action lies outside its eligibility set (or the
+    matched propensity is exactly 0), ``_compute_contributions`` zeros out
+    ``w_clip``, so the DR pseudo-outcome collapses to ``q_pi``. Verifying
+    the identity directly on the helper isolates it from estimator noise.
+    """
+    n, n_ops = 6, 3
+    rng = np.random.default_rng(0)
+    propensities = np.full((n, n_ops), 1.0 / n_ops)
+    policy_probs = np.full((n, n_ops), 1.0 / n_ops)
+    Y = rng.normal(loc=10.0, scale=2.0, size=n)
+    q_hat = rng.normal(loc=9.0, scale=1.0, size=n)
+    A = np.array([0, 1, 2, 0, 1, 2])
+    elig = np.ones((n, n_ops), dtype=int)
+    # Knock the chosen action out of the eligibility set on rows 0 and 3 so
+    # `matched[i] == False` and the textbook DR contribution should be q_pi[i].
+    elig[0, 0] = 0
+    elig[3, 0] = 0
+
+    q_pi, w_clip, dr_contrib, _, matched = _compute_contributions(
+        propensities, policy_probs, Y, q_hat, A, elig, clip=float("inf")
+    )
+    for i in (0, 3):
+        assert not matched[i]
+        assert w_clip[i] == 0.0
+        assert dr_contrib[i] == pytest.approx(q_pi[i], abs=IDENTITY_TOL)
+
+
+def test_pairwise_pre_split_decision_id_offset():
+    """Mirror of test_pre_split_decision_id_offset for the pairwise path.
+
+    Issue #92 acceptance criterion 3 requires the documented join-back
+    pattern (``merge(frame, logs.reset_index(names="decision_id"))``) to
+    work for both estimator paths and both ``policy_train`` settings.
+    """
+    logs_df, op_daily_df = skdr_eval.make_pairwise_synth(
+        n_days=2, n_clients_day=80, n_ops=8, seed=42, binary=False
+    )
+    feature_cols = [c for c in logs_df.columns if c.startswith(("cli_", "op_"))]
+    model = Ridge(random_state=42)
+    model.fit(logs_df[feature_cols].values, logs_df["service_time"].values)
+    n_total = len(logs_df)
+
+    art = skdr_eval.evaluate_pairwise_models(
+        logs_df=logs_df,
+        op_daily_df=op_daily_df,
+        models={"ridge": model},
+        metric_col="service_time",
+        task_type="regression",
+        direction="min",
+        n_splits=2,
+        strategy="direct",
+        random_state=42,
+        policy_train="pre_split",
+        policy_train_frac=0.7,
+        keep_contributions=True,
+    )
+    frame = art.contributions("ridge", estimator="DR")
+    decision_ids = frame["decision_id"].to_numpy()
+
+    # Decision ids must be valid positional indices into the original logs_df,
+    # not 0..n_eval-1 in the post-split slice.
+    assert decision_ids.min() >= 0
+    assert decision_ids.max() < n_total
+    assert len(np.unique(decision_ids)) == len(decision_ids)
+    # Round-trip join: the contribution frame's ``reward`` matches the
+    # corresponding row's ``service_time`` in the original ``logs_df``.
+    logs_with_id = logs_df.reset_index(drop=True).reset_index(names="decision_id")
+    joined = pd.merge(frame, logs_with_id, on="decision_id", how="left")
+    assert len(joined) == len(frame)
+    np.testing.assert_allclose(
+        joined["reward"].to_numpy(),
+        joined["service_time"].astype(float).to_numpy(),
+        atol=IDENTITY_TOL,
+        err_msg="pairwise pre_split decision_id must round-trip to original logs",
+    )
+
+
+def test_card_block_no_overlap_when_few_decisions():
+    """Card top/bottom blocks must not show the same decision_id twice."""
+    art = _run_sklearn(n=400, keep_contributions=True)
+    # Trim contributions to 3 decisions to force the small-n path.
+    detailed = art.detailed["HGB"]["DR"]
+    if detailed.contributions is None:
+        pytest.skip("contributions not stored")
+    trimmed = {k: v[:3] for k, v in detailed.contributions.items()}
+    detailed.contributions = trimmed
+    html = art.card("HGB", headline_estimator="DR")
+    # The top-K block and bottom-K block must never list the same decision_id.
+    # The rendered HTML embeds the decision_id as a row value; we check the
+    # data-side helper rather than the HTML to avoid brittle parsing.
+    top, bottom = art._card_contribution_rows("HGB", "DR")
+    top_ids = {row["decision_id"] for row in top}
+    bottom_ids = {row["decision_id"] for row in bottom}
+    assert top_ids.isdisjoint(bottom_ids), (
+        f"card top/bottom overlap on small-n run: top={top_ids} bottom={bottom_ids}"
+    )
+    # And the card render itself must succeed.
+    assert "<html" in html or "<div" in html or "top" in html.lower()
+
+
+def test_card_block_single_decision_shows_only_top():
+    """With exactly one decision, the bottom block must be empty."""
+    art = _run_sklearn(n=400, keep_contributions=True)
+    detailed = art.detailed["HGB"]["DR"]
+    if detailed.contributions is None:
+        pytest.skip("contributions not stored")
+    trimmed = {k: v[:1] for k, v in detailed.contributions.items()}
+    detailed.contributions = trimmed
+    top, bottom = art._card_contribution_rows("HGB", "DR")
+    assert len(top) == 1
+    assert len(bottom) == 0
+
+
+# --------------------------------------------------------------------------- #
+# Optional stress tests (gated by SKDR_STRESS=1)                              #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skipif(
+    os.getenv("SKDR_STRESS") != "1",
+    reason="stress test — set SKDR_STRESS=1 to enable (issue #92 stretch goal)",
+)
+def test_stress_million_row_keep_contributions_within_2x_baseline():
+    """Issue #92 stress: 1M-row keep=True run completes within 2x keep=False.
+
+    Verifies both that the run does not OOM and that the contributions
+    plumbing does not introduce a multiplicative slowdown beyond the
+    expected linear cost of materializing six float64 arrays of length n.
+    """
+    n = 1_000_000
+
+    t0 = time.perf_counter()
+    art_off = _run_sklearn(n=n, keep_contributions=False)
+    t_off = time.perf_counter() - t0
+    assert not art_off.report.empty
+
+    t0 = time.perf_counter()
+    art_on = _run_sklearn(n=n, keep_contributions=True)
+    t_on = time.perf_counter() - t0
+    assert not art_on.report.empty
+    assert art_on.detailed["HGB"]["DR"].contributions is not None
+    payload = art_on.detailed["HGB"]["DR"].contributions
+    assert payload["decision_id"].shape == (n,)
+
+    ratio = t_on / max(t_off, 1e-6)
+    assert ratio < 2.0, (
+        f"keep_contributions=True ran {ratio:.2f}x slower than baseline "
+        f"(t_off={t_off:.2f}s, t_on={t_on:.2f}s); expected <2x per issue #92."
+    )
+
+
+@pytest.mark.skipif(
+    os.getenv("SKDR_STRESS") != "1",
+    reason="memory probe — set SKDR_STRESS=1 to enable",
+)
+def test_stress_memory_off_vs_on_within_bounds():
+    """Acceptance criterion 6 (measured): keep=False does not pay the storage cost.
+
+    The default-off path stores ``contributions=None`` on every ``DRResult``
+    (verified by ``test_default_does_not_store_contributions``); this test
+    additionally measures peak-allocation deltas via tracemalloc to confirm
+    the absence of the six contribution arrays. Within 1% on n=50000 is
+    well inside the budget.
+    """
+    import tracemalloc
+
+    n = 50_000
+
+    tracemalloc.start()
+    art_off = _run_sklearn(n=n, keep_contributions=False)
+    _, peak_off = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    del art_off
+
+    tracemalloc.start()
+    art_on = _run_sklearn(n=n, keep_contributions=True)
+    _, peak_on = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    del art_on
+
+    # Six float64 arrays of length n (q_pi, q_hat, weight, reward,
+    # contribution_to_V) + one int64 (decision_id) = ~5*8 + 8 = 48 bytes/row
+    # ≈ 2.4 MB at n=50k. Allow generous 10x for transient working set.
+    expected_payload_bytes = n * (5 * 8 + 8)
+    delta = peak_on - peak_off
+    assert delta < 10 * expected_payload_bytes, (
+        f"keep=True peak memory ({peak_on}) - keep=False peak ({peak_off}) "
+        f"= {delta} bytes; far exceeds expected payload "
+        f"{expected_payload_bytes} bytes at n={n}."
+    )

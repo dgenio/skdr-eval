@@ -820,10 +820,23 @@ class EvaluationArtifact:
             return [], []
         contrib = result.contributions["contribution_to_V"]
         decision_id = result.contributions["decision_id"]
-        n_show = min(5, len(contrib))
-        if n_show == 0:
+        n_contrib = len(contrib)
+        if n_contrib == 0:
             return [], []
         order = np.argsort(contrib)
+        if n_contrib == 1:
+            # Only one decision: show it as a single top contributor, no
+            # bottom block — otherwise the same id would render in both.
+            return [
+                {
+                    "decision_id": int(decision_id[order[0]]),
+                    "contribution_to_V": float(contrib[order[0]]),
+                }
+            ], []
+        # Partition into two non-overlapping halves so the card never shows the
+        # same decision in both "top contributors" and "bottom detractors" when
+        # n_contrib < 10. Each block caps at 5.
+        n_show = min(5, n_contrib // 2)
         bottom_idx = order[:n_show]
         top_idx = order[-n_show:][::-1]
         top = [
