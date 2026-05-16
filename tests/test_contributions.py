@@ -1,8 +1,8 @@
 """Tests for per-decision contributions (issue #92).
 
 Covers ``DRResult.contributions``, ``EvaluationArtifact.contributions``, the
-``keep_contributions`` flag and its implicit activation via ``ci_bootstrap``,
-the ``max_kept_contributions`` memory guard, and the card top-K block.
+``keep_contributions`` flag, its independence from ``ci_bootstrap``, the
+``max_kept_contributions`` memory guard, and the card top-K block.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import Ridge
 
 import skdr_eval
+from skdr_eval.core import _compute_contributions
 from skdr_eval.exceptions import DataValidationError
 
 if TYPE_CHECKING:
@@ -172,18 +173,79 @@ def test_top_k_zero_raises():
         art.contributions("HGB", estimator="DR", top_k=0)
 
 
+def test_top_k_negative_raises():
+    art = _run_sklearn(keep_contributions=True)
+    with pytest.raises(DataValidationError, match="positive integer"):
+        art.contributions("HGB", estimator="DR", top_k=-3)
+
+
+def test_compute_contributions_unbounded_clip():
+    # Exercise the clip==inf branch of _compute_contributions.
+    rng = np.random.default_rng(0)
+    n, k = 16, 3
+    propensities = rng.uniform(0.1, 0.9, size=(n, k))
+    propensities /= propensities.sum(axis=1, keepdims=True)
+    policy_probs = np.eye(k)[rng.integers(0, k, size=n)]
+    Y = rng.normal(size=n)
+    q_hat = rng.normal(size=n)
+    A = rng.integers(0, k, size=n)
+    elig = np.ones((n, k))
+    q_pi, w_clip, dr_contrib, decision_id, matched = _compute_contributions(
+        propensities, policy_probs, Y, q_hat, A, elig, clip=float("inf")
+    )
+    assert q_pi.shape == (n,)
+    assert w_clip.shape == (n,)
+    assert dr_contrib.shape == (n,)
+    assert decision_id.tolist() == list(range(n))
+    assert matched.all()
+
+
+def test_compute_contributions_log_indices_length_mismatch_raises():
+    rng = np.random.default_rng(0)
+    n = 8
+    propensities = np.full((n, 2), 0.5)
+    policy_probs = np.zeros((n, 2))
+    policy_probs[:, 0] = 1.0
+    Y = rng.normal(size=n)
+    q_hat = rng.normal(size=n)
+    A = np.zeros(n, dtype=int)
+    elig = np.ones((n, 2))
+    with pytest.raises(DataValidationError, match="length"):
+        _compute_contributions(
+            propensities,
+            policy_probs,
+            Y,
+            q_hat,
+            A,
+            elig,
+            clip=10.0,
+            eval_log_indices=np.arange(n - 1, dtype=np.int64),
+        )
+
+
 # --------------------------------------------------------------------------- #
-# Implicit activation by ci_bootstrap                                         #
+# Independence from ci_bootstrap                                              #
 # --------------------------------------------------------------------------- #
 
 
-def test_ci_bootstrap_implies_keep_contributions():
+def test_ci_bootstrap_does_not_auto_attach_contributions():
+    # ci_bootstrap=True must not silently retain contributions on DRResult —
+    # existing CI callers don't opt into the contributions feature and the
+    # extra memory would surprise them.
     art = _run_sklearn(ci_bootstrap=True)
-    frame = art.contributions("HGB", estimator="DR")
-    assert set(frame.columns) == set(REQUIRED_COLUMNS)
-    # CI columns from ci_bootstrap are unaffected by the contributions plumbing.
     assert "ci_lower" in art.report.columns
     assert "ci_upper" in art.report.columns
+    for est_name in ("DR", "SNDR"):
+        assert art.detailed["HGB"][est_name].contributions is None
+    with pytest.raises(DataValidationError, match="not available"):
+        art.contributions("HGB", estimator="DR")
+
+
+def test_keep_contributions_and_ci_bootstrap_combine():
+    art = _run_sklearn(keep_contributions=True, ci_bootstrap=True)
+    assert "ci_lower" in art.report.columns
+    frame = art.contributions("HGB", estimator="DR")
+    assert set(frame.columns) == set(REQUIRED_COLUMNS)
 
 
 # --------------------------------------------------------------------------- #

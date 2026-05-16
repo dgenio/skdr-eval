@@ -778,8 +778,8 @@ class EvaluationArtifact:
         diag_payload = _diag_to_payload(diag) if diag is not None else None
 
         # Top contributors / detractors block (#92). Available when the
-        # evaluator was called with keep_contributions=True or
-        # ci_bootstrap=True; otherwise the lists stay empty.
+        # evaluator was called with keep_contributions=True; otherwise the
+        # lists stay empty.
         top_contributors, bottom_detractors = self._card_contribution_rows(
             model_name, headline_estimator
         )
@@ -921,7 +921,7 @@ class EvaluationArtifact:
         selected ``(model_name, estimator)`` row in :attr:`report`.
 
         Only available when the evaluator was called with
-        ``keep_contributions=True`` or ``ci_bootstrap=True``.
+        ``keep_contributions=True``.
 
         Parameters
         ----------
@@ -962,7 +962,7 @@ class EvaluationArtifact:
         if payload is None:
             raise DataValidationError(
                 "per-decision contributions are not available; re-run with "
-                "keep_contributions=True (or ci_bootstrap=True).",
+                "keep_contributions=True.",
             )
 
         frame = pd.DataFrame({col: payload[col] for col in self._CONTRIBUTION_COLUMNS})

@@ -1109,7 +1109,10 @@ def _build_contributions_payload(
                 contribution_to_V = q_pi + (n * w_clip / w_sum) * (Y - q_hat)
             else:
                 # SNDR fallback path matches dr_value_with_clip: q_pi.mean().
-                contribution_to_V = q_pi.copy()
+                # Unreachable from the public API because dr_value_with_clip
+                # raises ValueError("No matched samples found") before
+                # returning when w_clip.sum() would be 0.
+                contribution_to_V = q_pi.copy()  # pragma: no cover
         else:
             contribution_to_V = dr_contrib
 
@@ -1272,10 +1275,10 @@ def evaluate_sklearn_models(
         artifact. See :class:`skdr_eval.reporting.SupportHealthThresholds`.
     keep_contributions : bool, default=False
         If True, attach per-decision DR/SNDR contributions to each
-        :class:`DRResult` under ``contributions`` and make them queryable via
-        :meth:`EvaluationArtifact.contributions` (issue #92). Default is
-        False to preserve the memory profile; ``ci_bootstrap=True``
-        auto-enables capture (the bootstrap path computes the same arrays).
+        :class:`DRResult` under ``contributions`` and make them queryable
+        via :meth:`EvaluationArtifact.contributions` (issue #92). Default
+        is False to preserve the memory profile. Independent of
+        ``ci_bootstrap``: enabling bootstrap CIs does not attach a payload.
     max_kept_contributions : int, default=100_000_000
         Hard cap on the number of evaluated decisions for which per-decision
         contributions may be captured. Raises :class:`DataValidationError`
@@ -1294,8 +1297,8 @@ def evaluate_sklearn_models(
     ValueError
         If ``models`` is empty or contains ``None`` values.
     DataValidationError
-        If ``keep_contributions`` (or ``ci_bootstrap``) is requested with
-        more than ``max_kept_contributions`` evaluated decisions.
+        If ``keep_contributions=True`` is set with more than
+        ``max_kept_contributions`` evaluated decisions.
     """
     if not models:
         raise ValueError("models dict must not be empty")
@@ -1339,15 +1342,16 @@ def evaluate_sklearn_models(
     # per-decision contributions so users can join back to ``logs`` (#92).
     eval_log_indices = np.arange(n_train, n_train + len(eval_design.Y), dtype=np.int64)
 
-    # Contributions capture is implicit when ci_bootstrap=True (the bootstrap
-    # path already recomputes the same arrays).
-    keep_contribs = keep_contributions or ci_bootstrap
-    if keep_contribs and len(eval_log_indices) > max_kept_contributions:
+    # Contributions capture is opt-in via keep_contributions. The
+    # ci_bootstrap path keeps its own local arrays (see below) and does not
+    # attach a payload to DRResult, so existing CI callers see no change in
+    # retained memory.
+    if keep_contributions and len(eval_log_indices) > max_kept_contributions:
         raise DataValidationError(
             f"keep_contributions requested for {len(eval_log_indices)} "
             f"decisions, exceeding max_kept_contributions="
             f"{max_kept_contributions}. Raise the cap explicitly or "
-            f"disable keep_contributions / ci_bootstrap.",
+            f"disable keep_contributions.",
         )
 
     # Fit propensity model
@@ -1404,10 +1408,10 @@ def evaluate_sklearn_models(
 
         detailed_results[model_name] = results
 
-        # Attach per-decision contributions (#92). Does not alter the
-        # ci_bootstrap numerics below — that path recomputes its own
-        # ``dr_contrib`` inline to preserve historical CI values.
-        if keep_contribs:
+        # Attach per-decision contributions (#92). Opt-in only; does not
+        # interact with the ci_bootstrap path, which uses its own local
+        # arrays inline to preserve historical CI values.
+        if keep_contributions:
             contribs_payload = _build_contributions_payload(
                 results,
                 propensities,
@@ -2002,8 +2006,8 @@ def evaluate_pairwise_models(
     Raises
     ------
     DataValidationError
-        If ``keep_contributions`` (or ``ci_bootstrap``) is requested with
-        more than ``max_kept_contributions`` evaluated decisions.
+        If ``keep_contributions=True`` is set with more than
+        ``max_kept_contributions`` evaluated decisions.
     """
 
     logger.info("Starting pairwise evaluation")
@@ -2178,16 +2182,16 @@ def evaluate_pairwise_models(
     # Convert policies to policy probabilities
     max_ops = max(len(ops) for ops in design.ops_all_by_day.values())
 
-    # Per-decision contributions plumbing (#92). pre_split sorts and
-    # re-indexes ``eval_logs_df`` so the original-log mapping is gone — the
-    # decision_id column is the within-evaluation-slice position.
-    keep_contribs = keep_contributions or ci_bootstrap
-    if keep_contribs and len(logs_df) > max_kept_contributions:
+    # Per-decision contributions plumbing (#92). Opt-in only; ci_bootstrap
+    # keeps its own local arrays and does not attach a payload to DRResult.
+    # pre_split sorts and re-indexes ``eval_logs_df`` so the original-log
+    # mapping is gone — the decision_id column is the within-evaluation-slice
+    # position.
+    if keep_contributions and len(logs_df) > max_kept_contributions:
         raise DataValidationError(
             f"keep_contributions requested for {len(logs_df)} decisions, "
             f"exceeding max_kept_contributions={max_kept_contributions}. "
-            f"Raise the cap explicitly or disable keep_contributions / "
-            f"ci_bootstrap.",
+            f"Raise the cap explicitly or disable keep_contributions.",
         )
     eval_log_indices_pair = np.arange(len(logs_df), dtype=np.int64)
 
@@ -2245,9 +2249,8 @@ def evaluate_pairwise_models(
 
             detailed_results[model_name] = results
 
-            # Attach per-decision contributions (#92). Does not alter the
-            # ci_bootstrap numerics below.
-            if keep_contribs:
+            # Attach per-decision contributions (#92). Opt-in only.
+            if keep_contributions:
                 contribs_payload = _build_contributions_payload(
                     results,
                     propensities,
