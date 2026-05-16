@@ -74,9 +74,12 @@ def _make_time_series_split(
     observations in time-ordered data — it prevents the fold immediately
     following the training cut from touching the last training row.
     """
-    if not isinstance(n_splits, int) or n_splits < 2:
+    # n_splits >= 2 is a TimeSeriesSplit precondition; surface it eagerly
+    # with our typed error rather than letting sklearn raise deep in .split().
+    _MIN_SPLITS = 2
+    if not isinstance(n_splits, int) or n_splits < _MIN_SPLITS:
         raise DataValidationError(
-            f"n_splits must be an integer >= 2, got {n_splits!r}"
+            f"n_splits must be an integer >= {_MIN_SPLITS}, got {n_splits!r}"
         )
     if not isinstance(gap, int) or gap < 0:
         raise DataValidationError(f"gap must be a non-negative integer, got {gap!r}")

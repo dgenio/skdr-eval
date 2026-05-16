@@ -335,7 +335,7 @@ def test_temporal_split_controls_stochastic_outcome_consistency():
         dr_rows = artifact.report[artifact.report["estimator"] == "DR"]
         assert len(dr_rows) == 1, f"expected one DR row, got {len(dr_rows)}"
         v_hat = float(dr_rows.iloc[0]["V_hat"])
-        se = float(dr_rows.iloc[0]["SE"])
+        se = float(dr_rows.iloc[0]["SE_if"])
         assert np.isfinite(v_hat) and np.isfinite(se) and se > 0
         estimates.append((gap, v_hat, se))
 
