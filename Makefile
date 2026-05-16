@@ -89,8 +89,8 @@ release-check: clean check build
 # Git workflow helpers
 feature:
 	@read -p "Enter feature name: " feature_name; \
-	git checkout develop && \
-	git pull origin develop && \
+	git checkout main && \
+	git pull origin main && \
 	git checkout -b feature/$$feature_name
 
 hotfix:

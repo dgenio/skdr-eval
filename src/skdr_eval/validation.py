@@ -477,13 +477,16 @@ def validate_logs(
 
     # Row-wise: the chosen action must be eligible on its own row, otherwise
     # downstream estimators treat the observed action as outside support.
-    chosen_elig_cols = logs["action"].astype(str) + "_elig"
-    chosen_elig = np.array(
-        [
-            logs.at[idx, col]
-            for idx, col in zip(logs.index, chosen_elig_cols, strict=True)
-        ]
-    )
+    # Vectorized positional lookup over the elig sub-matrix: action -> column
+    # index inside ``elig_values`` (already materialized above), then a single
+    # ``take_along_axis``-style gather across the matrix. Avoids the O(n)
+    # Python list comprehension over ``logs.at[idx, col]`` that became the
+    # dominant preflight cost on large logs (>100k rows). The earlier
+    # ``invalid_actions`` guard means every chosen action has a matching
+    # elig column, so ``Categorical.codes`` cannot return -1 here.
+    chosen_elig_cols = (logs["action"].astype(str) + "_elig").to_numpy()
+    chosen_pos = pd.Categorical(chosen_elig_cols, categories=elig_cols).codes
+    chosen_elig = elig_values[np.arange(len(logs)), chosen_pos]
     bad_rows = np.where(chosen_elig != 1)[0]
     if bad_rows.size:
         sample = bad_rows[:5].tolist()

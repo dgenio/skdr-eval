@@ -301,3 +301,49 @@ def test_temporal_split_controls_recover_ground_truth_pairwise(kwargs):
         f"Pairwise DR={v_dr:.6f} failed to recover ground-truth V*={c} under "
         f"temporal controls {kwargs}"
     )
+
+
+def test_temporal_split_controls_stochastic_outcome_consistency():
+    """Stochastic-outcome smoke: varying ``gap`` must not move ``V_DR`` more
+    than a few standard errors.
+
+    The constant-outcome identity tests above prove the IPS residual collapses
+    exactly when Y is constant — but that substitution is degenerate, since
+    ``V_DR = mean(q_pi)`` regardless of fold layout. This complement test
+    keeps the original stochastic ``service_time`` outcome and verifies
+    that swapping ``gap`` in {0, 1, 5} on the same data + seed does not
+    shift V_DR by more than ``3 * max(SE)`` -- the gap-induced fold variance
+    must remain dominated by sample variance for the estimator to be calibrated.
+
+    A regression in the threading (e.g. ``gap`` not propagated into one of the
+    two CV layers) would cause a stale fold layout to be reused for one
+    estimator but not the other, producing a much larger spread.
+    """
+    logs, _ops, _ = skdr_eval.make_synth_logs(n=3000, n_ops=3, seed=7)
+    model = HistGradientBoostingRegressor(max_iter=30, random_state=0)
+
+    estimates: list[tuple[int, float, float]] = []
+    for gap in (0, 1, 5):
+        artifact = skdr_eval.evaluate_sklearn_models(
+            logs=logs,
+            models={"hgb": model},
+            fit_models=True,
+            n_splits=3,
+            random_state=0,
+            gap=gap,
+        )
+        dr_rows = artifact.report[artifact.report["estimator"] == "DR"]
+        assert len(dr_rows) == 1, f"expected one DR row, got {len(dr_rows)}"
+        v_hat = float(dr_rows.iloc[0]["V_hat"])
+        se = float(dr_rows.iloc[0]["SE"])
+        assert np.isfinite(v_hat) and np.isfinite(se) and se > 0
+        estimates.append((gap, v_hat, se))
+
+    v_hats = np.array([e[1] for e in estimates])
+    max_se = max(e[2] for e in estimates)
+    spread = float(v_hats.max() - v_hats.min())
+    assert spread < 3.0 * max_se, (
+        f"V_DR spread {spread:.4f} across gap in [0, 1, 5] exceeds 3 * max_SE "
+        f"{3 * max_se:.4f}; estimates = "
+        + ", ".join(f"gap={g}: V={v:.4f}+/-{s:.4f}" for g, v, s in estimates)
+    )

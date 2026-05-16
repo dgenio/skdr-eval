@@ -74,6 +74,10 @@ def _make_time_series_split(
     observations in time-ordered data — it prevents the fold immediately
     following the training cut from touching the last training row.
     """
+    if not isinstance(n_splits, int) or n_splits < 2:
+        raise DataValidationError(
+            f"n_splits must be an integer >= 2, got {n_splits!r}"
+        )
     if not isinstance(gap, int) or gap < 0:
         raise DataValidationError(f"gap must be a non-negative integer, got {gap!r}")
     if test_size is not None and (not isinstance(test_size, int) or test_size <= 0):
