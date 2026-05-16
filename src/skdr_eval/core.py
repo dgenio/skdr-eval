@@ -1,8 +1,9 @@
 """Core implementation of DR and Stabilized DR for offline policy evaluation."""
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
     from .reporting import EvaluationArtifact, SupportHealthThresholds
@@ -52,6 +53,68 @@ from .validation import (
 )
 
 logger = logging.getLogger("skdr_eval")
+
+
+def _make_time_series_split(
+    n_samples: int,
+    n_splits: int,
+    *,
+    gap: int = 1,
+    test_size: int | None = None,
+    max_train_size: int | None = None,
+) -> TimeSeriesSplit:
+    """Build a ``TimeSeriesSplit`` with validated temporal-split controls.
+
+    ``gap``, ``test_size``, and ``max_train_size`` are passed straight through
+    to :class:`sklearn.model_selection.TimeSeriesSplit`; we only enforce
+    pre-conditions that would otherwise surface as opaque sklearn errors deep
+    in fold iteration.
+
+    The default ``gap=1`` is a conservative leakage guard for adjacent
+    observations in time-ordered data — it prevents the fold immediately
+    following the training cut from touching the last training row.
+    """
+    # n_splits >= 2 is a TimeSeriesSplit precondition; surface it eagerly
+    # with our typed error rather than letting sklearn raise deep in .split().
+    _MIN_SPLITS = 2
+    if not isinstance(n_splits, int) or n_splits < _MIN_SPLITS:
+        raise DataValidationError(
+            f"n_splits must be an integer >= {_MIN_SPLITS}, got {n_splits!r}"
+        )
+    if not isinstance(gap, int) or gap < 0:
+        raise DataValidationError(f"gap must be a non-negative integer, got {gap!r}")
+    if test_size is not None and (not isinstance(test_size, int) or test_size <= 0):
+        raise DataValidationError(
+            f"test_size must be a positive integer or None, got {test_size!r}"
+        )
+    if max_train_size is not None and (
+        not isinstance(max_train_size, int) or max_train_size <= 0
+    ):
+        raise DataValidationError(
+            f"max_train_size must be a positive integer or None, got {max_train_size!r}"
+        )
+
+    # Feasibility: sklearn's TimeSeriesSplit needs n_samples > n_splits *
+    # test_size + gap. We also enforce the n_splits * 2 floor so every fold
+    # contains at least one train sample even when test_size is implicit.
+    effective_test = test_size if test_size is not None else 1
+    min_required = max(
+        n_splits * 2,
+        n_splits * effective_test + gap + 1,
+    )
+    if n_samples < min_required:
+        raise InsufficientDataError(
+            f"Need at least {min_required} samples for "
+            f"n_splits={n_splits}, gap={gap}, test_size={test_size}; "
+            f"got {n_samples}"
+        )
+
+    return TimeSeriesSplit(
+        n_splits=n_splits,
+        gap=gap,
+        test_size=test_size,
+        max_train_size=max_train_size,
+    )
 
 
 # Type definitions for better type safety
@@ -285,6 +348,10 @@ def fit_propensity_timecal(
     ts: np.ndarray | None = None,
     n_splits: int = 3,
     random_state: int = 0,
+    *,
+    gap: int = 1,
+    test_size: int | None = None,
+    max_train_size: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Fit propensity model with time-aware cross-validation and calibration.
 
@@ -300,6 +367,17 @@ def fit_propensity_timecal(
         Number of time-series splits.
     random_state : int, default=0
         Random seed.
+    gap : int, default=1
+        Number of samples to exclude between the end of each training fold and
+        the start of the corresponding test fold. The default of ``1`` is a
+        conservative guard against adjacent-row temporal leakage; set to ``0``
+        to recover the unbuffered sklearn default.
+    test_size : int, optional
+        Per-fold test-window size in samples. ``None`` (default) defers to
+        sklearn's automatic sizing.
+    max_train_size : int, optional
+        Cap the training-fold size in samples (sliding-window CV). ``None``
+        (default) uses an expanding window.
 
     Returns
     -------
@@ -347,11 +425,6 @@ def fit_propensity_timecal(
         if n_actions <= 1:
             raise InsufficientDataError(f"Need at least 2 actions, got {n_actions}")
 
-        if n_samples < n_splits * 2:
-            raise InsufficientDataError(
-                f"Need at least {n_splits * 2} samples for {n_splits} splits, got {n_samples}"
-            )
-
         # Sort by timestamp if provided to ensure proper time-series ordering
         if ts is not None:
             time_order = np.argsort(ts)
@@ -367,7 +440,13 @@ def fit_propensity_timecal(
             inverse_order = np.arange(n_samples)
 
         # Time-series split on sorted data
-        tscv = TimeSeriesSplit(n_splits=n_splits)
+        tscv = _make_time_series_split(
+            n_samples,
+            n_splits,
+            gap=gap,
+            test_size=test_size,
+            max_train_size=max_train_size,
+        )
         propensities = np.zeros((n_samples, n_actions))
         fold_indices = np.full(n_samples, -1)
 
@@ -490,6 +569,10 @@ def fit_outcome_crossfit(
     n_splits: int = 3,
     estimator: str | Callable[[], Any] = "hgb",
     random_state: int = 0,
+    *,
+    gap: int = 1,
+    test_size: int | None = None,
+    max_train_size: int | None = None,
 ) -> tuple[np.ndarray, list[tuple[Any, np.ndarray, np.ndarray]]]:
     """Fit outcome model with cross-fitting.
 
@@ -505,6 +588,13 @@ def fit_outcome_crossfit(
         Estimator type or factory function.
     random_state : int, default=0
         Random seed.
+    gap : int, default=1
+        Number of samples skipped between train and test windows; see
+        :func:`fit_propensity_timecal` for full semantics.
+    test_size : int, optional
+        Per-fold test-window size in samples.
+    max_train_size : int, optional
+        Cap on training-fold size in samples.
 
     Returns
     -------
@@ -539,11 +629,6 @@ def fit_outcome_crossfit(
             )
 
         n_samples = X_obs.shape[0]
-        if n_samples < n_splits * 2:
-            raise InsufficientDataError(
-                f"Need at least {n_splits * 2} samples for {n_splits} splits, got {n_samples}"
-            )
-
         predictions = np.zeros(n_samples)
         models_info = []
 
@@ -568,7 +653,13 @@ def fit_outcome_crossfit(
             raise ValueError(f"Unknown estimator: {estimator}")
 
         # Time-series split
-        tscv = TimeSeriesSplit(n_splits=n_splits)
+        tscv = _make_time_series_split(
+            n_samples,
+            n_splits,
+            gap=gap,
+            test_size=test_size,
+            max_train_size=max_train_size,
+        )
 
         for fold_idx, (train_idx, test_idx) in enumerate(tscv.split(X_obs)):
             try:
@@ -1015,6 +1106,10 @@ def evaluate_sklearn_models(
     policy_train: str = "all",
     policy_train_frac: float = 0.85,
     support_thresholds: "SupportHealthThresholds | None" = None,
+    *,
+    gap: int = 1,
+    test_size: int | None = None,
+    max_train_size: int | None = None,
 ) -> "EvaluationArtifact":
     """Evaluate sklearn models using DR and SNDR estimators.
 
@@ -1109,6 +1204,9 @@ def evaluate_sklearn_models(
         eval_design.ts,
         n_splits=n_splits,
         random_state=random_state,
+        gap=gap,
+        test_size=test_size,
+        max_train_size=max_train_size,
     )
 
     # Fit outcome model
@@ -1118,6 +1216,9 @@ def evaluate_sklearn_models(
         n_splits=n_splits,
         estimator=outcome_estimator,
         random_state=random_state,
+        gap=gap,
+        test_size=test_size,
+        max_train_size=max_train_size,
     )
 
     # Evaluate each model
@@ -1292,6 +1393,9 @@ def estimate_propensity_pairwise(
     neg_per_pos: int = 5,
     n_splits: int = 3,
     random_state: int = 0,
+    gap: int = 1,
+    test_size: int | None = None,
+    max_train_size: int | None = None,
 ) -> np.ndarray:
     """Estimate propensity scores for pairwise evaluation.
 
@@ -1310,6 +1414,13 @@ def estimate_propensity_pairwise(
         Number of time series splits
     random_state : int
         Random seed
+    gap : int, default=1
+        Samples skipped between train and test windows in the time-series CV
+        used to fit the propensity classifier.
+    test_size : int, optional
+        Per-fold test-window size in samples; ``None`` defers to sklearn.
+    max_train_size : int, optional
+        Cap on training-fold size in samples; ``None`` uses expanding window.
 
     Returns
     -------
@@ -1336,7 +1447,6 @@ def estimate_propensity_pairwise(
 
     if method == "condlogit":
         # Build pairwise training data with time-forward splits
-        tscv = TimeSeriesSplit(n_splits=n_splits)
         days_sorted = sorted(design.ops_all_by_day.keys())
 
         # Create day-to-index mapping for time splits
@@ -1349,6 +1459,14 @@ def estimate_propensity_pairwise(
         for day in days_sorted:
             all_indices_list.extend(day_indices[day])
         all_indices = np.array(all_indices_list)
+
+        tscv = _make_time_series_split(
+            len(all_indices),
+            n_splits,
+            gap=gap,
+            test_size=test_size,
+            max_train_size=max_train_size,
+        )
 
         # Fit conditional logit with cross-validation
         for fold, (train_idx, test_idx) in enumerate(tscv.split(all_indices)):
@@ -1505,7 +1623,13 @@ def estimate_propensity_pairwise(
         X_client = np.array(client_features, dtype=np.float32)
 
         # Fit multinomial logistic regression with time-forward CV
-        tscv = TimeSeriesSplit(n_splits=n_splits)
+        tscv = _make_time_series_split(
+            len(X_client),
+            n_splits,
+            gap=gap,
+            test_size=test_size,
+            max_train_size=max_train_size,
+        )
 
         for train_idx, test_idx in tscv.split(X_client):
             X_train, X_test = X_client[train_idx], X_client[test_idx]
@@ -1596,6 +1720,10 @@ def evaluate_pairwise_models(
     random_state: int = 0,
     outcome_estimator: str | Callable[[], Any] = "hgb",
     support_thresholds: "SupportHealthThresholds | None" = None,
+    *,
+    gap: int = 1,
+    test_size: int | None = None,
+    max_train_size: int | None = None,
 ) -> "EvaluationArtifact":
     """Evaluate pairwise models using autoscale strategy.
 
@@ -1795,6 +1923,9 @@ def evaluate_pairwise_models(
         neg_per_pos=neg_per_pos,
         n_splits=n_splits,
         random_state=random_state,
+        gap=gap,
+        test_size=test_size,
+        max_train_size=max_train_size,
     )
 
     # Fit outcome models with cross-fitting
@@ -1846,7 +1977,14 @@ def evaluate_pairwise_models(
     # Fit outcome model
     estimator_obj = _get_outcome_estimator(outcome_estimator, task_type)
     q_hat, _ = fit_outcome_crossfit(
-        X_obs, Y.astype(np.float64), n_splits, lambda: estimator_obj, random_state
+        X_obs,
+        Y.astype(np.float64),
+        n_splits,
+        lambda: estimator_obj,
+        random_state,
+        gap=gap,
+        test_size=test_size,
+        max_train_size=max_train_size,
     )
 
     # Convert policies to policy probabilities

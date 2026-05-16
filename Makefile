@@ -1,6 +1,6 @@
 # Makefile for skdr-eval development
 
-.PHONY: help install install-dev clean lint format typecheck test test-cov build docs check validate all
+.PHONY: help install install-dev clean lint format typecheck test test-cov build docs check validate smoke all
 
 # Default target
 help:
@@ -67,8 +67,13 @@ docs:
 validate:
 	python scripts/validate_contribution.py
 
+# Examples smoke (mirrors CI examples-smoke job)
+smoke:
+	python examples/preflight.py
+	python examples/quickstart.py
+
 # Composite targets
-check: lint typecheck test
+check: lint typecheck test smoke
 
 all: clean check build
 
@@ -84,8 +89,8 @@ release-check: clean check build
 # Git workflow helpers
 feature:
 	@read -p "Enter feature name: " feature_name; \
-	git checkout develop && \
-	git pull origin develop && \
+	git checkout main && \
+	git pull origin main && \
 	git checkout -b feature/$$feature_name
 
 hotfix:

@@ -16,7 +16,8 @@ from typing import Optional
 # Configuration constants
 COVERAGE_THRESHOLD = 80
 CODE_DIRS = ("src/", "tests/", "examples/")
-PROTECTED_BRANCHES = ("main", "develop")
+PROTECTED_BRANCHES = ("main",)
+DEFAULT_BASE_BRANCH = "main"
 CONVENTIONAL_PREFIXES = (
     "feat:",
     "fix:",
@@ -79,15 +80,15 @@ class ContributionValidator:
             )
             return False
 
-        # Check if branch is ahead of develop
+        # Check if branch is ahead of the default base
         code, stdout, _ = self.run_command(
-            ["git", "rev-list", "--count", "develop..HEAD"]
+            ["git", "rev-list", "--count", f"{DEFAULT_BASE_BRANCH}..HEAD"]
         )
         if code == 0:
             commits_ahead = int(stdout.strip()) if stdout.strip().isdigit() else 0
             if commits_ahead == 0:
                 self.warnings.append(
-                    "No new commits on this branch compared to develop"
+                    f"No new commits on this branch compared to {DEFAULT_BASE_BRANCH}"
                 )
 
         self.success_count += 1
@@ -212,7 +213,7 @@ class ContributionValidator:
 
         # Check for docstrings in new/modified Python files using AST
         code, stdout, _ = self.run_command(
-            ["git", "diff", "--name-only", "develop...HEAD"]
+            ["git", "diff", "--name-only", f"{DEFAULT_BASE_BRANCH}...HEAD"]
         )
         if code == 0:
             python_files = [
@@ -279,8 +280,10 @@ class ContributionValidator:
         print("Checking commit messages...")
         self.total_checks += 1
 
-        # Get commits ahead of develop
-        code, stdout, _ = self.run_command(["git", "log", "--oneline", "develop..HEAD"])
+        # Get commits ahead of the default base
+        code, stdout, _ = self.run_command(
+            ["git", "log", "--oneline", f"{DEFAULT_BASE_BRANCH}..HEAD"]
+        )
         if code != 0:
             self.warnings.append("Could not check commit messages")
             return True
@@ -301,6 +304,28 @@ class ContributionValidator:
         print("Commit message check completed")
         return True
 
+    def check_examples_smoke(self) -> bool:
+        """Run the same example scripts as the CI examples-smoke job."""
+        print("Running examples smoke (preflight + quickstart)...")
+        self.total_checks += 1
+
+        for script in ("examples/preflight.py", "examples/quickstart.py"):
+            if not (self.repo_root / script).exists():
+                self.errors.append(f"Missing required example script: {script}")
+                return False
+            code, stdout, stderr = self.run_command([sys.executable, script])
+            if code != 0:
+                self.errors.append(
+                    f"Example script failed: {script}\nstdout:\n{stdout}\n"
+                    f"stderr:\n{stderr}"
+                )
+                return False
+            print(f"PASS {script}")
+
+        self.success_count += 1
+        print("Examples smoke passed (mirrors CI examples-smoke job)")
+        return True
+
     def validate_all(self) -> bool:
         """Run all validation checks."""
         print("Starting contribution validation...\n")
@@ -311,6 +336,7 @@ class ContributionValidator:
             self.check_formatting,
             self.check_type_checking,
             self.check_tests,
+            self.check_examples_smoke,
             self.check_documentation,
             self.check_commit_messages,
         ]
@@ -353,7 +379,7 @@ class ContributionValidator:
             print("\nAll checks passed! Your contribution is ready for PR submission.")
             print("\nNext steps:")
             print(f"   1. Push your branch: git push origin {current_branch}")
-            print("   2. Create PR targeting 'develop' branch")
+            print(f"   2. Create PR targeting '{DEFAULT_BASE_BRANCH}' branch")
             print("   3. Fill out the PR template completely")
             print("   4. Wait for CI checks and code review")
 

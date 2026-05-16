@@ -280,7 +280,7 @@ def plot_calibration_curve(
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    bin_centers_raw, bin_means_raw = zip(*calibration_curve)
+    bin_centers_raw, bin_means_raw = zip(*calibration_curve, strict=False)
     bin_centers: np.ndarray = np.array(bin_centers_raw)
     bin_means: np.ndarray = np.array(bin_means_raw)
 
@@ -340,7 +340,7 @@ def plot_roc_curve(
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    fpr_raw, tpr_raw = zip(*roc_curve)
+    fpr_raw, tpr_raw = zip(*roc_curve, strict=False)
     fpr: np.ndarray = np.array(fpr_raw)
     tpr: np.ndarray = np.array(tpr_raw)
 
@@ -409,7 +409,7 @@ def plot_diagnostics_summary(
     ax1.tick_params(axis="x", rotation=45)
 
     # Add value labels on bars
-    for bar, score in zip(bars, scores):
+    for bar, score in zip(bars, scores, strict=False):
         height = bar.get_height()
         ax1.text(
             bar.get_x() + bar.get_width() / 2.0,
@@ -451,7 +451,7 @@ def plot_diagnostics_summary(
     # Plot 4: Calibration curve
     ax4 = axes[1, 0]
     if diagnostics.calibration_curve:
-        bin_centers, bin_means = zip(*diagnostics.calibration_curve)
+        bin_centers, bin_means = zip(*diagnostics.calibration_curve, strict=False)
         ax4.plot(bin_centers, bin_means, "o-", label="Calibration", linewidth=2)
         ax4.plot([0, 1], [0, 1], "k--", alpha=0.7)
     ax4.set_xlabel("Mean Predicted")
@@ -464,7 +464,7 @@ def plot_diagnostics_summary(
     # Plot 5: ROC curve
     ax5 = axes[1, 1]
     if diagnostics.roc_curve:
-        fpr, tpr = zip(*diagnostics.roc_curve)
+        fpr, tpr = zip(*diagnostics.roc_curve, strict=False)
         ax5.plot(fpr, tpr, "b-", label="ROC", linewidth=2)
         ax5.plot([0, 1], [0, 1], "k--", alpha=0.7)
     ax5.set_xlabel("False Positive Rate")
@@ -627,7 +627,7 @@ def create_dashboard(
         ax2.set_ylim(0, 1)
         ax2.tick_params(axis="x", rotation=45)
 
-        for bar, score in zip(bars, scores):
+        for bar, score in zip(bars, scores, strict=False):
             height = bar.get_height()
             ax2.text(
                 bar.get_x() + bar.get_width() / 2.0,
@@ -676,7 +676,7 @@ def create_dashboard(
     # Plot 4: Calibration curve (if diagnostics available)
     ax4 = fig.add_subplot(gs[1, 2:])
     if diagnostics and diagnostics.calibration_curve:
-        bin_centers, bin_means = zip(*diagnostics.calibration_curve)
+        bin_centers, bin_means = zip(*diagnostics.calibration_curve, strict=False)
         ax4.plot(bin_centers, bin_means, "o-", label="Calibration", linewidth=2)
         ax4.plot([0, 1], [0, 1], "k--", alpha=0.7)
         ax4.set_xlabel("Mean Predicted")
@@ -698,7 +698,7 @@ def create_dashboard(
     # Plot 5: ROC curve (if diagnostics available)
     ax5 = fig.add_subplot(gs[2, :2])
     if diagnostics and diagnostics.roc_curve:
-        fpr, tpr = zip(*diagnostics.roc_curve)
+        fpr, tpr = zip(*diagnostics.roc_curve, strict=False)
         ax5.plot(fpr, tpr, "b-", label="ROC", linewidth=2)
         ax5.plot([0, 1], [0, 1], "k--", alpha=0.7)
         ax5.set_xlabel("False Positive Rate")
