@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **PSIS Pareto-k support-health diagnostic** ([#80]). Every `DRResult` and report row now carries `pareto_k`, the Generalized-Pareto shape parameter of the unclipped importance-weight tail (Vehtari, Simpson, Gelman, Yao & Gabry 2024, *Pareto Smoothed Importance Sampling*, JMLR 25:1–58). New warning code `HIGH_PARETO_K` fires as `caution` when `k ≥ 0.5` and escalates to `high_risk` when `k ≥ 0.7`. Thresholds tunable via `SupportHealthThresholds(high_pareto_k_caution=..., high_pareto_k=...)`. New public helper `skdr_eval.diagnostics.psis_pareto_k(weights)`.
+- **Propensity calibration diagnostics in card** ([#84]). `PropensityDiagnostics` now exposes 15-bin `ece` (Expected Calibration Error, Naeini, Cooper & Hauskrecht 2015), `brier_score` (multiclass), `reliability_curve`, and `ece_n_bins`. New warning code `MISCAL_PROP` fires as `caution` when `ECE > 0.10` and escalates to `high_risk` when `ECE > 0.20`. Thresholds tunable via `SupportHealthThresholds(miscal_ece=...)`. New public helpers in `skdr_eval.diagnostics`: `compute_propensity_ece`, `compute_propensity_brier`, `compute_propensity_reliability_curve`.
+- New columns in the HTML report/card (`pareto_k`, plus `ECE`/`Brier` on the propensity-diagnostics table) and a `Calibration` block in the card ([#84]).
 - **Per-decision V̂ contributions on the artifact ([#92]).** `evaluate_sklearn_models` and `evaluate_pairwise_models` accept `keep_contributions=True` (and a `max_kept_contributions=100_000_000` memory guard); when set, each `DRResult` carries a `contributions` dict (`decision_id, q_pi, q_hat, weight, reward, contribution_to_V`) and `EvaluationArtifact.contributions(model, *, estimator="DR", top_k=None)` returns a tidy DataFrame. By construction `contribution_to_V.mean() == V_hat` to float64 precision for both DR and SNDR — DR uses `q_pi + w·(Y-q_hat)`; SNDR rescales the residual term by `n / Σw` so the per-decision values average to the ratio estimator. Capture is opt-in and independent of `ci_bootstrap` — bootstrap CIs continue to use local arrays inline and do not retain a payload on `DRResult`. The stakeholder card includes top-5 contributors / bottom-5 detractors when contributions are present.
 - **Public preflight validators** — new `skdr_eval.validate_logs(logs, *, cli_pref, st_pref, strict)` and `skdr_eval.validate_pairwise_inputs(logs_df, op_daily_df, *, metric_col, ...)` raise typed `DataValidationError` / `InsufficientDataError` on schema problems before evaluation begins. Strict mode adds monotonic-timestamp and elig-mask sanity checks. ([#24])
 - **`skdr_eval.get_capabilities()`** — side-effect-free detection of optional extras (`viz`, `speed`). Returns booleans plus a `missing_extras` list pointing at the install command needed to enable each disabled capability. ([#26])
@@ -15,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`examples/preflight.py`** — runnable preflight script: capability dump + log + pairwise schema validation.
 
 ### Changed
+- **Schema bump:** `SCHEMA_VERSION` `1.0.0 → 1.1.0`. Additive only — `_ReportRowSchema` and `_DiagnosticsPayloadSchema` use `None` defaults for the new fields, so 1.0.0 payloads load unchanged via `load_artifact_json`.
 - **Default fold gap is now `gap=1`** on every entry point that takes time-series CV (`fit_propensity_timecal`, `fit_outcome_crossfit`, `estimate_propensity_pairwise`, `evaluate_sklearn_models`, `evaluate_pairwise_models`). Prior versions used sklearn's `TimeSeriesSplit(n_splits=...)` default of `gap=0`. The new default is a conservative adjacent-row leakage guard; it shifts fold boundaries by one sample and therefore changes DR/SNDR estimates relative to prior baselines on the same data and seed. To restore the pre-PR fold layout, pass `gap=0` explicitly. The constant-outcome identity simulation (`tests/test_temporal_split_controls.py`) still recovers the ground-truth value under both defaults; the change is a numerical-behavior shift, not a statistical-correctness fix.
 - **GitHub Flow.** Dropped the `develop` integration branch. All feature branches now branch off and merge back to `main`. CI no longer triggers on `develop`; branch-protection docs, `CONTRIBUTING.md`, `DEVELOPMENT.md`, and `scripts/validate_contribution.py` updated accordingly. ([#54])
 - **Python matrix tightened.** `requires-python = ">=3.11"`. Python 3.10 dropped from CI; ruff `target-version` bumped to `py311`, mypy `python_version` to `3.11`, black `target-version` to `py311`.
@@ -28,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`induce_policy_stream_topk` now raises `DataValidationError` on duplicate `operator_id` rows within a day.** The day-vectorized eligibility mask uses a `dict[operator_id -> position]`, which would otherwise silently drop earlier duplicate positions (last-write-wins) and diverge from the prior `isin(...)` semantics. Surface the ambiguity instead of papering over it, consistent with the fail-loud bias in `docs/agent-context/invariants.md`. ([#66] review)
 
 ### Tests
+- New `tests/test_diagnostics_trust.py` with simulation proofs that PSIS Pareto-k recovers known GPD shapes (`k ∈ {0.3, 0.7, 1.2}`), separates light- from heavy-tail weights, and that ECE → 0 under perfectly-calibrated DGPs and clears the 0.10 gate under temperature-distorted propensities. Required by `docs/agent-context/review-checklist.md` for any new statistical primitive.
+- Extended `tests/test_propensity_diagnostics.py` with unit tests for `psis_pareto_k`, `compute_propensity_ece`, `compute_propensity_brier`, and `compute_propensity_reliability_curve` (degenerate inputs, sample floors, hand-computed Brier fixture, backward-compat dataclass construction).
+- Extended `tests/test_reporting_artifact.py` with `HIGH_PARETO_K` / `MISCAL_PROP` threshold matrices, end-to-end column presence, and JSON round-trip coverage of the new fields.
 - New parity and call-count tests for both rewrites: `test_induce_policy_from_sklearn_vectorized_matches_scalar_reference`, `test_induce_policy_from_sklearn_issues_single_predict_call`, `test_stream_topk_surrogate_predict_call_count_per_day`, `test_stream_topk_chunk_pairs_controls_batching_and_preserves_policy`, `test_stream_topk_chunk_pairs_forwarded_through_induce_policy`.
 - New `test_stream_topk_duplicate_operator_ids_per_day_raises` covering the fail-loud precondition added to `_build_day_elig_mask` (PR #66 review).
 
@@ -40,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#61]: https://github.com/dgenio/skdr-eval/issues/61
 [#63]: https://github.com/dgenio/skdr-eval/issues/63
 [#66]: https://github.com/dgenio/skdr-eval/pull/66
+[#80]: https://github.com/dgenio/skdr-eval/issues/80
+[#84]: https://github.com/dgenio/skdr-eval/issues/84
 [#92]: https://github.com/dgenio/skdr-eval/issues/92
 
 ## [0.6.0] - 2026-05-12

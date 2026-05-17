@@ -53,13 +53,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger("skdr_eval")
 
 # Bump SCHEMA_VERSION when the artifact JSON layout changes incompatibly.
-SCHEMA_VERSION = "1.0.0"
+# 1.0.0 → 1.1.0: additive trust diagnostics (#80 pareto_k, #84 ECE/Brier).
+# Old readers that pinned the 1.0.0 schema can still load 1.1.0 payloads
+# because every new field has a ``None``/default fallback in the Pydantic
+# models (``extra="allow"`` on _ReportRowSchema makes the new column
+# transparent; PropensityDiagnostics payload fields default to ``None``).
+SCHEMA_VERSION = "1.1.0"
 
 # Machine-readable warning codes. Do not localize.
 WARN_LOW_ESS = "LOW_ESS"
 WARN_EXTREME_CLIP = "EXTREME_CLIP"
 WARN_POOR_OVERLAP = "POOR_OVERLAP"
 WARN_LOW_MATCH_RATE = "LOW_MATCH_RATE"
+WARN_HIGH_PARETO_K = "HIGH_PARETO_K"  # #80 — PSIS Pareto-k > threshold
+WARN_MISCAL_PROP = "MISCAL_PROP"  # #84 — ECE above threshold
 
 # Severity labels.
 SUPPORT_OK = "ok"
@@ -97,6 +104,14 @@ class SupportHealthThresholds:
     - ``poor_overlap_min_pscore`` — Default ``None`` resolves at runtime to
       ``1 / n_samples`` (no realistic support at all). ``POOR_OVERLAP`` is
       always ``high_risk`` since DR validity does not survive zero overlap.
+    - ``high_pareto_k = 0.7`` — Vehtari et al. (2024) PSIS thresholds (#80).
+      ``k`` is the GPD shape parameter of the importance-weight tail.
+      ``0.5 ≤ k < 0.7`` issues ``HIGH_PARETO_K`` as ``caution``;
+      ``k ≥ 0.7`` escalates to ``high_risk`` (variance does not exist).
+    - ``miscal_ece = 0.10`` — 10-point Expected Calibration Error gate (#84).
+      Above ``miscal_ece`` fires ``MISCAL_PROP`` as ``caution``;
+      above ``2 · miscal_ece`` escalates to ``high_risk`` (predictions are
+      decoupled enough from outcomes that IPW estimates are biased).
 
     Attributes
     ----------
@@ -108,12 +123,24 @@ class SupportHealthThresholds:
         Floor on ``match_rate`` below which ``LOW_MATCH_RATE`` fires (caution).
     poor_overlap_min_pscore : float, optional
         Floor on ``min_pscore``. ``None`` means ``1 / n_samples``.
+    high_pareto_k_caution : float
+        Floor on Pareto-k above which ``HIGH_PARETO_K`` fires (caution).
+        Default 0.5 (Vehtari et al. 2024 "convergence slow" threshold).
+    high_pareto_k : float
+        Floor on Pareto-k above which ``HIGH_PARETO_K`` escalates to
+        ``high_risk``. Default 0.7 (PSIS "do not trust" threshold).
+    miscal_ece : float
+        Ceiling on Expected Calibration Error above which ``MISCAL_PROP``
+        fires (caution). Default 0.10.
     """
 
     low_ess_frac: float = 0.10
     extreme_clip_tail_mass: float = 0.05
     low_match_rate: float = 0.50
     poor_overlap_min_pscore: float | None = None
+    high_pareto_k_caution: float = 0.5
+    high_pareto_k: float = 0.7
+    miscal_ece: float = 0.10
 
 
 # --------------------------------------------------------------------------- #
@@ -125,14 +152,29 @@ def _compute_row_warnings(
     row: dict[str, Any],
     thresholds: SupportHealthThresholds,
     n_samples: int,
+    *,
+    model_ece: float | None = None,
 ) -> tuple[list[str], str]:
     """Compute warning codes and severity for a single report row.
+
+    Parameters
+    ----------
+    row : dict
+        A report row (must contain ``ESS, tail_mass, match_rate, min_pscore``;
+        ``pareto_k`` is read if present).
+    thresholds : SupportHealthThresholds
+        Threshold set.
+    n_samples : int
+        Evaluation sample size (for ESS-fraction).
+    model_ece : float, optional
+        Per-model propensity Expected Calibration Error (#84). When provided
+        and above ``thresholds.miscal_ece``, ``MISCAL_PROP`` is emitted.
+        ``nan`` and ``None`` are treated identically and skip the check.
 
     Returns
     -------
     codes : list of str
-        Stable-ordered warning codes (``LOW_ESS`` before ``EXTREME_CLIP``
-        before ``LOW_MATCH_RATE`` before ``POOR_OVERLAP``).
+        Stable-ordered warning codes.
     severity : str
         One of ``"ok"``, ``"caution"``, ``"high_risk"``.
     """
@@ -166,12 +208,36 @@ def _compute_row_warnings(
     if min_pscore < overlap_floor:
         high.append(WARN_POOR_OVERLAP)
 
-    # Stable order: LOW_ESS, EXTREME_CLIP, LOW_MATCH_RATE, POOR_OVERLAP.
+    # HIGH_PARETO_K (#80): Pareto-k of the unclipped importance-weight tail.
+    # ``row['pareto_k']`` may be missing on legacy callers that build their own
+    # report rows; treat missing/nan as "no signal" rather than fail loudly.
+    pk_raw = row.get("pareto_k")
+    if pk_raw is not None:
+        pk = float(pk_raw)
+        if np.isfinite(pk):
+            if pk >= thresholds.high_pareto_k:
+                high.append(WARN_HIGH_PARETO_K)
+            elif pk >= thresholds.high_pareto_k_caution:
+                caution.append(WARN_HIGH_PARETO_K)
+
+    # MISCAL_PROP (#84): per-model propensity ECE.  Same nan-as-no-signal rule.
+    if model_ece is not None and np.isfinite(float(model_ece)):
+        ece = float(model_ece)
+        if ece > thresholds.miscal_ece * 2:
+            high.append(WARN_MISCAL_PROP)
+        elif ece > thresholds.miscal_ece:
+            caution.append(WARN_MISCAL_PROP)
+
+    # Stable order: LOW_ESS, EXTREME_CLIP, LOW_MATCH_RATE, POOR_OVERLAP,
+    # HIGH_PARETO_K, MISCAL_PROP.  New codes append rather than interleave so
+    # historical artifact diffs remain readable.
     code_order = [
         WARN_LOW_ESS,
         WARN_EXTREME_CLIP,
         WARN_LOW_MATCH_RATE,
         WARN_POOR_OVERLAP,
+        WARN_HIGH_PARETO_K,
+        WARN_MISCAL_PROP,
     ]
     codes = [c for c in code_order if c in caution or c in high]
 
@@ -188,6 +254,8 @@ def attach_warnings(
     report: pd.DataFrame,
     n_samples: int,
     thresholds: SupportHealthThresholds | None = None,
+    *,
+    model_ece: dict[str, float] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Attach ``support_health`` and ``diagnostic_warnings`` columns.
 
@@ -196,11 +264,17 @@ def attach_warnings(
     report : pd.DataFrame
         Report from ``evaluate_*_models``. Must contain at least the columns
         ``model, estimator, ESS, tail_mass, match_rate, min_pscore``.
+        ``pareto_k`` is read if present (drives ``HIGH_PARETO_K``; #80).
     n_samples : int
         Number of evaluation samples (used for ESS-fraction and default
         overlap floor). Must be positive.
     thresholds : SupportHealthThresholds, optional
         Threshold set. Defaults to :class:`SupportHealthThresholds`.
+    model_ece : dict[str, float], optional
+        Map ``model_name -> Expected Calibration Error`` (#84). When supplied,
+        ``MISCAL_PROP`` may be emitted on rows whose model has ECE above
+        ``thresholds.miscal_ece``. Models missing from this dict (or values
+        of ``nan``) are treated as "no signal" and skip the check.
 
     Returns
     -------
@@ -228,11 +302,15 @@ def attach_warnings(
             f"report is missing required columns for warnings: {sorted(missing)}",
         )
 
+    ece_lookup = model_ece or {}
     severities: list[str] = []
     code_strings: list[str] = []
     warning_records: list[dict[str, Any]] = []
     for _, row in report.iterrows():
-        codes, severity = _compute_row_warnings(row.to_dict(), thresholds, n_samples)
+        ece_val = ece_lookup.get(str(row["model"]))
+        codes, severity = _compute_row_warnings(
+            row.to_dict(), thresholds, n_samples, model_ece=ece_val
+        )
         severities.append(severity)
         code_strings.append(",".join(codes))
         warning_records.append(
@@ -384,6 +462,9 @@ class _ReportRowSchema(BaseModel):
     ci_upper: float | None = None
     support_health: str | None = None
     diagnostic_warnings: str | None = None
+    # Trust-additions field (#80). Optional default keeps 1.0.0 schemas
+    # loadable as-is — old payloads simply lack this key.
+    pareto_k: float | None = None
 
 
 class _WarningRowSchema(BaseModel):
@@ -419,6 +500,13 @@ class _DiagnosticsPayloadSchema(BaseModel):
     log_loss_score: float | None
     statistics: dict[str, float | None]
     balance_stats: dict[str, float | None]
+    # Trust additions (#84). Optional defaults keep 1.0.0 payloads loadable;
+    # old artifacts simply lack the ECE/Brier keys, which Pydantic v2 accepts
+    # because the fields have ``None`` defaults.
+    ece: float | None = None
+    brier_score: float | None = None
+    reliability_curve: list[tuple[float | None, float | None, int]] | None = None
+    ece_n_bins: int | None = None
 
 
 class ArtifactSchema(BaseModel):
@@ -502,6 +590,7 @@ _OPTIONAL_REPORT_KEYS = (
     "ci_upper",
     "support_health",
     "diagnostic_warnings",
+    "pareto_k",
 )
 
 
@@ -518,7 +607,16 @@ def _diag_to_payload(diag: PropensityDiagnostics) -> dict[str, Any]:
     Every numeric field flows through :func:`_jsonable` so non-finite values
     (NaN, ±inf) are coerced to ``None`` and the resulting payload round-trips
     through RFC-8259 strict JSON parsers.
+
+    The ``reliability_curve`` is emitted as a list of 3-tuples
+    ``(bin_mean_predicted, bin_empirical_frac, bin_count)``; non-finite
+    numerics again become ``None``, and the per-bin counts are kept as
+    integers for downstream histogram code.
     """
+    reliability_payload = [
+        (_jsonable(float(mean_pred)), _jsonable(float(frac)), int(count))
+        for (mean_pred, frac, count) in diag.reliability_curve
+    ]
     return {
         "overlap_ratio": _jsonable(float(diag.overlap_ratio)),
         "balance_ratio": _jsonable(float(diag.balance_ratio)),
@@ -529,6 +627,12 @@ def _diag_to_payload(diag: PropensityDiagnostics) -> dict[str, Any]:
         "balance_stats": {
             str(k): _jsonable(float(v)) for k, v in diag.balance_stats.items()
         },
+        # Trust additions (#84). nan ECE / Brier / counts flow through
+        # ``_jsonable`` so the JSON stays RFC-8259 compliant.
+        "ece": _jsonable(float(diag.ece)),
+        "brier_score": _jsonable(float(diag.brier_score)),
+        "reliability_curve": reliability_payload,
+        "ece_n_bins": int(diag.ece_n_bins),
     }
 
 
@@ -795,6 +899,10 @@ class EvaluationArtifact:
             "ci_label": _ci_label(self.metadata.get("alpha", 0.05)),
             "support_health": support,
             "warning_codes": warn_codes,
+            # Trust diagnostics (#80): the Pareto-k for the headline row is
+            # the same value carried on every (model, estimator) row of the
+            # report, but the card surfaces only the headline slot.
+            "headline_pareto_k": head_dict.get("pareto_k"),
             "interpretation": interpretation,
             "plot_b64": plot_b64,
             "estimator_rows": estimator_rows,
@@ -1115,6 +1223,16 @@ def _build_interpretation(
         parts.append(
             "Poor overlap: minimum propensity is at or below 1/n; DR validity does not hold."
         )
+    if WARN_HIGH_PARETO_K in warning_codes:
+        parts.append(
+            "High Pareto-k: importance-weight tail is heavy (PSIS), so V̂ is "
+            "driven by a few decisions and the bootstrap CI under-states uncertainty."
+        )
+    if WARN_MISCAL_PROP in warning_codes:
+        parts.append(
+            "Miscalibrated propensities: ECE above threshold; IPW weights are "
+            "systematically biased and the DR correction may not fully recover."
+        )
     return " ".join(parts)
 
 
@@ -1211,9 +1329,13 @@ def build_evaluation_artifact(
     """
     from . import __version__ as _pkg_version  # noqa: PLC0415
 
-    enriched_report, warnings_df = attach_warnings(report, n_samples, thresholds)
+    # Compute diagnostics first so MISCAL_PROP (#84) can read the ECE map.
     sensitivity_df = summarize_sensitivity(detailed)
     diagnostics = _compute_diagnostics(propensities, actions, list(detailed.keys()))
+    model_ece = {name: float(diag.ece) for name, diag in diagnostics.items()}
+    enriched_report, warnings_df = attach_warnings(
+        report, n_samples, thresholds, model_ece=model_ece
+    )
 
     metadata: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,

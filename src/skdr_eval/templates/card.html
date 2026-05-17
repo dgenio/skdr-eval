@@ -56,7 +56,7 @@
 
   <h2>All estimators</h2>
   <table>
-    <thead><tr><th>estimator</th><th>V&#770;</th><th>SE</th><th>clip</th><th>ESS</th><th>match_rate</th></tr></thead>
+    <thead><tr><th>estimator</th><th>V&#770;</th><th>SE</th><th>clip</th><th>ESS</th><th>match_rate</th><th>Pareto-k</th></tr></thead>
     <tbody>
     {% for row in estimator_rows %}
       <tr>
@@ -66,6 +66,7 @@
         <td class="numeric">{{ row.clip|fmt_num(default="∞") }}</td>
         <td class="numeric">{{ row.ESS|fmt_num }}</td>
         <td class="numeric">{{ row.match_rate|fmt_num(spec="%.3f") }}</td>
+        <td class="numeric">{{ row.pareto_k|fmt_num(spec="%.2f") }}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -110,6 +111,40 @@
       <tr><th>log_loss_score</th><td class="numeric">{{ diagnostics.log_loss_score|fmt_num(spec="%.3f") }}</td></tr>
     </tbody>
   </table>
+
+  {% if diagnostics.ece is not none or diagnostics.brier_score is not none %}
+  <h2>Calibration ({{ diagnostics.ece_n_bins or 15 }}-bin)</h2>
+  <table>
+    <tbody>
+      <tr>
+        <th>ECE</th>
+        <td class="numeric">{{ diagnostics.ece|fmt_num(spec="%.4f") }}</td>
+        <td class="meta">Expected Calibration Error &middot; lower is better</td>
+      </tr>
+      <tr>
+        <th>Brier</th>
+        <td class="numeric">{{ diagnostics.brier_score|fmt_num(spec="%.4f") }}</td>
+        <td class="meta">Multiclass Brier score &middot; lower is better</td>
+      </tr>
+    </tbody>
+  </table>
+  {% if diagnostics.reliability_curve %}
+  <table>
+    <thead><tr><th>bin mean p&#770;</th><th>empirical freq</th><th>count</th></tr></thead>
+    <tbody>
+    {% for bin in diagnostics.reliability_curve %}
+      {% if bin[2] > 0 %}
+      <tr>
+        <td class="numeric">{{ bin[0]|fmt_num(spec="%.3f") }}</td>
+        <td class="numeric">{{ bin[1]|fmt_num(spec="%.3f") }}</td>
+        <td class="numeric">{{ bin[2] }}</td>
+      </tr>
+      {% endif %}
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% endif %}
   {% endif %}
 
   <div class="meta">
