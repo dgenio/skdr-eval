@@ -569,6 +569,7 @@ def compute_propensity_reliability_curve(
     -------
     list of (float, float, int)
         Per-bin reliability triples ``(mean_predicted_top1, empirical_accuracy, count)``.
+        Returns an empty list when ``propensities`` has zero rows.
     """
     if len(propensities) != len(actions):
         raise DataValidationError(
@@ -613,7 +614,9 @@ def psis_pareto_k(weights: np.ndarray, min_tail_len: int = 5) -> float:
     §2.2-2.3:
 
     1. Sort raw importance weights in ascending order.
-    2. Take the top ``M = min(0.2·n, 3·sqrt(n))`` weights as the tail.
+    2. Take the top ``M = min(0.2·n, 3·sqrt(n))`` weights as the tail,
+       capped at ``_MAX_PARETO_K_TAIL_LEN`` (200) to keep the GPD fit
+       fast on very large samples.
     3. Subtract the threshold (the largest weight *below* the tail).
     4. Fit a Generalized Pareto Distribution to those tail exceedances via
        the profile-likelihood estimator of Zhang & Stephens (2009).
@@ -632,7 +635,8 @@ def psis_pareto_k(weights: np.ndarray, min_tail_len: int = 5) -> float:
     ----------
     weights : np.ndarray
         Raw (unclipped) importance weights ``1 / π(a_observed | x)`` for the
-        matched subset.  Must be 1-D, non-negative, and finite.
+        matched subset.  Must be 1-D (or column-vector ``(n, 1)``),
+        non-negative, and finite.
     min_tail_len : int, default=5
         Minimum required tail length to attempt the GPD fit. Below this we
         return ``nan`` (statistically meaningless).
@@ -643,7 +647,12 @@ def psis_pareto_k(weights: np.ndarray, min_tail_len: int = 5) -> float:
         Estimated Pareto-k shape parameter, or ``nan`` if the weights are
         degenerate (all equal, too few non-zero, or too few samples).
     """
-    w = np.asarray(weights, dtype=float).ravel()
+    w = np.asarray(weights, dtype=float)
+    if w.ndim > 2 or (w.ndim == 2 and w.shape[1] != 1):
+        raise DataValidationError(
+            f"psis_pareto_k: weights must be 1-D or (n, 1), got shape {w.shape}"
+        )
+    w = w.ravel()
     if w.size == 0:
         return float("nan")
     if not np.isfinite(w).all():
