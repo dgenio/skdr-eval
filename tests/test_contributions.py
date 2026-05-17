@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import time
+import tracemalloc
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -546,8 +547,6 @@ def test_stress_memory_off_vs_on_within_bounds():
     the absence of the six contribution arrays. Within 1% on n=50000 is
     well inside the budget.
     """
-    import tracemalloc
-
     n = 50_000
 
     tracemalloc.start()
