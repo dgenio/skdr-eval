@@ -124,6 +124,19 @@ print(artifact.diagnostics)     # propensity overlap / calibration / discriminat
 # 6. Export (issue #28) and stakeholder card (issue #30)
 artifact.export("artifacts/run", formats=["json", "html"])
 artifact.save_card("artifacts/run_card.html", "RandomForest")
+
+# 7. Per-decision contributions (issue #92) — opt in with keep_contributions=True
+artifact = skdr_eval.evaluate_sklearn_models(
+    logs=logs,
+    models=models,
+    fit_models=True,
+    n_splits=3,
+    random_state=42,
+    keep_contributions=True,  # attach per-decision DR/SNDR pseudo-outcomes
+)
+contribs = artifact.contributions("RandomForest", estimator="DR", top_k=5)
+print(contribs)  # decision_id, q_pi, q_hat, weight, reward, contribution_to_V
+#  contribution_to_V.mean() == V_hat by construction (float64 precision)
 ```
 
 > **Breaking change in 0.6.0:** `evaluate_sklearn_models` and
