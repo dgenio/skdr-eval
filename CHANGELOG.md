@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-05-17
 
 ### Added
 - **PSIS Pareto-k support-health diagnostic** ([#80]). Every `DRResult` and report row now carries `pareto_k`, the Generalized-Pareto shape parameter of the unclipped importance-weight tail (Vehtari, Simpson, Gelman, Yao & Gabry 2024, *Pareto Smoothed Importance Sampling*, JMLR 25:1–58). New warning code `HIGH_PARETO_K` fires as `caution` when `k ≥ 0.5` and escalates to `high_risk` when `k ≥ 0.7`. Thresholds tunable via `SupportHealthThresholds(high_pareto_k_caution=..., high_pareto_k=...)`. New public helper `skdr_eval.diagnostics.psis_pareto_k(weights)`.
