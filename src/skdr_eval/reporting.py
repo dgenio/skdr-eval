@@ -32,7 +32,7 @@ import io
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -772,8 +772,6 @@ class EvaluationArtifact:
 
     def to_json_str(self, *, indent: int | None = 2) -> str:
         """Serialize the artifact to a JSON string via the Pydantic schema."""
-        # ``model_dump_json`` is typed Any under the current pydantic stubs;
-        # cast to str so mypy --strict (``warn_return_any``) stays clean.
         return str(self.to_schema().model_dump_json(indent=indent))
 
     def to_json(self, path: str | Path, *, indent: int | None = 2) -> Path:
@@ -807,8 +805,6 @@ class EvaluationArtifact:
         diagnostics_payload = {
             name: _diag_to_payload(diag) for name, diag in self.diagnostics.items()
         }
-        # Jinja's ``Template.render`` is typed Any under the current stubs;
-        # cast to ``str`` so mypy --strict stays clean.
         return str(
             template.render(
                 schema_version=self.metadata.get("schema_version", SCHEMA_VERSION),
@@ -885,6 +881,13 @@ class EvaluationArtifact:
         diag = self.diagnostics.get(model_name)
         diag_payload = _diag_to_payload(diag) if diag is not None else None
 
+        # Top contributors / detractors block (#92). Available when the
+        # evaluator was called with keep_contributions=True; otherwise the
+        # lists stay empty.
+        top_contributors, bottom_detractors = self._card_contribution_rows(
+            model_name, headline_estimator
+        )
+
         return {
             "model_name": model_name,
             "task_summary": self.metadata.get("evaluator", "skdr_eval"),
@@ -904,10 +907,61 @@ class EvaluationArtifact:
             "plot_b64": plot_b64,
             "estimator_rows": estimator_rows,
             "diagnostics": diag_payload,
+            "top_contributors": top_contributors,
+            "bottom_detractors": bottom_detractors,
             "schema_version": self.metadata.get("schema_version", SCHEMA_VERSION),
             "skdr_eval_version": self.metadata.get("skdr_eval_version", "unknown"),
             "timestamp": self.metadata.get("timestamp", ""),
         }
+
+    def _card_contribution_rows(
+        self,
+        model_name: str,
+        headline_estimator: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Return (top contributors, bottom detractors) for the card.
+
+        Empty lists when contributions are not captured for this run.
+        """
+        result = self.detailed[model_name][headline_estimator]
+        if result.contributions is None:
+            return [], []
+        contrib = result.contributions["contribution_to_V"]
+        decision_id = result.contributions["decision_id"]
+        n_contrib = len(contrib)
+        if n_contrib == 0:
+            return [], []
+        order = np.argsort(contrib)
+        if n_contrib == 1:
+            # Only one decision: show it as a single top contributor, no
+            # bottom block — otherwise the same id would render in both.
+            return [
+                {
+                    "decision_id": int(decision_id[order[0]]),
+                    "contribution_to_V": float(contrib[order[0]]),
+                }
+            ], []
+        # Partition into two non-overlapping halves so the card never shows the
+        # same decision in both "top contributors" and "bottom detractors" when
+        # n_contrib < 10. Each block caps at 5.
+        n_show = min(5, n_contrib // 2)
+        bottom_idx = order[:n_show]
+        top_idx = order[-n_show:][::-1]
+        top = [
+            {
+                "decision_id": int(decision_id[i]),
+                "contribution_to_V": float(contrib[i]),
+            }
+            for i in top_idx
+        ]
+        bottom = [
+            {
+                "decision_id": int(decision_id[i]),
+                "contribution_to_V": float(contrib[i]),
+            }
+            for i in bottom_idx
+        ]
+        return top, bottom
 
     def card(
         self,
@@ -941,8 +995,6 @@ class EvaluationArtifact:
         )
         env = _template_env()
         template = env.get_template("card.html")
-        # Jinja's ``Template.render`` is typed Any under the current stubs;
-        # cast to ``str`` so mypy --strict stays clean.
         return str(template.render(**ctx))
 
     def save_card(
@@ -961,6 +1013,88 @@ class EvaluationArtifact:
         )
         logger.info("Wrote evaluation card to %s", p)
         return p
+
+    # ------------------------------------------------------------------ #
+    # Per-decision contributions (#92)                                    #
+    # ------------------------------------------------------------------ #
+
+    _CONTRIBUTION_COLUMNS = (
+        "decision_id",
+        "q_pi",
+        "q_hat",
+        "weight",
+        "reward",
+        "contribution_to_V",
+    )
+
+    def contributions(
+        self,
+        model_name: str,
+        *,
+        estimator: str = "DR",
+        top_k: int | None = None,
+    ) -> pd.DataFrame:
+        """Per-decision contributions to ``V_hat`` (issue #92).
+
+        Returns a DataFrame with columns ``decision_id, q_pi, q_hat, weight,
+        reward, contribution_to_V``. By construction
+        ``contribution_to_V.mean() == V_hat`` to float64 precision for the
+        selected ``(model_name, estimator)`` row in :attr:`report`.
+
+        Only available when the evaluator was called with
+        ``keep_contributions=True``.
+
+        Parameters
+        ----------
+        model_name : str
+            Model in :attr:`detailed`.
+        estimator : ``"DR"`` or ``"SNDR"``, default ``"DR"``
+            Which estimator's contributions to return.
+        top_k : int, optional
+            If set, return only the ``top_k`` largest-magnitude
+            contributions (``contribution_to_V.abs().nlargest(top_k)``).
+            ``None`` returns all rows.
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per evaluated decision (or ``top_k`` rows).
+
+        Raises
+        ------
+        DataValidationError
+            If ``model_name``/``estimator`` is unknown, or if contributions
+            were not captured for this run.
+        """
+        if model_name not in self.detailed:
+            raise DataValidationError(
+                f"model {model_name!r} not in artifact "
+                f"(known: {sorted(self.detailed)})",
+            )
+        est_map = self.detailed[model_name]
+        if estimator not in est_map:
+            raise DataValidationError(
+                f"estimator {estimator!r} not in detailed[{model_name!r}] "
+                f"(known: {sorted(est_map)})",
+            )
+
+        result = est_map[estimator]
+        payload = result.contributions
+        if payload is None:
+            raise DataValidationError(
+                "per-decision contributions are not available; re-run with "
+                "keep_contributions=True.",
+            )
+
+        frame = pd.DataFrame({col: payload[col] for col in self._CONTRIBUTION_COLUMNS})
+        if top_k is not None:
+            if top_k <= 0:
+                raise DataValidationError(
+                    f"top_k must be a positive integer, got {top_k!r}",
+                )
+            ordering = frame["contribution_to_V"].abs().sort_values(ascending=False)
+            frame = frame.loc[ordering.index[:top_k]].reset_index(drop=True)
+        return frame
 
     # ------------------------------------------------------------------ #
     # Bulk export                                                         #
@@ -1206,7 +1340,7 @@ def build_evaluation_artifact(
     metadata: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "skdr_eval_version": _pkg_version,
-        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
         "evaluator": evaluator,
         "n_samples": int(n_samples),
     }
@@ -1231,11 +1365,8 @@ def load_artifact_json(path: str | Path) -> ArtifactSchema:
     """Load and validate an artifact JSON file. Returns the Pydantic schema."""
     p = Path(path)
     data = json.loads(p.read_text(encoding="utf-8"))
-    # ``model_validate`` returns ``Self`` in pydantic v2 but the current stubs
-    # surface it as ``Any``; the runtime guarantee is satisfied — annotate so
-    # mypy --strict (``warn_return_any``) stays clean.
-    validated: ArtifactSchema = ArtifactSchema.model_validate(data)
-    return validated
+    schema: ArtifactSchema = ArtifactSchema.model_validate(data)
+    return schema
 
 
 def export_results(

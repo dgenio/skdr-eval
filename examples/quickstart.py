@@ -15,6 +15,9 @@ def main():
     print("\n1. Generating synthetic service logs...")
     logs, ops_all, _ = skdr_eval.make_synth_logs(n=5000, n_ops=5, seed=42)
 
+    # Preflight: confirm the logs schema is what evaluate_sklearn_models expects.
+    skdr_eval.validate_logs(logs)
+
     print(f"   Generated {len(logs)} log entries")
     print(f"   Operators: {list(ops_all)}")
     print(
@@ -48,6 +51,7 @@ def main():
         random_state=42,
         policy_train="pre_split",
         policy_train_frac=0.8,
+        keep_contributions=True,  # #92: enable per-decision V_hat contributions
     )
 
     # 0.6.0: evaluate_sklearn_models returns a single EvaluationArtifact bundling
@@ -189,6 +193,12 @@ def main():
         best_model_name,
     )
     print(f"   Wrote card: {card_path}")
+
+    # 12. Per-decision contributions (issue #92)
+    print("\n12. Top decisions driving V_hat (DR contributions)")
+    print("-" * 50)
+    top5 = artifact.contributions(best_model_name, estimator="DR", top_k=5)
+    print(top5.to_string(index=False))
 
     print("\nQuickstart example completed!")
     print("\nNext steps:")

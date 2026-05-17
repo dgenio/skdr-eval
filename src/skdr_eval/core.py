@@ -1,8 +1,9 @@
 """Core implementation of DR and Stabilized DR for offline policy evaluation."""
 
 import logging
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Literal, Protocol
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
     from .reporting import EvaluationArtifact, SupportHealthThresholds
@@ -52,6 +53,68 @@ from .validation import (
 )
 
 logger = logging.getLogger("skdr_eval")
+
+
+def _make_time_series_split(
+    n_samples: int,
+    n_splits: int,
+    *,
+    gap: int = 1,
+    test_size: int | None = None,
+    max_train_size: int | None = None,
+) -> TimeSeriesSplit:
+    """Build a ``TimeSeriesSplit`` with validated temporal-split controls.
+
+    ``gap``, ``test_size``, and ``max_train_size`` are passed straight through
+    to :class:`sklearn.model_selection.TimeSeriesSplit`; we only enforce
+    pre-conditions that would otherwise surface as opaque sklearn errors deep
+    in fold iteration.
+
+    The default ``gap=1`` is a conservative leakage guard for adjacent
+    observations in time-ordered data — it prevents the fold immediately
+    following the training cut from touching the last training row.
+    """
+    # n_splits >= 2 is a TimeSeriesSplit precondition; surface it eagerly
+    # with our typed error rather than letting sklearn raise deep in .split().
+    _MIN_SPLITS = 2
+    if not isinstance(n_splits, int) or n_splits < _MIN_SPLITS:
+        raise DataValidationError(
+            f"n_splits must be an integer >= {_MIN_SPLITS}, got {n_splits!r}"
+        )
+    if not isinstance(gap, int) or gap < 0:
+        raise DataValidationError(f"gap must be a non-negative integer, got {gap!r}")
+    if test_size is not None and (not isinstance(test_size, int) or test_size <= 0):
+        raise DataValidationError(
+            f"test_size must be a positive integer or None, got {test_size!r}"
+        )
+    if max_train_size is not None and (
+        not isinstance(max_train_size, int) or max_train_size <= 0
+    ):
+        raise DataValidationError(
+            f"max_train_size must be a positive integer or None, got {max_train_size!r}"
+        )
+
+    # Feasibility: sklearn's TimeSeriesSplit needs n_samples > n_splits *
+    # test_size + gap. We also enforce the n_splits * 2 floor so every fold
+    # contains at least one train sample even when test_size is implicit.
+    effective_test = test_size if test_size is not None else 1
+    min_required = max(
+        n_splits * 2,
+        n_splits * effective_test + gap + 1,
+    )
+    if n_samples < min_required:
+        raise InsufficientDataError(
+            f"Need at least {min_required} samples for "
+            f"n_splits={n_splits}, gap={gap}, test_size={test_size}; "
+            f"got {n_samples}"
+        )
+
+    return TimeSeriesSplit(
+        n_splits=n_splits,
+        gap=gap,
+        test_size=test_size,
+        max_train_size=max_train_size,
+    )
 
 
 # Type definitions for better type safety
@@ -149,6 +212,14 @@ class DRResult:
         importance weights of the matched subset. ``k < 0.5`` is reliable,
         ``0.5 ≤ k < 0.7`` is caution, ``k ≥ 0.7`` is high-risk. ``nan`` when
         the matched subset is too small to fit a tail.
+    contributions : dict[str, np.ndarray] | None, optional
+        Per-decision contributions captured at the selected clip. ``None``
+        unless the evaluator was called with ``keep_contributions=True`` or
+        ``ci_bootstrap=True``. Keys: ``decision_id`` (int row position into
+        the evaluated slice), ``q_pi``, ``q_hat``, ``weight``, ``reward``,
+        ``contribution_to_V``. By construction
+        ``contribution_to_V.mean() == V_hat`` to float64 precision for both
+        DR and SNDR (issue #92).
     """
 
     clip: float
@@ -164,6 +235,7 @@ class DRResult:
     pscore_q01: float
     grid: pd.DataFrame
     pareto_k: float = float("nan")
+    contributions: dict[str, np.ndarray] | None = field(default=None)
 
 
 def build_design(
@@ -291,6 +363,10 @@ def fit_propensity_timecal(
     ts: np.ndarray | None = None,
     n_splits: int = 3,
     random_state: int = 0,
+    *,
+    gap: int = 1,
+    test_size: int | None = None,
+    max_train_size: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Fit propensity model with time-aware cross-validation and calibration.
 
@@ -306,6 +382,17 @@ def fit_propensity_timecal(
         Number of time-series splits.
     random_state : int, default=0
         Random seed.
+    gap : int, default=1
+        Number of samples to exclude between the end of each training fold and
+        the start of the corresponding test fold. The default of ``1`` is a
+        conservative guard against adjacent-row temporal leakage; set to ``0``
+        to recover the unbuffered sklearn default.
+    test_size : int, optional
+        Per-fold test-window size in samples. ``None`` (default) defers to
+        sklearn's automatic sizing.
+    max_train_size : int, optional
+        Cap the training-fold size in samples (sliding-window CV). ``None``
+        (default) uses an expanding window.
 
     Returns
     -------
@@ -353,11 +440,6 @@ def fit_propensity_timecal(
         if n_actions <= 1:
             raise InsufficientDataError(f"Need at least 2 actions, got {n_actions}")
 
-        if n_samples < n_splits * 2:
-            raise InsufficientDataError(
-                f"Need at least {n_splits * 2} samples for {n_splits} splits, got {n_samples}"
-            )
-
         # Sort by timestamp if provided to ensure proper time-series ordering
         if ts is not None:
             time_order = np.argsort(ts)
@@ -373,7 +455,13 @@ def fit_propensity_timecal(
             inverse_order = np.arange(n_samples)
 
         # Time-series split on sorted data
-        tscv = TimeSeriesSplit(n_splits=n_splits)
+        tscv = _make_time_series_split(
+            n_samples,
+            n_splits,
+            gap=gap,
+            test_size=test_size,
+            max_train_size=max_train_size,
+        )
         propensities = np.zeros((n_samples, n_actions))
         fold_indices = np.full(n_samples, -1)
 
@@ -496,6 +584,10 @@ def fit_outcome_crossfit(
     n_splits: int = 3,
     estimator: str | Callable[[], Any] = "hgb",
     random_state: int = 0,
+    *,
+    gap: int = 1,
+    test_size: int | None = None,
+    max_train_size: int | None = None,
 ) -> tuple[np.ndarray, list[tuple[Any, np.ndarray, np.ndarray]]]:
     """Fit outcome model with cross-fitting.
 
@@ -511,6 +603,13 @@ def fit_outcome_crossfit(
         Estimator type or factory function.
     random_state : int, default=0
         Random seed.
+    gap : int, default=1
+        Number of samples skipped between train and test windows; see
+        :func:`fit_propensity_timecal` for full semantics.
+    test_size : int, optional
+        Per-fold test-window size in samples.
+    max_train_size : int, optional
+        Cap on training-fold size in samples.
 
     Returns
     -------
@@ -545,11 +644,6 @@ def fit_outcome_crossfit(
             )
 
         n_samples = X_obs.shape[0]
-        if n_samples < n_splits * 2:
-            raise InsufficientDataError(
-                f"Need at least {n_splits * 2} samples for {n_splits} splits, got {n_samples}"
-            )
-
         predictions = np.zeros(n_samples)
         models_info = []
 
@@ -574,7 +668,13 @@ def fit_outcome_crossfit(
             raise ValueError(f"Unknown estimator: {estimator}")
 
         # Time-series split
-        tscv = TimeSeriesSplit(n_splits=n_splits)
+        tscv = _make_time_series_split(
+            n_samples,
+            n_splits,
+            gap=gap,
+            test_size=test_size,
+            max_train_size=max_train_size,
+        )
 
         for fold_idx, (train_idx, test_idx) in enumerate(tscv.split(X_obs)):
             try:
@@ -930,6 +1030,122 @@ def dr_value_with_clip(
     return {"DR": dr_result, "SNDR": sndr_result}
 
 
+# Maximum number of evaluated decisions for which per-decision contributions
+# may be captured. At 5 float64 columns x 100M decisions x 2 estimators this is
+# ~8 GB; a higher value is a deliberate opt-in.
+DEFAULT_MAX_KEPT_CONTRIBUTIONS = 100_000_000
+
+
+def _compute_contributions(
+    propensities: np.ndarray,
+    policy_probs: np.ndarray,
+    Y: np.ndarray,
+    q_hat: np.ndarray,
+    A: np.ndarray,
+    elig: np.ndarray,
+    clip: float,
+    *,
+    eval_log_indices: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Recompute per-decision DR ingredients at a selected clip.
+
+    Returns ``(q_pi, w_clip, dr_contrib, decision_id, matched)`` arrays of
+    length ``n = len(Y)``. ``dr_contrib`` is the textbook DR pseudo-outcome
+    ``q_pi + w_clip * (Y - q_hat)``; ``mean(dr_contrib) == V_DR`` to float64
+    precision. ``decision_id`` is ``eval_log_indices`` if supplied (so
+    callers can join contributions back to the original logs after a
+    pre-split), else ``arange(n)``.
+
+    This helper exists so the new ``keep_contributions`` path (issue #92)
+    and the existing ``ci_bootstrap`` path share one code path — otherwise
+    the identity test ``mean(contribution_to_V) == V_hat`` could drift from
+    the value the bootstrap CI conditions on.
+    """
+    n = len(Y)
+    # q_pi == q_hat when q_hat is 1D; see design note in dr_value_with_clip.
+    q_pi = np.sum(policy_probs * q_hat.reshape(n, -1), axis=1)
+    pi_obs = propensities[np.arange(n), A]
+    A_int = A.astype(int)
+    elig_bool = elig.astype(bool)
+    matched = (pi_obs > 0) & elig_bool[np.arange(n), A_int]
+
+    if clip == float("inf"):
+        w_clip = np.where(pi_obs > 0, 1.0 / pi_obs, 0.0)
+    else:
+        w_clip = np.where(pi_obs > 0, np.minimum(1.0 / pi_obs, clip), 0.0)
+    w_clip[~matched] = 0
+
+    dr_contrib = q_pi + w_clip * (Y - q_hat)
+
+    decision_id: np.ndarray
+    if eval_log_indices is None:
+        decision_id = np.arange(n, dtype=np.int64)
+    else:
+        decision_id = np.asarray(eval_log_indices, dtype=np.int64)
+        if len(decision_id) != n:
+            raise DataValidationError(
+                f"eval_log_indices length {len(decision_id)} != n_decisions {n}",
+            )
+
+    return q_pi, w_clip, dr_contrib, decision_id, matched
+
+
+def _build_contributions_payload(
+    results: dict[str, "DRResult"],
+    propensities: np.ndarray,
+    policy_probs: np.ndarray,
+    Y: np.ndarray,
+    q_hat: np.ndarray,
+    A: np.ndarray,
+    elig: np.ndarray,
+    *,
+    eval_log_indices: np.ndarray | None,
+) -> dict[str, dict[str, np.ndarray]]:
+    """Build ``{estimator: contributions_dict}`` for every entry in ``results``.
+
+    DR uses the textbook pseudo-outcome ``q_pi + w*(Y - q_hat)`` whose mean
+    is ``V_DR``. SNDR rescales the residual term by ``n / Σw`` so that the
+    per-decision values average to the ratio estimator's ``V_SNDR``
+    (``q_pi.mean() + Σw*(Y-q_hat)/Σw``).
+    """
+    payload: dict[str, dict[str, np.ndarray]] = {}
+    for estimator_name, result in results.items():
+        q_pi, w_clip, dr_contrib, decision_id, _matched = _compute_contributions(
+            propensities,
+            policy_probs,
+            Y,
+            q_hat,
+            A,
+            elig,
+            result.clip,
+            eval_log_indices=eval_log_indices,
+        )
+
+        if estimator_name == "SNDR":
+            w_sum = float(w_clip.sum())
+            n = len(Y)
+            if w_sum > 0:
+                contribution_to_V = q_pi + (n * w_clip / w_sum) * (Y - q_hat)
+            else:
+                # SNDR fallback path matches dr_value_with_clip: q_pi.mean().
+                # Unreachable from the public API because dr_value_with_clip
+                # raises ValueError("No matched samples found") before
+                # returning when w_clip.sum() would be 0.
+                contribution_to_V = q_pi.copy()  # pragma: no cover
+        else:
+            contribution_to_V = dr_contrib
+
+        payload[estimator_name] = {
+            "decision_id": decision_id,
+            "q_pi": q_pi,
+            "q_hat": np.asarray(q_hat, dtype=np.float64),
+            "weight": w_clip,
+            "reward": np.asarray(Y, dtype=np.float64),
+            "contribution_to_V": contribution_to_V,
+        }
+    return payload
+
+
 def block_bootstrap_ci(
     values_num: np.ndarray,
     values_den: np.ndarray | None,
@@ -1034,6 +1250,12 @@ def evaluate_sklearn_models(
     policy_train: str = "all",
     policy_train_frac: float = 0.85,
     support_thresholds: "SupportHealthThresholds | None" = None,
+    *,
+    gap: int = 1,
+    test_size: int | None = None,
+    max_train_size: int | None = None,
+    keep_contributions: bool = False,
+    max_kept_contributions: int = DEFAULT_MAX_KEPT_CONTRIBUTIONS,
 ) -> "EvaluationArtifact":
     """Evaluate sklearn models using DR and SNDR estimators.
 
@@ -1070,6 +1292,16 @@ def evaluate_sklearn_models(
     support_thresholds : SupportHealthThresholds, optional
         Thresholds for support-health warnings attached to the returned
         artifact. See :class:`skdr_eval.reporting.SupportHealthThresholds`.
+    keep_contributions : bool, default=False
+        If True, attach per-decision DR/SNDR contributions to each
+        :class:`DRResult` under ``contributions`` and make them queryable
+        via :meth:`EvaluationArtifact.contributions` (issue #92). Default
+        is False to preserve the memory profile. Independent of
+        ``ci_bootstrap``: enabling bootstrap CIs does not attach a payload.
+    max_kept_contributions : int, default=100_000_000
+        Hard cap on the number of evaluated decisions for which per-decision
+        contributions may be captured. Raises :class:`DataValidationError`
+        if ``n_eval`` exceeds this value while contributions are being kept.
 
     Returns
     -------
@@ -1083,6 +1315,9 @@ def evaluate_sklearn_models(
     ------
     ValueError
         If ``models`` is empty or contains ``None`` values.
+    DataValidationError
+        If ``keep_contributions=True`` is set with more than
+        ``max_kept_contributions`` evaluated decisions.
     """
     if not models:
         raise ValueError("models dict must not be empty")
@@ -1120,6 +1355,23 @@ def evaluate_sklearn_models(
     else:
         train_design = design
         eval_design = design
+        n_train = 0
+
+    # Original-log row positions for the evaluated slice. Carried through to
+    # per-decision contributions so users can join back to ``logs`` (#92).
+    eval_log_indices = np.arange(n_train, n_train + len(eval_design.Y), dtype=np.int64)
+
+    # Contributions capture is opt-in via keep_contributions. The
+    # ci_bootstrap path keeps its own local arrays (see below) and does not
+    # attach a payload to DRResult, so existing CI callers see no change in
+    # retained memory.
+    if keep_contributions and len(eval_log_indices) > max_kept_contributions:
+        raise DataValidationError(
+            f"keep_contributions requested for {len(eval_log_indices)} "
+            f"decisions, exceeding max_kept_contributions="
+            f"{max_kept_contributions}. Raise the cap explicitly or "
+            f"disable keep_contributions.",
+        )
 
     # Fit propensity model
     propensities, _ = fit_propensity_timecal(
@@ -1128,6 +1380,9 @@ def evaluate_sklearn_models(
         eval_design.ts,
         n_splits=n_splits,
         random_state=random_state,
+        gap=gap,
+        test_size=test_size,
+        max_train_size=max_train_size,
     )
 
     # Fit outcome model
@@ -1137,6 +1392,9 @@ def evaluate_sklearn_models(
         n_splits=n_splits,
         estimator=outcome_estimator,
         random_state=random_state,
+        gap=gap,
+        test_size=test_size,
+        max_train_size=max_train_size,
     )
 
     # Evaluate each model
@@ -1168,6 +1426,23 @@ def evaluate_sklearn_models(
         )
 
         detailed_results[model_name] = results
+
+        # Attach per-decision contributions (#92). Opt-in only; does not
+        # interact with the ci_bootstrap path, which uses its own local
+        # arrays inline to preserve historical CI values.
+        if keep_contributions:
+            contribs_payload = _build_contributions_payload(
+                results,
+                propensities,
+                policy_probs,
+                eval_design.Y,
+                q_hat,
+                eval_design.A,
+                eval_design.elig,
+                eval_log_indices=eval_log_indices,
+            )
+            for est_name, est_payload in contribs_payload.items():
+                results[est_name].contributions = est_payload
 
         # Add to report
         for estimator_name, result in results.items():
@@ -1312,6 +1587,9 @@ def estimate_propensity_pairwise(
     neg_per_pos: int = 5,
     n_splits: int = 3,
     random_state: int = 0,
+    gap: int = 1,
+    test_size: int | None = None,
+    max_train_size: int | None = None,
 ) -> np.ndarray:
     """Estimate propensity scores for pairwise evaluation.
 
@@ -1330,6 +1608,13 @@ def estimate_propensity_pairwise(
         Number of time series splits
     random_state : int
         Random seed
+    gap : int, default=1
+        Samples skipped between train and test windows in the time-series CV
+        used to fit the propensity classifier.
+    test_size : int, optional
+        Per-fold test-window size in samples; ``None`` defers to sklearn.
+    max_train_size : int, optional
+        Cap on training-fold size in samples; ``None`` uses expanding window.
 
     Returns
     -------
@@ -1356,7 +1641,6 @@ def estimate_propensity_pairwise(
 
     if method == "condlogit":
         # Build pairwise training data with time-forward splits
-        tscv = TimeSeriesSplit(n_splits=n_splits)
         days_sorted = sorted(design.ops_all_by_day.keys())
 
         # Create day-to-index mapping for time splits
@@ -1369,6 +1653,14 @@ def estimate_propensity_pairwise(
         for day in days_sorted:
             all_indices_list.extend(day_indices[day])
         all_indices = np.array(all_indices_list)
+
+        tscv = _make_time_series_split(
+            len(all_indices),
+            n_splits,
+            gap=gap,
+            test_size=test_size,
+            max_train_size=max_train_size,
+        )
 
         # Fit conditional logit with cross-validation
         for fold, (train_idx, test_idx) in enumerate(tscv.split(all_indices)):
@@ -1525,7 +1817,13 @@ def estimate_propensity_pairwise(
         X_client = np.array(client_features, dtype=np.float32)
 
         # Fit multinomial logistic regression with time-forward CV
-        tscv = TimeSeriesSplit(n_splits=n_splits)
+        tscv = _make_time_series_split(
+            len(X_client),
+            n_splits,
+            gap=gap,
+            test_size=test_size,
+            max_train_size=max_train_size,
+        )
 
         for train_idx, test_idx in tscv.split(X_client):
             X_train, X_test = X_client[train_idx], X_client[test_idx]
@@ -1616,6 +1914,12 @@ def evaluate_pairwise_models(
     random_state: int = 0,
     outcome_estimator: str | Callable[[], Any] = "hgb",
     support_thresholds: "SupportHealthThresholds | None" = None,
+    *,
+    gap: int = 1,
+    test_size: int | None = None,
+    max_train_size: int | None = None,
+    keep_contributions: bool = False,
+    max_kept_contributions: int = DEFAULT_MAX_KEPT_CONTRIBUTIONS,
 ) -> "EvaluationArtifact":
     """Evaluate pairwise models using autoscale strategy.
 
@@ -1700,6 +2004,16 @@ def evaluate_pairwise_models(
     support_thresholds : SupportHealthThresholds, optional
         Thresholds for support-health warnings attached to the returned
         artifact. See :class:`skdr_eval.reporting.SupportHealthThresholds`.
+    keep_contributions : bool, default=False
+        If True, attach per-decision DR/SNDR contributions to each
+        :class:`DRResult` under ``contributions`` and make them queryable
+        via :meth:`EvaluationArtifact.contributions` (issue #92). Default
+        is False to preserve the memory profile; ``ci_bootstrap=True``
+        auto-enables capture (the bootstrap path computes the same arrays).
+    max_kept_contributions : int, default=100_000_000
+        Hard cap on the number of evaluated decisions for which per-decision
+        contributions may be captured. Raises :class:`DataValidationError`
+        if ``n_eval`` exceeds this value while contributions are being kept.
 
     Returns
     -------
@@ -1708,6 +2022,12 @@ def evaluate_pairwise_models(
         ``sensitivity``, ``diagnostics``, and ``metadata``. **Breaking change
         in 0.6.0**: previously returned ``(report, detailed_results)``;
         migrate by unpacking ``artifact.report`` and ``artifact.detailed``.
+
+    Raises
+    ------
+    DataValidationError
+        If ``keep_contributions=True`` is set with more than
+        ``max_kept_contributions`` evaluated decisions.
     """
 
     logger.info("Starting pairwise evaluation")
@@ -1733,15 +2053,26 @@ def evaluate_pairwise_models(
     # Optional pre_split: fit policy models on training portion, evaluate on
     # held-out tail. This avoids training-on-test leakage when fit_models=True.
     eval_logs_df = logs_df
+    # Track original-log positions for the eval slice so per-decision
+    # contributions can be joined back to the user's input ``logs_df`` via the
+    # documented ``logs.reset_index(names="decision_id")`` pattern. For
+    # ``policy_train="all"``, the eval slice IS the input, so the identity
+    # mapping is correct.
+    eval_log_indices_pair: np.ndarray = np.arange(len(logs_df), dtype=np.int64)
     if fit_models and policy_train == "pre_split":
-        # Sort by day to respect time order, then split chronologically
-        sorted_logs = logs_df.sort_values(by=day_col, kind="stable").reset_index(
-            drop=True
-        )
+        # Sort by day to respect time order, then split chronologically.
+        # Capture the permutation so the eval-slice rows still carry their
+        # positional indices into the user's input ``logs_df`` (issue #92,
+        # acceptance criterion: original log columns are joinable back).
+        positions = logs_df.reset_index(drop=True)
+        sorted_with_pos = positions.sort_values(by=day_col, kind="stable")
+        sort_order = sorted_with_pos.index.to_numpy()
+        sorted_logs = sorted_with_pos.reset_index(drop=True)
         n_total = len(sorted_logs)
         n_train = max(1, int(n_total * policy_train_frac))
         train_logs = sorted_logs.iloc[:n_train].reset_index(drop=True)
         eval_logs_df = sorted_logs.iloc[n_train:].reset_index(drop=True)
+        eval_log_indices_pair = sort_order[n_train:].astype(np.int64)
         if len(eval_logs_df) == 0:
             raise ValueError(
                 f"pre_split left 0 evaluation rows (n_total={n_total}, "
@@ -1815,6 +2146,9 @@ def evaluate_pairwise_models(
         neg_per_pos=neg_per_pos,
         n_splits=n_splits,
         random_state=random_state,
+        gap=gap,
+        test_size=test_size,
+        max_train_size=max_train_size,
     )
 
     # Fit outcome models with cross-fitting
@@ -1866,11 +2200,41 @@ def evaluate_pairwise_models(
     # Fit outcome model
     estimator_obj = _get_outcome_estimator(outcome_estimator, task_type)
     q_hat, _ = fit_outcome_crossfit(
-        X_obs, Y.astype(np.float64), n_splits, lambda: estimator_obj, random_state
+        X_obs,
+        Y.astype(np.float64),
+        n_splits,
+        lambda: estimator_obj,
+        random_state,
+        gap=gap,
+        test_size=test_size,
+        max_train_size=max_train_size,
     )
 
     # Convert policies to policy probabilities
     max_ops = max(len(ops) for ops in design.ops_all_by_day.values())
+
+    # Per-decision contributions plumbing (#92). Opt-in only; ci_bootstrap
+    # keeps its own local arrays and does not attach a payload to DRResult.
+    # ``eval_log_indices_pair`` was established up at the pre_split block and
+    # carries each eval-slice row's positional index into the *original*
+    # ``logs_df`` so users can ``merge(frame, logs.reset_index(names=
+    # "decision_id"))`` against their full input even after a pre_split.
+    if keep_contributions and len(logs_df) > max_kept_contributions:
+        raise DataValidationError(
+            f"keep_contributions requested for {len(logs_df)} decisions, "
+            f"exceeding max_kept_contributions={max_kept_contributions}. "
+            f"Raise the cap explicitly or disable keep_contributions.",
+        )
+    # Defensive sanity check: ``logs_df`` was rebound to ``design.logs_df``
+    # above; its length must match the slice ``eval_log_indices_pair`` was
+    # built for. Mismatch would indicate an unexpected re-ordering inside
+    # PairwiseDesign.from_dataframes.
+    if len(eval_log_indices_pair) != len(logs_df):
+        raise DataValidationError(
+            f"internal: eval_log_indices_pair length "
+            f"{len(eval_log_indices_pair)} != design.logs_df length "
+            f"{len(logs_df)}; contributions decision_id would be wrong"
+        )
 
     detailed_results = {}
     report_rows = []
@@ -1925,6 +2289,21 @@ def evaluate_pairwise_models(
             )
 
             detailed_results[model_name] = results
+
+            # Attach per-decision contributions (#92). Opt-in only.
+            if keep_contributions:
+                contribs_payload = _build_contributions_payload(
+                    results,
+                    propensities,
+                    policy_probs,
+                    Y.astype(np.float64),
+                    q_hat,
+                    A,
+                    elig,
+                    eval_log_indices=eval_log_indices_pair,
+                )
+                for est_name, est_payload in contribs_payload.items():
+                    results[est_name].contributions = est_payload
 
             # Add to report
             for estimator_name, result in results.items():

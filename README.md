@@ -66,6 +66,29 @@ pip install -e .[dev]
 
 ## Quick Start
 
+### Preflight
+
+Before a real evaluation, confirm your environment + schema in one shot:
+
+```python
+import skdr_eval
+
+# Which optional extras are installed?
+print(skdr_eval.get_capabilities())
+# {'viz': True, 'speed': False, 'missing_extras': ['speed']}
+
+# Validate your logs match the schema evaluate_sklearn_models expects.
+skdr_eval.validate_logs(logs, strict=True)
+
+# For the pairwise API:
+skdr_eval.validate_pairwise_inputs(
+    logs_df, op_daily_df, metric_col="service_time", strict=True,
+)
+```
+
+See `examples/preflight.py` for a runnable script — wire it into CI to catch
+schema or extras drift before the long-running evaluation kicks off.
+
 ### Standard Evaluation
 
 ```python
@@ -101,6 +124,19 @@ print(artifact.diagnostics)     # propensity overlap / calibration / discriminat
 # 6. Export (issue #28) and stakeholder card (issue #30)
 artifact.export("artifacts/run", formats=["json", "html"])
 artifact.save_card("artifacts/run_card.html", "RandomForest")
+
+# 7. Per-decision contributions (issue #92) — opt in with keep_contributions=True
+artifact = skdr_eval.evaluate_sklearn_models(
+    logs=logs,
+    models=models,
+    fit_models=True,
+    n_splits=3,
+    random_state=42,
+    keep_contributions=True,  # attach per-decision DR/SNDR pseudo-outcomes
+)
+contribs = artifact.contributions("RandomForest", estimator="DR", top_k=5)
+print(contribs)  # decision_id, q_pi, q_hat, weight, reward, contribution_to_V
+#  contribution_to_V.mean() == V_hat by construction (float64 precision)
 ```
 
 > **Breaking change in 0.6.0:** `evaluate_sklearn_models` and
@@ -167,6 +203,20 @@ Evaluate sklearn models using DR and SNDR estimators.
 - `fit_models`: Whether to fit models (default: True)
 - `n_splits`: Number of time-series splits (default: 3)
 - `random_state`: Random seed for reproducibility
+
+**Temporal split controls (keyword-only):**
+- `gap`: Samples skipped between train and test in each CV fold
+  (default: `1`, conservative adjacent-row leakage guard; `0` for sklearn's
+  unbuffered behavior).
+- `test_size`: Per-fold test-window size in samples (default: `None`,
+  defers to sklearn's automatic sizing).
+- `max_train_size`: Cap on training-fold size in samples (default: `None`,
+  expanding window). Set this to switch to a sliding-window CV — useful when
+  early data is no longer representative.
+
+The same trio is accepted by `evaluate_pairwise_models`,
+`fit_propensity_timecal`, `fit_outcome_crossfit`, and
+`estimate_propensity_pairwise`.
 
 #### `evaluate_pairwise_models(logs_df, op_daily_df, models, metric_col, task_type, direction, **kwargs)`
 Evaluate models using pairwise (client-operator) evaluation with autoscaling.

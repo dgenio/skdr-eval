@@ -13,21 +13,20 @@ Thank you for your interest in contributing to skdr-eval! This document outlines
 
 ## 🌟 Development Workflow
 
-We follow a **Git Flow** inspired workflow with modern best practices:
+We follow **GitHub Flow**: short-lived feature branches off `main`, merged back via PR.
 
 ### Branch Structure
-- **`main`**: Production-ready code, protected branch
-- **`develop`**: Integration branch for features, protected branch
-- **`feature/*`**: Feature development branches
+- **`main`**: Production-ready code, always deployable, protected branch
+- **`feature/*`**: Short-lived feature development branches
 - **`hotfix/*`**: Critical fixes for production
-- **`release/*`**: Release preparation branches
+- **`release/*`**: Optional release preparation branches (cut from `main`)
 
 ### Workflow Steps
 
 1. **Create Feature Branch**
    ```bash
-   git checkout develop
-   git pull origin develop
+   git checkout main
+   git pull origin main
    git checkout -b feature/your-feature-name
    ```
 
@@ -52,7 +51,7 @@ We follow a **Git Flow** inspired workflow with modern best practices:
 
 4. **Submit Pull Request**
    - Push feature branch to origin
-   - Create PR against `develop` branch
+   - Create PR against `main` branch
    - Fill out PR template completely
    - Wait for CI checks and code review
 
@@ -62,9 +61,9 @@ We follow a **Git Flow** inspired workflow with modern best practices:
    - Squash commits if requested
 
 6. **Merge**
-   - PR merged into `develop` by maintainer
+   - PR merged into `main` by maintainer
    - Feature branch deleted
-   - Regular releases from `develop` → `main`
+   - Tagged releases cut from `main`
 
 ## 🔒 Branch Protection & CI Requirements
 
@@ -76,11 +75,10 @@ We follow a **Git Flow** inspired workflow with modern best practices:
   - Formatting (ruff format --check)
   - Type checking (mypy)
   - Tests (pytest with ≥80% coverage)
-  - Multi-Python version compatibility (3.9-3.12)
+  - Multi-Python version compatibility (3.11-3.14)
 
 - ✅ **Required Approvals**:
-  - `develop` branch: **1 maintainer approval** required
-  - `main` branch: **2 maintainer approvals** required
+  - `main` branch: **1 maintainer approval** required
   - No self-approvals allowed
 
 - ✅ **Branch Status**:
@@ -89,8 +87,7 @@ We follow a **Git Flow** inspired workflow with modern best practices:
   - All conversations resolved
 
 ### Protected Branches
-- **`main`**: Production branch - requires 2 approvals + CI pass
-- **`develop`**: Integration branch - requires 1 approval + CI pass
+- **`main`**: Production branch - requires 1 approval + CI pass
 - **Direct pushes are DISABLED** for protected branches
 
 ### CI Failure Policy
@@ -141,11 +138,10 @@ We follow [Semantic Versioning](https://semver.org/):
 - **PATCH**: Bug fixes (backward compatible)
 
 ### Release Steps
-1. Create `release/vX.Y.Z` branch from `develop`
+1. Create `release/vX.Y.Z` branch from `main`
 2. Update version numbers and CHANGELOG
 3. Create PR: `release/vX.Y.Z` → `main`
 4. After merge: Tag release and publish to PyPI
-5. Merge `main` back to `develop`
 
 ## 🛠️ Development Setup
 

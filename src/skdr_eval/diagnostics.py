@@ -303,7 +303,7 @@ def assess_propensity_discrimination(
 
             # Compute ROC curve
             fpr, tpr, _ = roc_curve(y_true, y_scores)
-            roc_curves.append(list(zip(fpr, tpr)))
+            roc_curves.append(list(zip(fpr, tpr, strict=False)))
         except ValueError:
             continue
 

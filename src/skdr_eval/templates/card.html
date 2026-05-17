@@ -72,6 +72,34 @@
     </tbody>
   </table>
 
+  {% if top_contributors %}
+  <h2>Top contributors to V&#770;</h2>
+  <table>
+    <thead><tr><th>decision_id</th><th>contribution_to_V</th></tr></thead>
+    <tbody>
+    {% for row in top_contributors %}
+      <tr>
+        <td class="numeric">{{ row.decision_id }}</td>
+        <td class="numeric">{{ row.contribution_to_V|fmt_num }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Bottom detractors of V&#770;</h2>
+  <table>
+    <thead><tr><th>decision_id</th><th>contribution_to_V</th></tr></thead>
+    <tbody>
+    {% for row in bottom_detractors %}
+      <tr>
+        <td class="numeric">{{ row.decision_id }}</td>
+        <td class="numeric">{{ row.contribution_to_V|fmt_num }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
   {% if diagnostics %}
   <h2>Propensity diagnostics</h2>
   <table>

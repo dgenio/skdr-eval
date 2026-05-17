@@ -2,6 +2,7 @@
 
 import importlib
 
+from .capabilities import get_capabilities
 from .config import (
     ConfigManager,
     EvaluationConfig,
@@ -76,6 +77,7 @@ from .statistical import (
     t_test,
 )
 from .synth import make_pairwise_synth, make_synth_logs
+from .validation import validate_logs, validate_pairwise_inputs
 
 try:
     from .visualization import (  # noqa: F401
@@ -147,6 +149,7 @@ __all__ = [
     "export_results",
     "fit_outcome_crossfit",
     "fit_propensity_timecal",
+    "get_capabilities",
     "get_default_config",
     "get_model_recommendations",
     "induce_policy_from_sklearn",
@@ -166,6 +169,8 @@ __all__ = [
     "summarize_sensitivity",
     "t_test",
     "validate_config",
+    "validate_logs",
+    "validate_pairwise_inputs",
 ]
 
 if HAS_VISUALIZATION:
