@@ -648,7 +648,7 @@ def psis_pareto_k(weights: np.ndarray, min_tail_len: int = 5) -> float:
         degenerate (all equal, too few non-zero, or too few samples).
     """
     w = np.asarray(weights, dtype=float)
-    if w.ndim > 2 or (w.ndim == 2 and w.shape[1] != 1):
+    if w.ndim > 2 or (w.ndim == 2 and w.shape[1] != 1):  # noqa: PLR2004
         raise DataValidationError(
             f"psis_pareto_k: weights must be 1-D or (n, 1), got shape {w.shape}"
         )
