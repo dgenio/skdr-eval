@@ -56,6 +56,7 @@ def _run_eval(seed: int = 7, n: int = 400, ci: bool = False) -> EvaluationArtifa
         n_splits=3,
         random_state=seed,
         ci_bootstrap=ci,
+        policy_train="all",  # explicit: legacy tests use full-data semantics
     )
 
 
@@ -595,6 +596,7 @@ def test_evaluate_pairwise_models_returns_artifact():
         fit_models=True,
         n_splits=3,
         random_state=7,
+        policy_train="all",  # explicit: suppress DeprecationWarning in legacy test
     )
     assert isinstance(art, EvaluationArtifact)
     assert art.metadata["evaluator"] == "evaluate_pairwise_models"
@@ -835,3 +837,359 @@ def test_card_handles_missing_diagnostics():
     assert "HGB" in card
     # Without diagnostics, the "Propensity diagnostics" subsection is omitted.
     assert "Propensity diagnostics" not in card
+
+
+# --------------------------------------------------------------------------- #
+# Recommendation API (#83)                                                    #
+# --------------------------------------------------------------------------- #
+
+
+from skdr_eval.reporting import (  # noqa: E402
+    DiagnosticGate,
+    GateResult,
+    Reason,
+    Recommendation,
+    RecommendationPolicy,
+    gate_diagnostics,
+)
+
+
+def _make_report_row(
+    *,
+    v_hat: float = 0.5,
+    se: float = 0.1,
+    clip: float = 5.0,
+    ess: float = 200.0,
+    tail_mass: float = 0.05,
+    match_rate: float = 0.9,
+    min_pscore: float = 0.05,
+    pscore_q10: float = 0.05,
+    pscore_q05: float = 0.03,
+    pscore_q01: float = 0.01,
+    pareto_k: float = 0.5,
+    support_health: str = "ok",
+    diagnostic_warnings: str = "",
+    ci_lower: float | None = None,
+    ci_upper: float | None = None,
+    estimator: str = "SNDR",
+    model: str = "HGB",
+) -> pd.DataFrame:
+    row: dict[str, object] = {
+        "model": model,
+        "estimator": estimator,
+        "V_hat": v_hat,
+        "SE_if": se,
+        "clip": clip,
+        "ESS": ess,
+        "tail_mass": tail_mass,
+        "MSE_est": 0.01,
+        "match_rate": match_rate,
+        "min_pscore": min_pscore,
+        "pscore_q10": pscore_q10,
+        "pscore_q05": pscore_q05,
+        "pscore_q01": pscore_q01,
+        "pareto_k": pareto_k,
+        "support_health": support_health,
+        "diagnostic_warnings": diagnostic_warnings,
+    }
+    if ci_lower is not None:
+        row["ci_lower"] = ci_lower
+    if ci_upper is not None:
+        row["ci_upper"] = ci_upper
+    return pd.DataFrame([row])
+
+
+def _make_artifact_from_row(report: pd.DataFrame) -> EvaluationArtifact:
+    """Minimal stub artifact for recommendation/gate tests."""
+    # Build minimal DRResult stubs from the report row.
+    detailed: dict[str, dict[str, object]] = {}
+    for _, row in report.iterrows():
+        m = str(row["model"])
+        e = str(row["estimator"])
+        if m not in detailed:
+            detailed[m] = {}
+        # Minimal DRResult stub
+        from skdr_eval.core import DRResult as _DRResult  # noqa: PLC0415
+
+        grid = pd.DataFrame(
+            {
+                "clip": [row["clip"]],
+                "V_hat": [row["V_hat"]],
+                "SE_if": [row["SE_if"]],
+                "ESS": [row["ESS"]],
+                "MSE_est": [row["MSE_est"]],
+                "tail_mass": [row["tail_mass"]],
+                "match_rate": [row["match_rate"]],
+                "min_pscore": [row["min_pscore"]],
+            }
+        )
+        detailed[m][e] = _DRResult(
+            V_hat=float(row["V_hat"]),
+            SE_if=float(row["SE_if"]),
+            clip=float(row["clip"]),
+            ESS=float(row["ESS"]),
+            tail_mass=float(row["tail_mass"]),
+            MSE_est=float(row["MSE_est"]),
+            match_rate=float(row["match_rate"]),
+            min_pscore=float(row["min_pscore"]),
+            pscore_q10=float(row["pscore_q10"]),
+            pscore_q05=float(row["pscore_q05"]),
+            pscore_q01=float(row["pscore_q01"]),
+            pareto_k=float(row["pareto_k"]),
+            grid=grid,
+        )
+    return EvaluationArtifact(
+        report=report,
+        detailed=detailed,  # type: ignore[arg-type]
+        warnings=pd.DataFrame(
+            columns=["model", "estimator", "support_health", "warning_codes"]
+        ),
+        sensitivity=pd.DataFrame(),
+        diagnostics={},
+        metadata={"n_samples": 400},
+    )
+
+
+class TestRecommendation:
+    """Tests for EvaluationArtifact.recommendation() and Recommendation data class."""
+
+    def test_deploy_verdict_clean_ci(self) -> None:
+        """CI above baseline with no caution flags → 'deploy'."""
+        report = _make_report_row(
+            ci_lower=0.2, ci_upper=0.8, support_health="ok", diagnostic_warnings=""
+        )
+        art = _make_artifact_from_row(report)
+        rec = art.recommendation("HGB")
+        assert rec.verdict == "deploy"
+        assert rec.confidence == "high"
+        assert rec.primary_blocker is None
+        assert rec.recommended_estimator == "SNDR"
+
+    def test_ab_test_verdict_ci_above_baseline_with_caution(self) -> None:
+        """CI above baseline + caution flags → 'ab_test' with medium confidence."""
+        report = _make_report_row(
+            ci_lower=0.2,
+            ci_upper=0.8,
+            support_health="caution",
+            diagnostic_warnings="LOW_ESS",
+        )
+        art = _make_artifact_from_row(report)
+        rec = art.recommendation("HGB")
+        assert rec.verdict == "ab_test"
+        assert rec.confidence == "medium"
+
+    def test_ab_test_verdict_ci_overlaps_baseline(self) -> None:
+        """CI overlapping baseline → 'ab_test' with low confidence."""
+        report = _make_report_row(
+            ci_lower=-0.1,
+            ci_upper=0.3,
+            support_health="ok",
+            diagnostic_warnings="",
+        )
+        art = _make_artifact_from_row(report)
+        rec = art.recommendation("HGB", baseline=0.0)
+        assert rec.verdict == "ab_test"
+        assert rec.confidence == "low"
+
+    def test_do_not_deploy_high_risk(self) -> None:
+        """High-risk warning → 'do_not_deploy'."""
+        report = _make_report_row(
+            support_health="high_risk",
+            diagnostic_warnings="POOR_OVERLAP",
+        )
+        art = _make_artifact_from_row(report)
+        rec = art.recommendation("HGB")
+        assert rec.verdict == "do_not_deploy"
+        assert rec.primary_blocker == "POOR_OVERLAP"
+
+    def test_insufficient_evidence_no_ci(self) -> None:
+        """No CI available → 'insufficient_evidence'."""
+        report = _make_report_row(support_health="ok", diagnostic_warnings="")
+        art = _make_artifact_from_row(report)
+        rec = art.recommendation("HGB")
+        assert rec.verdict == "insufficient_evidence"
+
+    def test_reasons_list_populated(self) -> None:
+        report = _make_report_row(
+            support_health="high_risk",
+            diagnostic_warnings="POOR_OVERLAP",
+        )
+        art = _make_artifact_from_row(report)
+        rec = art.recommendation("HGB")
+        assert len(rec.reasons) >= 1
+        assert all(isinstance(r, Reason) for r in rec.reasons)
+
+    def test_to_dict_serializable(self) -> None:
+        report = _make_report_row(ci_lower=0.2, ci_upper=0.8)
+        art = _make_artifact_from_row(report)
+        rec = art.recommendation("HGB")
+        d = rec.to_dict()
+        assert "verdict" in d
+        assert "reasons" in d
+        # Each reason is a plain dict
+        for r in d["reasons"]:
+            assert "code" in r
+            assert "message" in r
+            assert "severity" in r
+
+    def test_from_dict_round_trip(self) -> None:
+        report = _make_report_row(ci_lower=0.2, ci_upper=0.8)
+        art = _make_artifact_from_row(report)
+        rec = art.recommendation("HGB")
+        d = rec.to_dict()
+        rec2 = Recommendation.from_dict(d)
+        assert rec2.verdict == rec.verdict
+        assert rec2.confidence == rec.confidence
+        assert rec2.primary_blocker == rec.primary_blocker
+
+    def test_unknown_model_raises(self) -> None:
+        art = _run_eval()
+        with pytest.raises(DataValidationError, match="not in artifact"):
+            art.recommendation("no_such_model")
+
+    def test_unknown_estimator_raises(self) -> None:
+        art = _run_eval()
+        with pytest.raises(DataValidationError, match="not in detailed"):
+            art.recommendation("HGB", estimator="QUANTUM")
+
+    def test_recommendation_with_policy_object(self) -> None:
+        report = _make_report_row(ci_lower=0.2, ci_upper=0.8)
+        art = _make_artifact_from_row(report)
+        policy = RecommendationPolicy(baseline=0.5)
+        # baseline=0.5: ci_lower=0.2 < 0.5, so CI overlaps → ab_test
+        rec = art.recommendation("HGB", policy=policy)
+        assert rec.verdict == "ab_test"
+
+    def test_recommendation_on_real_artifact(self) -> None:
+        """End-to-end: recommendation runs on a real artifact without error."""
+        art = _run_eval(ci=True)
+        rec = art.recommendation("HGB", estimator="DR")
+        assert rec.verdict in ("deploy", "ab_test", "do_not_deploy", "insufficient_evidence")
+        assert rec.model_name == "HGB"
+
+
+# --------------------------------------------------------------------------- #
+# DiagnosticGate API (#99)                                                    #
+# --------------------------------------------------------------------------- #
+
+
+class TestDiagnosticGate:
+    """Tests for gate_diagnostics() and DiagnosticGate data class."""
+
+    def test_gate_pass_healthy_artifact(self) -> None:
+        """Healthy report row should produce overall=pass."""
+        report = _make_report_row(
+            min_pscore=0.05,
+            ess=200.0,
+            pareto_k=0.4,
+            support_health="ok",
+            diagnostic_warnings="",
+        )
+        art = _make_artifact_from_row(report)
+        gate = gate_diagnostics(art, "HGB", "SNDR")
+        assert gate.overall == "pass"
+        assert gate.overlap.state == "pass"
+        assert gate.ess.state == "pass"
+        assert gate.calibration.state == "pass"
+
+    def test_gate_fail_poor_overlap(self) -> None:
+        """min_pscore ≤ 1/n → overlap gate fails."""
+        report = _make_report_row(
+            min_pscore=0.001,  # 1/400 = 0.0025; 0.001 < 0.0025
+            ess=200.0,
+            pareto_k=0.4,
+        )
+        art = _make_artifact_from_row(report)
+        gate = gate_diagnostics(art, "HGB", "SNDR")
+        assert gate.overlap.state == "fail"
+        assert gate.overall == "fail"
+
+    def test_gate_warn_low_match_rate(self) -> None:
+        """match_rate below threshold → overlap gate warns."""
+        report = _make_report_row(
+            min_pscore=0.05,
+            match_rate=0.3,  # below default LOW_MATCH_RATE=0.5
+            ess=200.0,
+            pareto_k=0.4,
+        )
+        art = _make_artifact_from_row(report)
+        gate = gate_diagnostics(art, "HGB", "SNDR")
+        assert gate.overlap.state == "warn"
+        assert gate.overall == "warn"
+
+    def test_gate_warn_low_ess(self) -> None:
+        """ESS below threshold → ess gate warns/fails."""
+        report = _make_report_row(min_pscore=0.05, ess=5.0, pareto_k=0.4)
+        art = _make_artifact_from_row(report)
+        gate = gate_diagnostics(art, "HGB", "SNDR")
+        assert gate.ess.state in ("warn", "fail")
+        assert gate.overall in ("warn", "fail")
+
+    def test_gate_warn_high_pareto_k(self) -> None:
+        """Pareto-k above threshold → calibration gate warns/fails."""
+        report = _make_report_row(
+            min_pscore=0.05, ess=200.0, pareto_k=0.85  # above default 0.7
+        )
+        art = _make_artifact_from_row(report)
+        gate = gate_diagnostics(art, "HGB", "SNDR")
+        assert gate.calibration.state in ("warn", "fail")
+        assert gate.overall in ("warn", "fail")
+
+    def test_gate_custom_thresholds(self) -> None:
+        """Custom SupportHealthThresholds affect gate outcomes."""
+        report = _make_report_row(min_pscore=0.05, ess=200.0, pareto_k=0.6)
+        art = _make_artifact_from_row(report)
+        strict = SupportHealthThresholds(high_pareto_k=0.5)
+        gate = gate_diagnostics(art, "HGB", "SNDR", thresholds=strict)
+        # pareto_k=0.6 > 0.5 → calibration should warn/fail
+        assert gate.calibration.state in ("warn", "fail")
+
+    def test_gate_to_dict(self) -> None:
+        report = _make_report_row()
+        art = _make_artifact_from_row(report)
+        gate = gate_diagnostics(art, "HGB", "SNDR")
+        d = gate.to_dict()
+        assert "overlap" in d
+        assert "ess" in d
+        assert "calibration" in d
+        assert "overall" in d
+        assert d["overlap"]["check"] == "overlap"
+
+    def test_gate_to_text(self) -> None:
+        report = _make_report_row()
+        art = _make_artifact_from_row(report)
+        gate = gate_diagnostics(art, "HGB", "SNDR")
+        txt = gate.to_text()
+        assert "DiagnosticGate overall" in txt
+        assert "overlap" in txt
+
+    def test_gate_unknown_model_raises(self) -> None:
+        art = _run_eval()
+        with pytest.raises(DataValidationError, match="not in artifact"):
+            gate_diagnostics(art, "no_such_model")
+
+    def test_gate_unknown_estimator_raises(self) -> None:
+        art = _run_eval()
+        with pytest.raises(DataValidationError, match="not in detailed"):
+            gate_diagnostics(art, "HGB", "QUANTUM")
+
+    def test_gate_on_real_artifact(self) -> None:
+        """End-to-end: gate_diagnostics runs on a real artifact without error."""
+        art = _run_eval()
+        gate = gate_diagnostics(art, "HGB", "DR")
+        assert gate.overall in ("pass", "warn", "fail")
+        assert isinstance(gate.overlap, GateResult)
+        assert isinstance(gate.ess, GateResult)
+        assert isinstance(gate.calibration, GateResult)
+
+    def test_gate_gateresult_to_dict_complete(self) -> None:
+        r = GateResult(
+            check="overlap", state="pass", code="OVERLAP_OK", message="ok",
+            value=0.05, threshold=0.0025
+        )
+        d = r.to_dict()
+        assert d["check"] == "overlap"
+        assert d["state"] == "pass"
+        assert d["value"] == 0.05
+        assert d["threshold"] == 0.0025
+

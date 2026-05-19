@@ -1,6 +1,6 @@
 # Makefile for skdr-eval development
 
-.PHONY: help install install-dev clean lint format typecheck test test-cov build docs check validate smoke all
+.PHONY: help install install-dev clean lint format typecheck test test-cov build docs check validate smoke coverage-sim all
 
 # Default target
 help:
@@ -17,6 +17,7 @@ help:
 	@echo "  docs         Generate documentation (future)"
 	@echo "  check        Run all quality checks (lint + typecheck + test)"
 	@echo "  validate     Run comprehensive contribution validation (AI agent friendly)"
+	@echo "  coverage-sim Run moving-block bootstrap coverage simulation (issues #81 #62)"
 	@echo "  all          Run clean + check + build"
 
 # Installation targets
@@ -66,6 +67,13 @@ docs:
 # Validation target for AI agents and contributors
 validate:
 	python scripts/validate_contribution.py
+
+# Coverage simulation for moving-block bootstrap calibration (#81 #62)
+# Uses n_reps=50 for speed in CI; increase to 500 for thorough local checks.
+coverage-sim:
+	python -m skdr_eval._simulation --dgp iid --n_reps 50
+	python -m skdr_eval._simulation --dgp ar1 --n_reps 50
+	python -m skdr_eval._simulation --dgp seasonal --n_reps 50
 
 # Examples smoke (mirrors CI examples-smoke job)
 smoke:

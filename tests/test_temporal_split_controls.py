@@ -104,6 +104,7 @@ def test_evaluate_sklearn_models_threads_kwargs():
         gap=2,
         test_size=30,
         max_train_size=200,
+        policy_train="all",  # explicit: suppress DeprecationWarning
     )
     assert not artifact.report.empty
 

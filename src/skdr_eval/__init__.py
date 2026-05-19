@@ -2,6 +2,7 @@
 
 import importlib
 
+from ._simulation import CoverageResult, simulate_coverage
 from .capabilities import get_capabilities
 from .config import (
     ConfigManager,
@@ -55,11 +56,17 @@ from .pairwise import PairwiseDesign
 from .reporting import (
     SCHEMA_VERSION,
     ArtifactSchema,
+    DiagnosticGate,
     EvaluationArtifact,
+    GateResult,
+    Reason,
+    Recommendation,
+    RecommendationPolicy,
     SupportHealthThresholds,
     attach_warnings,
     build_evaluation_artifact,
     export_results,
+    gate_diagnostics,
     load_artifact_json,
     render_evaluation_card,
     summarize_sensitivity,
@@ -110,12 +117,15 @@ __all__ = [
     "ConfigManager",
     "ConfigurationError",
     "ConvergenceError",
+    "CoverageResult",
     "DRResult",
     "DataValidationError",
     "Design",
+    "DiagnosticGate",
     "EstimationError",
     "EvaluationArtifact",
     "EvaluationConfig",
+    "GateResult",
     "InsufficientDataError",
     "MemoryError",
     "ModelConfig",
@@ -129,6 +139,9 @@ __all__ = [
     "PolicyInductionError",
     "PropensityDiagnostics",
     "PropensityScoreError",
+    "Reason",
+    "Recommendation",
+    "RecommendationPolicy",
     "SkdrEvalError",
     "StatisticalTest",
     "SupportHealthThresholds",
@@ -149,6 +162,7 @@ __all__ = [
     "export_results",
     "fit_outcome_crossfit",
     "fit_propensity_timecal",
+    "gate_diagnostics",
     "get_capabilities",
     "get_default_config",
     "get_model_recommendations",
@@ -166,6 +180,7 @@ __all__ = [
     "render_evaluation_card",
     "sample_size_calculation",
     "save_config_to_file",
+    "simulate_coverage",
     "summarize_sensitivity",
     "t_test",
     "validate_config",
