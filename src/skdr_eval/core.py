@@ -1161,7 +1161,8 @@ def _sndr_bootstrap_values(
     w_sum = float(w_clip.sum())
     n = len(Y)
     if w_sum > 0:
-        return q_pi + (n * w_clip / w_sum) * (Y - q_hat)
+        result: np.ndarray = q_pi + (n * w_clip / w_sum) * (Y - q_hat)
+        return result
     return q_pi.copy()
 
 
