@@ -589,6 +589,7 @@ def fit_outcome_crossfit(
     gap: int = 1,
     test_size: int | None = None,
     max_train_size: int | None = None,
+    sample_weight: np.ndarray | None = None,
 ) -> tuple[np.ndarray, list[tuple[Any, np.ndarray, np.ndarray]]]:
     """Fit outcome model with cross-fitting.
 
@@ -611,6 +612,11 @@ def fit_outcome_crossfit(
         Per-fold test-window size in samples.
     max_train_size : int, optional
         Cap on training-fold size in samples.
+    sample_weight : np.ndarray, optional
+        Per-row non-negative sample weights forwarded to the underlying
+        estimator's ``fit(..., sample_weight=...)``. Required by MRDR (#86)
+        to recover the variance-minimising outcome model under DR. ``None``
+        (default) means unweighted MSE.
 
     Returns
     -------
@@ -677,14 +683,43 @@ def fit_outcome_crossfit(
             max_train_size=max_train_size,
         )
 
+        if sample_weight is not None:
+            validate_numpy_array(sample_weight, "sample_weight", min_size=1)
+            validate_finite_values(sample_weight, "sample_weight")
+            if sample_weight.shape != (n_samples,):
+                raise DataValidationError(
+                    f"sample_weight shape {sample_weight.shape} must match "
+                    f"X_obs ({n_samples},)"
+                )
+            if np.any(sample_weight < 0):
+                raise DataValidationError(
+                    "sample_weight must be non-negative; received negatives"
+                )
+
         for fold_idx, (train_idx, test_idx) in enumerate(tscv.split(X_obs)):
             try:
                 X_train, X_test = X_obs[train_idx], X_obs[test_idx]
                 Y_train = Y[train_idx]
 
-                # Fit model
+                # Fit model — pass sample_weight when supplied. Falls back to
+                # unweighted fit when the underlying estimator does not accept
+                # the kwarg (rare in sklearn but defensive for callable
+                # factories returning custom regressors).
                 model = est_factory()
-                model.fit(X_train, Y_train)
+                if sample_weight is not None:
+                    sw_train = sample_weight[train_idx]
+                    try:
+                        model.fit(X_train, Y_train, sample_weight=sw_train)
+                    except TypeError:
+                        # Underlying estimator does not accept sample_weight;
+                        # fall back rather than silently ignore.
+                        raise OutcomeModelError(
+                            f"Estimator {model!r} does not accept "
+                            "sample_weight=; MRDR / weighted outcome losses "
+                            "are unavailable for this estimator."
+                        ) from None
+                else:
+                    model.fit(X_train, Y_train)
 
                 # Predict
                 pred = model.predict(X_test)
@@ -1031,6 +1066,116 @@ def dr_value_with_clip(
     return {"DR": dr_result, "SNDR": sndr_result}
 
 
+# Names of extra estimators that the strategy seam (#86, #85) recognises.
+# These are evaluated *in addition* to the historical ``("DR", "SNDR")`` pair.
+EXTRA_ESTIMATORS = ("MRDR", "SWITCH-DR", "DRos", "MIPS")
+
+
+def _canonical_estimator_name(name: str) -> str:
+    """Canonicalise estimator names so case / separators don't drift."""
+    canonical = name.strip().upper().replace("_", "-")
+    if canonical == "DROS":
+        return "DRos"
+    if canonical in {"DR", "SNDR", "MRDR", "SWITCH-DR", "MIPS"}:
+        return canonical
+    raise ValueError(
+        f"Unknown estimator {name!r}. Known: DR, SNDR, MRDR, SWITCH-DR, "
+        "DRos, MIPS (case-insensitive)."
+    )
+
+
+def _apply_extra_estimators(
+    *,
+    estimators: tuple[str, ...],
+    propensities: np.ndarray,
+    policy_probs: np.ndarray,
+    Y: np.ndarray,
+    q_hat: np.ndarray,
+    A: np.ndarray,
+    elig: np.ndarray,
+    X_obs: np.ndarray,
+    selected_clip: float,
+    action_embedding: np.ndarray | None,
+    switch_tau: float,
+    dros_lam: float,
+    mips_bandwidth: float,
+    outcome_estimator: "str | Callable[[], Any]",
+    n_splits: int,
+    random_state: int,
+    gap: int,
+    test_size: int | None,
+    max_train_size: int | None,
+) -> dict[str, "DRResult"]:
+    """Compute MRDR / SWITCH-DR / DRos / MIPS values via the strategy seam.
+
+    Returns a ``{estimator_name: DRResult}`` mapping that the caller merges
+    into ``detailed_results[model_name]`` alongside the base ``DR`` /
+    ``SNDR`` rows. The ``selected_clip`` argument should be the DR clip
+    chosen by :func:`dr_value_with_clip` — MRDR / SWITCH-DR / DRos reuse it
+    so the operating point stays consistent with the base run.
+    """
+    from .estimators import build_strategy, dr_value_with_strategy  # noqa: PLC0415
+
+    extras: dict[str, DRResult] = {}
+    # MRDR uses a sample-weighted outcome refit; defer the refit until we
+    # know whether MRDR is actually requested (cost amortises per model).
+    mrdr_q_hat: np.ndarray | None = None
+    canonical_set = {_canonical_estimator_name(n) for n in estimators}
+    for canonical in canonical_set:
+        if canonical in {"DR", "SNDR"}:
+            continue
+        if canonical == "MIPS" and action_embedding is None:
+            raise ValueError(
+                "MIPS estimator was requested but action_embedding= was not "
+                "supplied to evaluate_sklearn_models / evaluate_pairwise_models. "
+                "Pass an (n_actions, embed_dim) array via action_embedding=."
+            )
+
+        strategy = build_strategy(
+            canonical,
+            clip=float(selected_clip) if np.isfinite(selected_clip) else float("inf"),
+            tau=switch_tau,
+            lam=dros_lam,
+            action_embedding=action_embedding,
+            bandwidth=mips_bandwidth,
+        )
+
+        if canonical == "MRDR":
+            if mrdr_q_hat is None:
+                sw = strategy.outcome_loss(
+                    pi_obs=propensities[np.arange(len(Y)), A.astype(int)],
+                    policy_probs=policy_probs,
+                    A=A,
+                )
+                mrdr_q_hat, _ = fit_outcome_crossfit(
+                    X_obs,
+                    Y,
+                    n_splits=n_splits,
+                    estimator=outcome_estimator,
+                    random_state=random_state,
+                    gap=gap,
+                    test_size=test_size,
+                    max_train_size=max_train_size,
+                    sample_weight=sw,
+                )
+            q_hat_for_strategy = mrdr_q_hat
+        else:
+            q_hat_for_strategy = q_hat
+
+        result = dr_value_with_strategy(
+            propensities=propensities,
+            policy_probs=policy_probs,
+            Y=Y,
+            q_hat=q_hat_for_strategy,
+            A=A,
+            elig=elig,
+            strategy=strategy,
+            action_embedding=action_embedding,
+        )
+        extras[strategy.name] = result
+    return extras
+
+
 # Maximum number of evaluated decisions for which per-decision contributions
 # may be captured. At 5 float64 columns x 100M decisions x 2 estimators this is
 # ~8 GB; a higher value is a deliberate opt-in.
@@ -1276,6 +1421,11 @@ def evaluate_sklearn_models(
     max_train_size: int | None = None,
     keep_contributions: bool = False,
     max_kept_contributions: int = DEFAULT_MAX_KEPT_CONTRIBUTIONS,
+    estimators: tuple[str, ...] = ("DR", "SNDR"),
+    action_embedding: np.ndarray | None = None,
+    switch_tau: float = 5.0,
+    dros_lam: float = 1.0,
+    mips_bandwidth: float = 1.0,
 ) -> "EvaluationArtifact":
     """Evaluate sklearn models using DR and SNDR estimators.
 
@@ -1471,6 +1621,34 @@ def evaluate_sklearn_models(
             clip_grid=clip_grid,
         )
 
+        # Extra estimators (#85 #86): MRDR / SWITCH-DR / DRos / MIPS run via
+        # the strategy seam and are merged into the per-model detailed dict.
+        # The DR clip selected above is reused as the operating point so the
+        # comparison is apples-to-apples.
+        dr_selected_clip = float(results["DR"].clip)
+        extras = _apply_extra_estimators(
+            estimators=estimators,
+            propensities=propensities,
+            policy_probs=policy_probs,
+            Y=eval_design.Y,
+            q_hat=q_hat,
+            A=eval_design.A,
+            elig=eval_design.elig,
+            X_obs=eval_design.X_obs,
+            selected_clip=dr_selected_clip,
+            action_embedding=action_embedding,
+            switch_tau=switch_tau,
+            dros_lam=dros_lam,
+            mips_bandwidth=mips_bandwidth,
+            outcome_estimator=outcome_estimator,
+            n_splits=n_splits,
+            random_state=random_state,
+            gap=gap,
+            test_size=test_size,
+            max_train_size=max_train_size,
+        )
+        results.update(extras)
+
         detailed_results[model_name] = results
 
         # Attach per-decision contributions (#92). Opt-in only; does not
@@ -1478,7 +1656,7 @@ def evaluate_sklearn_models(
         # arrays inline to preserve historical CI values.
         if keep_contributions:
             contribs_payload = _build_contributions_payload(
-                results,
+                {k: v for k, v in results.items() if k in {"DR", "SNDR"}},
                 propensities,
                 policy_probs,
                 eval_design.Y,
@@ -1490,8 +1668,13 @@ def evaluate_sklearn_models(
             for est_name, est_payload in contribs_payload.items():
                 results[est_name].contributions = est_payload
 
-        # Add to report
-        for estimator_name, result in results.items():
+        # Add to report — emit a row per requested estimator that we actually
+        # produced. The strategy-seam estimators report ``clip=nan`` (the
+        # operating clip is implicit in the strategy).
+        requested_canon = [_canonical_estimator_name(n) for n in estimators]
+        emit_order = [n for n in requested_canon if n in results]
+        for estimator_name in emit_order:
+            result = results[estimator_name]
             row = {
                 "model": model_name,
                 "estimator": estimator_name,
@@ -1511,6 +1694,21 @@ def evaluate_sklearn_models(
 
             # Add confidence intervals if requested
             if ci_bootstrap:
+                # Extra estimators (MRDR/SWITCH-DR/DRos/MIPS) fall back to the
+                # IF-based normal CI here. Their bootstrap definition is
+                # strategy-specific and is tracked as a follow-up; producing
+                # the normal-approximation interval keeps the report
+                # rectangular and the CI conservative.
+                if estimator_name not in {"DR", "SNDR"}:
+                    z = norm.ppf(1 - alpha / 2)
+                    ci_lower, ci_upper = (
+                        result.V_hat - z * result.SE_if,
+                        result.V_hat + z * result.SE_if,
+                    )
+                    row["ci_lower"] = ci_lower
+                    row["ci_upper"] = ci_upper
+                    report_rows.append(row)
+                    continue
                 # Use proper block bootstrap for time-series data
                 try:
                     # Recompute estimator-specific pseudo-outcomes for bootstrap.
@@ -1596,6 +1794,7 @@ def evaluate_sklearn_models(
             "n_splits": int(n_splits),
             "clip_grid": [None if not np.isfinite(c) else float(c) for c in clip_grid],
             "ci_bootstrap": bool(ci_bootstrap),
+            "estimators": list(estimators),
         },
     )
 
@@ -1978,6 +2177,11 @@ def evaluate_pairwise_models(
     max_train_size: int | None = None,
     keep_contributions: bool = False,
     max_kept_contributions: int = DEFAULT_MAX_KEPT_CONTRIBUTIONS,
+    estimators: tuple[str, ...] = ("DR", "SNDR"),
+    action_embedding: np.ndarray | None = None,
+    switch_tau: float = 5.0,
+    dros_lam: float = 1.0,
+    mips_bandwidth: float = 1.0,
 ) -> "EvaluationArtifact":
     """Evaluate pairwise models using autoscale strategy.
 
@@ -2364,12 +2568,40 @@ def evaluate_pairwise_models(
                 min_ess_frac,
             )
 
+            # Extra estimators (#85 #86) for pairwise — operate on the same
+            # propensities / policy / outcome predictions; MRDR triggers a
+            # sample-weighted outcome refit. The DR clip is reused as the
+            # operating point.
+            dr_selected_clip = float(results["DR"].clip)
+            extras = _apply_extra_estimators(
+                estimators=estimators,
+                propensities=propensities,
+                policy_probs=policy_probs,
+                Y=Y.astype(np.float64),
+                q_hat=q_hat,
+                A=A,
+                elig=elig,
+                X_obs=X_obs,
+                selected_clip=dr_selected_clip,
+                action_embedding=action_embedding,
+                switch_tau=switch_tau,
+                dros_lam=dros_lam,
+                mips_bandwidth=mips_bandwidth,
+                outcome_estimator=outcome_estimator,
+                n_splits=n_splits,
+                random_state=random_state,
+                gap=gap,
+                test_size=test_size,
+                max_train_size=max_train_size,
+            )
+            results.update(extras)
+
             detailed_results[model_name] = results
 
             # Attach per-decision contributions (#92). Opt-in only.
             if keep_contributions:
                 contribs_payload = _build_contributions_payload(
-                    results,
+                    {k: v for k, v in results.items() if k in {"DR", "SNDR"}},
                     propensities,
                     policy_probs,
                     Y.astype(np.float64),
@@ -2381,8 +2613,13 @@ def evaluate_pairwise_models(
                 for est_name, est_payload in contribs_payload.items():
                     results[est_name].contributions = est_payload
 
-            # Add to report
-            for estimator_name, result in results.items():
+            # Add to report — emit a row per requested estimator that we
+            # actually produced; preserves historical row order for the
+            # default ("DR", "SNDR") request.
+            requested_canon = [_canonical_estimator_name(n) for n in estimators]
+            emit_order = [n for n in requested_canon if n in results]
+            for estimator_name in emit_order:
+                result = results[estimator_name]
                 report_row: dict[str, object] = {
                     "model": model_name,
                     "estimator": estimator_name,
@@ -2401,6 +2638,15 @@ def evaluate_pairwise_models(
                 }
 
                 if ci_bootstrap:
+                    # Extra estimators (MRDR/SWITCH-DR/DRos/MIPS) get the
+                    # IF-based normal CI here; strategy-specific block
+                    # bootstrap is tracked as a follow-up.
+                    if estimator_name not in {"DR", "SNDR"}:
+                        z = norm.ppf(1 - alpha / 2)
+                        report_row["ci_lower"] = result.V_hat - z * result.SE_if
+                        report_row["ci_upper"] = result.V_hat + z * result.SE_if
+                        report_rows.append(report_row)
+                        continue
                     # Use proper block bootstrap for time-series data
                     try:
                         # Recompute estimator-specific pseudo-outcomes for
@@ -2494,6 +2740,7 @@ def evaluate_pairwise_models(
             "n_splits": int(n_splits),
             "clip_grid": [None if not np.isfinite(c) else float(c) for c in clip_grid],
             "ci_bootstrap": bool(ci_bootstrap),
+            "estimators": list(estimators),
         },
     )
 
