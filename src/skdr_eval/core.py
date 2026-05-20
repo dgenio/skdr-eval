@@ -1,6 +1,7 @@
 """Core implementation of DR and Stabilized DR for offline policy evaluation."""
 
 import logging
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol
@@ -1146,6 +1147,25 @@ def _build_contributions_payload(
     return payload
 
 
+def _sndr_bootstrap_values(
+    q_pi: np.ndarray,
+    w_clip: np.ndarray,
+    Y: np.ndarray,
+    q_hat: np.ndarray,
+) -> np.ndarray:
+    """Compute SNDR pseudo-outcomes for bootstrap CI.
+
+    Uses the self-normalised formula: q_pi + (n/Σw)*w*(Y - q_hat)
+    so that mean(bootstrap_values) == V_SNDR.
+    """
+    w_sum = float(w_clip.sum())
+    n = len(Y)
+    if w_sum > 0:
+        result: np.ndarray = q_pi + (n * w_clip / w_sum) * (Y - q_hat)
+        return result
+    return q_pi.copy()
+
+
 def block_bootstrap_ci(
     values_num: np.ndarray,
     values_den: np.ndarray | None,
@@ -1247,7 +1267,7 @@ def evaluate_sklearn_models(
     clip_grid: tuple[float, ...] = (2, 5, 10, 20, 50, float("inf")),
     ci_bootstrap: bool = False,
     alpha: float = 0.05,
-    policy_train: str = "all",
+    policy_train: str | None = None,
     policy_train_frac: float = 0.85,
     support_thresholds: "SupportHealthThresholds | None" = None,
     *,
@@ -1285,8 +1305,16 @@ def evaluate_sklearn_models(
         nuisance estimation error is non-negligible.
     alpha : float, default=0.05
         Significance level for confidence intervals.
-    policy_train : str, default="all"
-        Training data for policy ("all" or "pre_split").
+    policy_train : str, optional
+        Training data for policy when ``fit_models=True``. ``"pre_split"``
+        (default) fits on the first ``policy_train_frac`` of the data and
+        evaluates on the held-out tail — the statistically-safe choice.
+        ``"all"`` fits and evaluates on the same data; retained for backward
+        compatibility but introduces training-on-test bias when ``fit_models=True``.
+        Passing ``None`` (or omitting the argument) uses ``"pre_split"`` and
+        emits a :class:`DeprecationWarning`; pass an explicit value to suppress
+        the warning. The default will become a required keyword in a future
+        release.
     policy_train_frac : float, default=0.85
         Fraction of data for policy training if policy_train="pre_split".
     support_thresholds : SupportHealthThresholds, optional
@@ -1323,6 +1351,24 @@ def evaluate_sklearn_models(
         raise ValueError("models dict must not be empty")
     if any(v is None for v in models.values()):
         raise ValueError("models dict values must not be None")
+
+    # Resolve policy_train sentinel: None means "pre_split" + emit warning.
+    if policy_train is None:
+        warnings.warn(
+            "evaluate_sklearn_models: policy_train was not specified and now "
+            "defaults to 'pre_split' (was 'all'). The 'all' mode fits and "
+            "evaluates on the same data, introducing training-on-test bias "
+            "when fit_models=True. Pass policy_train='pre_split' to suppress "
+            "this warning, or policy_train='all' to retain the old behavior. "
+            "See #60 and #82.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        policy_train = "pre_split"
+    if policy_train not in ("all", "pre_split"):
+        raise ValueError(
+            f"Unknown policy_train: {policy_train!r}. Must be 'all' or 'pre_split'"
+        )
 
     # Build design
     design = build_design(logs)
@@ -1467,8 +1513,11 @@ def evaluate_sklearn_models(
             if ci_bootstrap:
                 # Use proper block bootstrap for time-series data
                 try:
-                    # Recompute DR contributions for bootstrap.
-                    # q_pi == q_hat here; see design note in dr_value_with_clip.
+                    # Recompute estimator-specific pseudo-outcomes for bootstrap.
+                    # q_pi == q_hat when q_hat is 1D; see design note in
+                    # dr_value_with_clip. For SNDR we use the normalised
+                    # residual form so the bootstrap CI is anchored to the
+                    # same point estimate as V_hat (fixes #58).
                     q_pi = np.sum(
                         policy_probs * q_hat.reshape(len(eval_design.Y), -1), axis=1
                     )
@@ -1489,10 +1538,19 @@ def evaluate_sklearn_models(
                             )
                         w_clip[~matched] = 0
 
-                        # Create bootstrap values from DR contributions
-                        dr_contrib = q_pi + w_clip * (eval_design.Y - q_hat)
+                        # Estimator-specific pseudo-outcome for the bootstrap:
+                        # DR: q_pi + w*(Y - q_hat)  # noqa: ERA001
+                        # SNDR: q_pi + (n/Σw)*w*(Y - q_hat) — normalised so
+                        #       mean(bootstrap_values) == V_SNDR.
+                        if estimator_name == "SNDR":
+                            bootstrap_values = _sndr_bootstrap_values(
+                                q_pi, w_clip, eval_design.Y, q_hat
+                            )
+                        else:
+                            bootstrap_values = q_pi + w_clip * (eval_design.Y - q_hat)
+
                         ci_lower, ci_upper = block_bootstrap_ci(
-                            values_num=dr_contrib,
+                            values_num=bootstrap_values,
                             values_den=None,
                             base_mean=np.array([result.V_hat]),
                             n_boot=400,
@@ -1904,7 +1962,7 @@ def evaluate_pairwise_models(
     ci_bootstrap: bool = False,
     alpha: float = 0.05,
     fit_models: bool = False,
-    policy_train: Literal["all", "pre_split"] = "all",
+    policy_train: Literal["all", "pre_split"] | None = None,
     policy_train_frac: float = 0.85,
     surrogate_model: str = "hgb",
     day_col: str = "arrival_day",
@@ -1942,14 +2000,18 @@ def evaluate_pairwise_models(
         logs_df against metric_col before inducing policies. Set to True when
         passing unfitted model instances; set to False when passing pre-fitted
         models.
-    policy_train : Literal["all", "pre_split"], default="all"
+    policy_train : Literal["all", "pre_split"], optional
         How to split data for fitting policy models when ``fit_models=True``.
-        Default matches ``evaluate_sklearn_models`` for API symmetry; consider
-        ``"pre_split"`` to eliminate training-on-test leakage.
+        ``"pre_split"`` (default) fits on the first ``policy_train_frac`` of
+        the data and evaluates on the held-out tail — the statistically-safe
+        choice. ``"all"`` fits and evaluates on the same data; retained for
+        backward compatibility but introduces training-on-test bias when
+        ``fit_models=True``. Passing ``None`` (or omitting the argument) uses
+        ``"pre_split"`` and emits a :class:`DeprecationWarning`. Ignored when
+        ``fit_models=False``.
 
         - ``"all"``: Fit on all data and evaluate on all data. Faster but
-          biased — included for API symmetry with ``evaluate_sklearn_models``
-          and for callers that fit models elsewhere.
+          biased — included for backward compatibility.
         - ``"pre_split"``: Fit on the first ``policy_train_frac`` of the data
           (sorted by day) and evaluate only on the held-out tail. Removes
           training-on-test leakage; the statistically safer choice when
@@ -2039,6 +2101,20 @@ def evaluate_pairwise_models(
         )
     if direction not in ["min", "max"]:
         raise ValueError(f"Unknown direction: {direction}. Must be 'min' or 'max'")
+
+    # Resolve policy_train sentinel: None means "pre_split" + emit warning.
+    if policy_train is None:
+        warnings.warn(
+            "evaluate_pairwise_models: policy_train was not specified and now "
+            "defaults to 'pre_split' (was 'all'). The 'all' mode fits and "
+            "evaluates on the same data, introducing training-on-test bias "
+            "when fit_models=True. Pass policy_train='pre_split' to suppress "
+            "this warning, or policy_train='all' to retain the old behavior. "
+            "See #60 and #82.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        policy_train = "pre_split"
 
     # Validate policy_train parameters
     if policy_train not in ("all", "pre_split"):
@@ -2327,8 +2403,12 @@ def evaluate_pairwise_models(
                 if ci_bootstrap:
                     # Use proper block bootstrap for time-series data
                     try:
-                        # Recompute DR contributions for bootstrap.
-                        # q_pi == q_hat here; see design note in dr_value_with_clip.
+                        # Recompute estimator-specific pseudo-outcomes for
+                        # bootstrap.  q_pi == q_hat when q_hat is 1D; see
+                        # design note in dr_value_with_clip. For SNDR we use
+                        # the normalised residual form so the bootstrap CI
+                        # is anchored to the same point estimate as V_hat
+                        # (fixes #58).
                         q_pi = np.sum(policy_probs * q_hat.reshape(len(Y), -1), axis=1)
                         pi_obs = propensities[np.arange(len(Y)), A]
                         A_int: np.ndarray = A.astype(int)
@@ -2347,10 +2427,18 @@ def evaluate_pairwise_models(
                                 )
                             w_clip[~matched] = 0
 
-                            # Create bootstrap values from DR contributions
-                            dr_contrib = q_pi + w_clip * (Y - q_hat)
+                            # Estimator-specific pseudo-outcome for bootstrap:
+                            # DR: q_pi + w*(Y - q_hat)  # noqa: ERA001
+                            # SNDR: q_pi + (n/Σw)*w*(Y - q_hat)  # noqa: ERA001
+                            if estimator_name == "SNDR":
+                                bootstrap_values = _sndr_bootstrap_values(
+                                    q_pi, w_clip, Y, q_hat
+                                )
+                            else:
+                                bootstrap_values = q_pi + w_clip * (Y - q_hat)
+
                             ci_lower, ci_upper = block_bootstrap_ci(
-                                values_num=dr_contrib,
+                                values_num=bootstrap_values,
                                 values_den=None,
                                 base_mean=np.array([result.V_hat]),
                                 n_boot=400,

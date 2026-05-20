@@ -5,7 +5,77 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **SNDR bootstrap CI fix** ([#58]). The moving-block bootstrap CI for the
+  SNDR estimator now uses the correct normalised pseudo-outcome
+  `q_pi + (n/Σw)·w·(Y−q̂)` instead of the DR pseudo-outcome
+  `q_pi + w·(Y−q̂)`. The old code produced a CI anchored to the DR point
+  estimate, not to V̂_SNDR. This was a statistical correctness bug silently
+  noted in test comments. Both evaluators (`evaluate_sklearn_models`,
+  `evaluate_pairwise_models`) are fixed.
+
+- **`policy_train` defaults to `"pre_split"` with DeprecationWarning** ([#60],
+  [#82]). The sentinel approach: passing `policy_train=None` (or omitting the
+  argument) now emits `DeprecationWarning` and uses `"pre_split"`. Passing
+  `policy_train="pre_split"` or `policy_train="all"` suppresses the warning.
+  The old default of `"all"` is retained for backward compatibility but
+  deprecated. This change affects both `evaluate_sklearn_models` and
+  `evaluate_pairwise_models`.
+
+- **`Recommendation` API** ([#83]). New `EvaluationArtifact.recommendation(
+  model_name, *, estimator="SNDR", baseline=0.0, policy=None)` method that
+  aggregates support-health warnings and CI position into a structured
+  `Recommendation` dataclass with `verdict` (``"deploy"`` / ``"ab_test"`` /
+  ``"do_not_deploy"`` / ``"insufficient_evidence"``), `confidence`
+  (``"high"`` / ``"medium"`` / ``"low"``), `primary_blocker`, `reasons`
+  (list of `Reason` objects), and `recommended_estimator`. Supports
+  `to_dict()` / `from_dict()`. Also exported from the top-level package.
+
+- **`DiagnosticGate` API** ([#99]). New `gate_diagnostics(artifact, model_name,
+  estimator="DR", *, thresholds=None)` function that runs structured
+  pass/warn/fail gates for overlap (`min_pscore` vs 1/n), effective sample
+  size, and calibration (Pareto-k). Returns a `DiagnosticGate` dataclass with
+  `overlap`, `ess`, `calibration` (`GateResult` objects) and `overall`.
+  Supports `to_dict()` and `to_text()`. All symbols exported from the top-level
+  package.
+
+- **Coverage-probability simulation harness** ([#81]). New private module
+  `src/skdr_eval/_simulation.py` with `simulate_coverage(dgp, n, n_reps,
+  alpha, block_length_strategy, block_len, seed, tolerance) → CoverageResult`.
+  Supports DGPs: ``"iid"``, ``"ar1"`` (ρ=0.5), ``"seasonal"`` (weekly, period=52).
+  Returns `CoverageResult` with empirical coverage, Wilson 95% CI for the
+  proportion, and a `passes_nominal` verdict. `CoverageResult` and
+  `simulate_coverage` are exported from the top-level package.
+
+- **`make coverage-sim` target** ([#81]). Runs the simulation harness for all
+  three DGPs at `n_reps=50` (fast CI check). Increase `--n_reps` locally for
+  thorough calibration checking.
+
+### Changed
+- `evaluate_sklearn_models` and `evaluate_pairwise_models` parameter
+  `policy_train` changed from `str = "all"` to `str | None = None`.
+  Callers relying on the old default should add `policy_train="all"` to
+  suppress the `DeprecationWarning`, or migrate to `policy_train="pre_split"`
+  for the statistically-sound choice.
+
+### Tests
+- New `tests/test_coverage_simulation.py` — structural, validation, and
+  statistical coverage tests for `simulate_coverage`.
+- Extended `tests/test_bootstrap_integration.py` with
+  `TestBootstrapCICoverageDGP`: B=50 DGP seeds check that the DR CI brackets
+  the oracle V* at ≥70% rate, and a new test checks that the post-fix SNDR CI
+  contains V̂_SNDR across B=30 seeds.
+- Extended `tests/test_reporting_artifact.py` with `TestRecommendation` (all
+  verdict branches, `to_dict`/`from_dict`, error paths) and
+  `TestDiagnosticGate` (all gate states, custom thresholds, serialization,
+  error paths).
+- Extended `tests/test_api.py` with `policy_train` deprecation warning tests
+  and import checks for new public symbols.
+
 ## [0.7.0] - 2026-05-17
+
 
 ### Added
 - **PSIS Pareto-k support-health diagnostic** ([#80]). Every `DRResult` and report row now carries `pareto_k`, the Generalized-Pareto shape parameter of the unclipped importance-weight tail (Vehtari, Simpson, Gelman, Yao & Gabry 2024, *Pareto Smoothed Importance Sampling*, JMLR 25:1–58). New warning code `HIGH_PARETO_K` fires as `caution` when `k ≥ 0.5` and escalates to `high_risk` when `k ≥ 0.7`. Thresholds tunable via `SupportHealthThresholds(high_pareto_k_caution=..., high_pareto_k=...)`. New public helper `skdr_eval.diagnostics.psis_pareto_k(weights)`.

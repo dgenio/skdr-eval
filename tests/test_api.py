@@ -1,6 +1,7 @@
 """Test API imports and basic functionality."""
 
 import logging
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -166,6 +167,7 @@ def test_evaluate_sklearn_models_signature():
         fit_models=True,
         n_splits=3,
         random_state=0,
+        policy_train="all",  # explicit: suppress DeprecationWarning
     )
 
     report, detailed_results = _artifact.report, _artifact.detailed
@@ -422,3 +424,69 @@ def test_induce_policy_from_sklearn_uniform_fallback_for_no_eligible_samples():
     np.testing.assert_allclose(policy[3], expected_eligible_row, atol=1e-9)
     # Ineligible row: uniform 1/n_ops fallback.
     np.testing.assert_allclose(policy[1], np.full(n_ops, 1.0 / n_ops), atol=1e-9)
+
+
+# --------------------------------------------------------------------------- #
+# policy_train deprecation warning (#82 + #60)                               #
+# --------------------------------------------------------------------------- #
+
+
+def test_evaluate_sklearn_models_no_policy_train_warns() -> None:
+    """Calling evaluate_sklearn_models without policy_train emits DeprecationWarning."""
+    logs, _, _ = skdr_eval.make_synth_logs(n=200, n_ops=3, seed=0)
+    models = {"rf": RandomForestRegressor(n_estimators=5, random_state=0)}
+    with pytest.warns(DeprecationWarning, match="policy_train"):
+        skdr_eval.evaluate_sklearn_models(
+            logs=logs,
+            models=models,
+            fit_models=True,
+            n_splits=2,
+            # policy_train intentionally omitted
+        )
+
+
+def test_evaluate_sklearn_models_explicit_policy_train_no_warning() -> None:
+    """Passing policy_train explicitly suppresses the DeprecationWarning."""
+    logs, _, _ = skdr_eval.make_synth_logs(n=200, n_ops=3, seed=0)
+    models = {"rf": RandomForestRegressor(n_estimators=5, random_state=0)}
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        # Should NOT raise — no warning expected when policy_train is explicit.
+        skdr_eval.evaluate_sklearn_models(
+            logs=logs,
+            models=models,
+            fit_models=True,
+            n_splits=2,
+            policy_train="pre_split",
+        )
+
+
+def test_evaluate_sklearn_models_none_policy_train_uses_pre_split() -> None:
+    """evaluate_sklearn_models(policy_train=None) defaults to 'pre_split' behaviour."""
+    logs, _, _ = skdr_eval.make_synth_logs(n=300, n_ops=3, seed=1)
+    models = {"rf": RandomForestRegressor(n_estimators=5, random_state=0)}
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        art_none = skdr_eval.evaluate_sklearn_models(
+            logs=logs, models=models, fit_models=True, n_splits=2, policy_train=None
+        )
+    art_pre = skdr_eval.evaluate_sklearn_models(
+        logs=logs, models=models, fit_models=True, n_splits=2, policy_train="pre_split"
+    )
+    # Both should produce the same artifact structure.
+    assert list(art_none.report.columns) == list(art_pre.report.columns)
+    assert list(art_none.report["estimator"]) == list(art_pre.report["estimator"])
+
+
+def test_evaluate_sklearn_models_new_public_symbols_importable() -> None:
+    """New public symbols from issues #83 and #99 are accessible from the package."""
+    assert hasattr(skdr_eval, "Recommendation")
+    assert hasattr(skdr_eval, "RecommendationPolicy")
+    assert hasattr(skdr_eval, "Reason")
+    assert hasattr(skdr_eval, "DiagnosticGate")
+    assert hasattr(skdr_eval, "GateResult")
+    assert hasattr(skdr_eval, "gate_diagnostics")
+    assert hasattr(skdr_eval, "simulate_coverage")
+    assert hasattr(skdr_eval, "CoverageResult")
