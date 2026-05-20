@@ -151,7 +151,7 @@ class TestNegativeControl:
                 "This may be a fluke at this seed; re-run with n_reps=500 to confirm.",
                 stacklevel=2,
             )
-        # What we do assert: empirical coverage is at most the nominal + 5%
-        # (it should be noticeably below, but we bound from above to keep the
-        # test non-trivially informative).
-        assert result.empirical_coverage <= 0.95 + 0.05
+        # Assert that the negative control actually detects under-coverage:
+        # with block_len=1 on AR(1) and a fixed seed, passes_nominal should
+        # be False (coverage < nominal - tolerance).
+        assert not result.passes_nominal

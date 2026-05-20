@@ -1087,6 +1087,7 @@ class TestDiagnosticGate:
         )
         art = _make_artifact_from_row(report)
         gate = gate_diagnostics(art, "HGB", "SNDR")
+        assert isinstance(gate, DiagnosticGate)
         assert gate.overall == "pass"
         assert gate.overlap.state == "pass"
         assert gate.ess.state == "pass"

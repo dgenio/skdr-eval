@@ -1023,7 +1023,7 @@ class EvaluationArtifact:
         model_name: str,
         *,
         estimator: str = "SNDR",
-        baseline: float = 0.0,
+        baseline: "float | None" = None,
         policy: "RecommendationPolicy | None" = None,
     ) -> "Recommendation":
         """Generate a structured deployment recommendation for one model.
@@ -1039,10 +1039,12 @@ class EvaluationArtifact:
         estimator : str, default ``"SNDR"``
             Estimator row to base the recommendation on (``"DR"`` or
             ``"SNDR"``).
-        baseline : float, default 0.0
+        baseline : float or None, default None
             Minimum policy value threshold.  The CI gate checks
             ``ci_lower > baseline``.  Takes precedence over
-            ``policy.baseline`` when both are provided.
+            ``policy.baseline`` when provided (even if 0.0).
+            When ``None``, falls back to ``policy.baseline`` if a policy
+            is given, otherwise defaults to 0.0.
         policy : RecommendationPolicy, optional
             Advanced policy object.  ``baseline`` kwarg takes precedence
             when supplied.
@@ -1057,9 +1059,12 @@ class EvaluationArtifact:
         DataValidationError
             If ``model_name`` or ``estimator`` is not found in the artifact.
         """
-        _policy = RecommendationPolicy(baseline=baseline)
-        if policy is not None:
-            _policy = RecommendationPolicy(baseline=baseline if baseline != 0.0 else policy.baseline)
+        if baseline is not None:
+            _policy = RecommendationPolicy(baseline=baseline)
+        elif policy is not None:
+            _policy = policy
+        else:
+            _policy = RecommendationPolicy(baseline=0.0)
         return _build_recommendation(self, model_name, estimator, _policy)
 
     # ------------------------------------------------------------------ #
@@ -1414,10 +1419,8 @@ def _build_recommendation(
             f"No report row for model={model_name!r}, estimator={estimator!r}.",
         )
     row = rows.iloc[0]
-    support_health = str(row.get("support_health", SUPPORT_OK))
     warn_str = str(row.get("diagnostic_warnings", "") or "")
     warn_codes = [c for c in warn_str.split(",") if c]
-    v_hat = float(row["V_hat"])
     ci_lower = row.get("ci_lower")
     ci_upper = row.get("ci_upper")
     ci_lower = None if ci_lower is None or (isinstance(ci_lower, float) and np.isnan(ci_lower)) else float(ci_lower)

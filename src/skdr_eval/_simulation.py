@@ -41,9 +41,9 @@ class CoverageResult:
     ci_for_coverage : tuple[float, float]
         Wilson (1927) 95% confidence interval for ``empirical_coverage``.
     passes_nominal : bool
-        True when ``ci_for_coverage[0] >= alpha_tolerance``, i.e. the
-        empirical coverage is consistent with the nominal rate within the
-        sampling variability of the simulation.
+        True when ``empirical_coverage >= (1 - alpha) - tolerance``, i.e.
+        the empirical coverage is at or above the nominal rate minus the
+        allowed shortfall.
     dgp : str
         Name of the DGP (``"iid"``, ``"ar1"``, or ``"seasonal"``).
     n : int
@@ -132,7 +132,7 @@ def simulate_coverage(
     dgp : {"iid", "ar1", "seasonal"}, default "ar1"
         Data-generating process.
 
-        - ``"iid"``: independent standard-normal observations.
+        - ``"iid"``: independent normal observations with mean=1.0, std=1.0.
         - ``"ar1"``: AR(1) with autocorrelation ρ = 0.5.
         - ``"seasonal"``: sinusoidal weekly seasonality (period = 52) plus
           i.i.d. noise.
@@ -144,7 +144,7 @@ def simulate_coverage(
         Nominal significance level.  The target coverage is ``1 - alpha``.
     block_length_strategy : {"auto", "fixed"}, default "auto"
         ``"auto"`` lets :func:`block_bootstrap_ci` choose the block length
-        (currently ``max(1, n^{1/3})``).  ``"fixed"`` uses ``block_len``.
+        (currently ``max(1, int(sqrt(n)))``).  ``"fixed"`` uses ``block_len``.
     block_len : int, optional
         Required when ``block_length_strategy="fixed"``.
     seed : int, default 42
