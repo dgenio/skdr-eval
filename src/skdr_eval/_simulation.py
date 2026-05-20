@@ -16,7 +16,7 @@ Issues: #81 (simulation harness), #62 (DGP coverage test).
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable  # noqa: TC003
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -101,7 +101,7 @@ def _sample_seasonal(n: int, rng: np.random.Generator, period: int = 52) -> np.n
     return np.sin(2 * np.pi * t / period) + rng.normal(1.0, 0.5, size=n)
 
 
-def _true_mean(dgp: str) -> float:
+def _true_mean(dgp: str) -> float:  # noqa: ARG001
     """Return the population mean for the given DGP."""
     return 1.0  # all three DGPs are shifted so E[Y] = 1.0
 
@@ -133,7 +133,7 @@ def simulate_coverage(
         Data-generating process.
 
         - ``"iid"``: independent normal observations with mean=1.0, std=1.0.
-        - ``"ar1"``: AR(1) with autocorrelation ρ = 0.5.
+        - ``"ar1"``: AR(1) with autocorrelation rho = 0.5.
         - ``"seasonal"``: sinusoidal weekly seasonality (period = 52) plus
           i.i.d. noise.
     n : int, default 5000
@@ -164,11 +164,19 @@ def simulate_coverage(
         If ``dgp`` is not recognised, or ``block_len`` is not provided when
         ``block_length_strategy="fixed"``.
     """
-    _dgp_samplers: dict[str, Any] = {"iid": _sample_iid, "ar1": _sample_ar1, "seasonal": _sample_seasonal}
+    _dgp_samplers: dict[str, Any] = {
+        "iid": _sample_iid,
+        "ar1": _sample_ar1,
+        "seasonal": _sample_seasonal,
+    }
     if dgp not in _dgp_samplers:
-        raise ValueError(f"Unknown DGP: {dgp!r}. Must be one of {sorted(_dgp_samplers)}")
+        raise ValueError(
+            f"Unknown DGP: {dgp!r}. Must be one of {sorted(_dgp_samplers)}"
+        )
     if block_length_strategy == "fixed" and block_len is None:
-        raise ValueError("block_len must be provided when block_length_strategy='fixed'.")
+        raise ValueError(
+            "block_len must be provided when block_length_strategy='fixed'."
+        )
     if block_length_strategy not in ("auto", "fixed"):
         raise ValueError(
             f"Unknown block_length_strategy: {block_length_strategy!r}. "
@@ -234,8 +242,8 @@ def simulate_coverage(
 
 
 def _main() -> None:  # pragma: no cover
-    import argparse
-    import sys
+    import argparse  # noqa: PLC0415
+    import sys  # noqa: PLC0415
 
     parser = argparse.ArgumentParser(
         description="Run moving-block bootstrap coverage simulation."
@@ -265,7 +273,9 @@ def _main() -> None:  # pragma: no cover
     print(f"n_reps       : {result.n_reps}")
     print(f"nominal      : {1.0 - result.alpha:.2%}")
     print(f"empirical    : {result.empirical_coverage:.2%}")
-    print(f"Wilson 95%CI : [{result.ci_for_coverage[0]:.2%}, {result.ci_for_coverage[1]:.2%}]")
+    print(
+        f"Wilson 95%CI : [{result.ci_for_coverage[0]:.2%}, {result.ci_for_coverage[1]:.2%}]"
+    )
     print(f"passes       : {result.passes_nominal}")
     sys.exit(0 if result.passes_nominal else 1)
 

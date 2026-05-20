@@ -1064,7 +1064,12 @@ class TestRecommendation:
         """End-to-end: recommendation runs on a real artifact without error."""
         art = _run_eval(ci=True)
         rec = art.recommendation("HGB", estimator="DR")
-        assert rec.verdict in ("deploy", "ab_test", "do_not_deploy", "insufficient_evidence")
+        assert rec.verdict in (
+            "deploy",
+            "ab_test",
+            "do_not_deploy",
+            "insufficient_evidence",
+        )
         assert rec.model_name == "HGB"
 
 
@@ -1129,7 +1134,9 @@ class TestDiagnosticGate:
     def test_gate_warn_high_pareto_k(self) -> None:
         """Pareto-k above threshold → calibration gate warns/fails."""
         report = _make_report_row(
-            min_pscore=0.05, ess=200.0, pareto_k=0.85  # above default 0.7
+            min_pscore=0.05,
+            ess=200.0,
+            pareto_k=0.85,  # above default 0.7
         )
         art = _make_artifact_from_row(report)
         gate = gate_diagnostics(art, "HGB", "SNDR")
@@ -1185,12 +1192,15 @@ class TestDiagnosticGate:
 
     def test_gate_gateresult_to_dict_complete(self) -> None:
         r = GateResult(
-            check="overlap", state="pass", code="OVERLAP_OK", message="ok",
-            value=0.05, threshold=0.0025
+            check="overlap",
+            state="pass",
+            code="OVERLAP_OK",
+            message="ok",
+            value=0.05,
+            threshold=0.0025,
         )
         d = r.to_dict()
         assert d["check"] == "overlap"
         assert d["state"] == "pass"
         assert d["value"] == 0.05
         assert d["threshold"] == 0.0025
-

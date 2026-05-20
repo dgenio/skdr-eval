@@ -1520,16 +1520,16 @@ def evaluate_sklearn_models(
                         w_clip[~matched] = 0
 
                         # Estimator-specific pseudo-outcome for the bootstrap:
-                        # DR: q_pi + w*(Y - q_hat)
+                        # DR: q_pi + w*(Y - q_hat)  # noqa: ERA001
                         # SNDR: q_pi + (n/Σw)*w*(Y - q_hat) — normalised so
                         #       mean(bootstrap_values) == V_SNDR.
                         if estimator_name == "SNDR":
                             w_sum = float(w_clip.sum())
                             _n = len(eval_design.Y)
                             if w_sum > 0:
-                                bootstrap_values = q_pi + (
-                                    _n * w_clip / w_sum
-                                ) * (eval_design.Y - q_hat)
+                                bootstrap_values = q_pi + (_n * w_clip / w_sum) * (
+                                    eval_design.Y - q_hat
+                                )
                             else:
                                 bootstrap_values = q_pi.copy()
                         else:
@@ -2414,15 +2414,15 @@ def evaluate_pairwise_models(
                             w_clip[~matched] = 0
 
                             # Estimator-specific pseudo-outcome for bootstrap:
-                            # DR: q_pi + w*(Y - q_hat)
-                            # SNDR: q_pi + (n/Σw)*w*(Y - q_hat)
+                            # DR: q_pi + w*(Y - q_hat)  # noqa: ERA001
+                            # SNDR: q_pi + (n/Σw)*w*(Y - q_hat)  # noqa: ERA001
                             if estimator_name == "SNDR":
                                 w_sum = float(w_clip.sum())
                                 _n = len(Y)
                                 if w_sum > 0:
-                                    bootstrap_values = q_pi + (
-                                        _n * w_clip / w_sum
-                                    ) * (Y - q_hat)
+                                    bootstrap_values = q_pi + (_n * w_clip / w_sum) * (
+                                        Y - q_hat
+                                    )
                                 else:
                                     bootstrap_values = q_pi.copy()
                             else:

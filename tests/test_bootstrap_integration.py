@@ -1,5 +1,7 @@
 """Tests for bootstrap CI integration in evaluation functions."""
 
+import warnings
+
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
@@ -499,8 +501,6 @@ class TestBootstrapCICoverageDGP:
 
     def _oracle_v_star(self, logs: "pd.DataFrame") -> float:
         """Compute an oracle DR estimate on the full dataset (no split)."""
-        import warnings
-
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
             model = RandomForestRegressor(n_estimators=20, random_state=0)
@@ -518,8 +518,6 @@ class TestBootstrapCICoverageDGP:
 
     def test_dr_ci_covers_oracle_at_nominal_rate(self) -> None:
         """DR CI from pre_split evaluation should bracket the oracle V* ≥70% of the time."""
-        import warnings
-
         B = 50
         covered = 0
 
@@ -563,8 +561,6 @@ class TestBootstrapCICoverageDGP:
         contains the SNDR V_hat value — a necessary (though not sufficient)
         condition for a well-formed CI.
         """
-        import warnings
-
         B = 30
         bad = 0
 

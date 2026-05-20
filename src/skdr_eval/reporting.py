@@ -1023,9 +1023,9 @@ class EvaluationArtifact:
         model_name: str,
         *,
         estimator: str = "SNDR",
-        baseline: "float | None" = None,
-        policy: "RecommendationPolicy | None" = None,
-    ) -> "Recommendation":
+        baseline: float | None = None,
+        policy: RecommendationPolicy | None = None,
+    ) -> Recommendation:
         """Generate a structured deployment recommendation for one model.
 
         Aggregates support-health warnings, CI position relative to a
@@ -1370,7 +1370,7 @@ class Recommendation:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Recommendation":
+    def from_dict(cls, data: dict[str, Any]) -> Recommendation:
         """Deserialize from a plain dict."""
         reasons = [
             Reason(
@@ -1391,7 +1391,7 @@ class Recommendation:
 
 
 def _build_recommendation(
-    artifact: "EvaluationArtifact",
+    artifact: EvaluationArtifact,
     model_name: str,
     estimator: str,
     policy: RecommendationPolicy,
@@ -1423,8 +1423,16 @@ def _build_recommendation(
     warn_codes = [c for c in warn_str.split(",") if c]
     ci_lower = row.get("ci_lower")
     ci_upper = row.get("ci_upper")
-    ci_lower = None if ci_lower is None or (isinstance(ci_lower, float) and np.isnan(ci_lower)) else float(ci_lower)
-    ci_upper = None if ci_upper is None or (isinstance(ci_upper, float) and np.isnan(ci_upper)) else float(ci_upper)
+    ci_lower = (
+        None
+        if ci_lower is None or (isinstance(ci_lower, float) and np.isnan(ci_lower))
+        else float(ci_lower)
+    )
+    ci_upper = (
+        None
+        if ci_upper is None or (isinstance(ci_upper, float) and np.isnan(ci_upper))
+        else float(ci_upper)
+    )
 
     reasons: list[Reason] = []
 
@@ -1443,21 +1451,27 @@ def _build_recommendation(
     high_risk_blockers: list[str] = []
     for code in warn_codes:
         if code in _HIGH_RISK_MSG:
-            reasons.append(Reason(code=code, message=_HIGH_RISK_MSG[code], severity="high_risk"))
+            reasons.append(
+                Reason(code=code, message=_HIGH_RISK_MSG[code], severity="high_risk")
+            )
             high_risk_blockers.append(code)
         elif code in _CAUTION_MSG:
-            reasons.append(Reason(code=code, message=_CAUTION_MSG[code], severity="caution"))
+            reasons.append(
+                Reason(code=code, message=_CAUTION_MSG[code], severity="caution")
+            )
 
     # --- Determine verdict ---
     if high_risk_blockers:
         primary_blocker = high_risk_blockers[0]
         verdict = "do_not_deploy"
         confidence = "high"
-        reasons.append(Reason(
-            code="DO_NOT_DEPLOY_HIGH_RISK",
-            message=f"High-risk diagnostic flag(s) present: {', '.join(high_risk_blockers)}.",
-            severity="high_risk",
-        ))
+        reasons.append(
+            Reason(
+                code="DO_NOT_DEPLOY_HIGH_RISK",
+                message=f"High-risk diagnostic flag(s) present: {', '.join(high_risk_blockers)}.",
+                severity="high_risk",
+            )
+        )
     elif ci_lower is not None and ci_upper is not None:
         primary_blocker = None
         ci_beats_baseline = ci_lower > policy.baseline
@@ -1466,49 +1480,57 @@ def _build_recommendation(
             if caution_present:
                 verdict = "ab_test"
                 confidence = "medium"
-                reasons.append(Reason(
-                    code="CI_ABOVE_BASELINE_WITH_CAUTION",
-                    message=(
-                        f"CI [{ci_lower:.4g}, {ci_upper:.4g}] is above "
-                        f"baseline {policy.baseline:.4g} but caution diagnostics present."
-                    ),
-                    severity="caution",
-                ))
+                reasons.append(
+                    Reason(
+                        code="CI_ABOVE_BASELINE_WITH_CAUTION",
+                        message=(
+                            f"CI [{ci_lower:.4g}, {ci_upper:.4g}] is above "
+                            f"baseline {policy.baseline:.4g} but caution diagnostics present."
+                        ),
+                        severity="caution",
+                    )
+                )
             else:
                 verdict = "deploy"
                 confidence = "high"
-                reasons.append(Reason(
-                    code="CI_ABOVE_BASELINE_CLEAN",
-                    message=(
-                        f"CI [{ci_lower:.4g}, {ci_upper:.4g}] fully exceeds "
-                        f"baseline {policy.baseline:.4g} with no caution flags."
-                    ),
-                    severity="info",
-                ))
+                reasons.append(
+                    Reason(
+                        code="CI_ABOVE_BASELINE_CLEAN",
+                        message=(
+                            f"CI [{ci_lower:.4g}, {ci_upper:.4g}] fully exceeds "
+                            f"baseline {policy.baseline:.4g} with no caution flags."
+                        ),
+                        severity="info",
+                    )
+                )
         else:
             verdict = "ab_test"
             confidence = "low"
-            reasons.append(Reason(
-                code="CI_OVERLAPS_BASELINE",
-                message=(
-                    f"CI [{ci_lower:.4g}, {ci_upper:.4g}] overlaps or is below "
-                    f"baseline {policy.baseline:.4g}."
-                ),
-                severity="caution",
-            ))
+            reasons.append(
+                Reason(
+                    code="CI_OVERLAPS_BASELINE",
+                    message=(
+                        f"CI [{ci_lower:.4g}, {ci_upper:.4g}] overlaps or is below "
+                        f"baseline {policy.baseline:.4g}."
+                    ),
+                    severity="caution",
+                )
+            )
     else:
         # No CI available — can still give a verdict if V_hat is large
         primary_blocker = None
         verdict = "insufficient_evidence"
         confidence = "low"
-        reasons.append(Reason(
-            code="NO_CI",
-            message=(
-                "No bootstrap CI available. Re-run with ci_bootstrap=True "
-                "for a more confident recommendation."
-            ),
-            severity="info",
-        ))
+        reasons.append(
+            Reason(
+                code="NO_CI",
+                message=(
+                    "No bootstrap CI available. Re-run with ci_bootstrap=True "
+                    "for a more confident recommendation."
+                ),
+                severity="info",
+            )
+        )
 
     # Sort: high_risk first, then caution, then info.
     _sev_order = {"high_risk": 0, "caution": 1, "info": 2}
@@ -1606,16 +1628,18 @@ class DiagnosticGate:
         for check in (self.overlap, self.ess, self.calibration):
             icon = {"pass": "✓", "warn": "⚠", "fail": "✗"}.get(check.state, "?")
             val = f" (value={check.value:.4g})" if check.value is not None else ""
-            lines.append(f"  {icon} {check.check}: {check.state} — {check.message}{val}")
+            lines.append(
+                f"  {icon} {check.check}: {check.state} — {check.message}{val}"
+            )
         return "\n".join(lines)
 
 
 def gate_diagnostics(
-    artifact: "EvaluationArtifact",
+    artifact: EvaluationArtifact,
     model_name: str,
     estimator: str = "DR",
     *,
-    thresholds: "SupportHealthThresholds | None" = None,
+    thresholds: SupportHealthThresholds | None = None,
 ) -> DiagnosticGate:
     """Run pass/warn/fail gates across key diagnostics for one (model, estimator) pair.
 
@@ -1669,8 +1693,14 @@ def gate_diagnostics(
     min_ps = row.get("min_pscore")
     match_rate = row.get("match_rate")
     overlap_threshold = 1.0 / max(n, 1)
-    min_ps_val = float(min_ps) if min_ps is not None and not np.isnan(float(min_ps)) else None
-    match_rate_val = float(match_rate) if match_rate is not None and not np.isnan(float(match_rate)) else None
+    min_ps_val = (
+        float(min_ps) if min_ps is not None and not np.isnan(float(min_ps)) else None
+    )
+    match_rate_val = (
+        float(match_rate)
+        if match_rate is not None and not np.isnan(float(match_rate))
+        else None
+    )
 
     if min_ps_val is not None and min_ps_val <= overlap_threshold:
         overlap = GateResult(
@@ -1702,7 +1732,11 @@ def gate_diagnostics(
 
     # --- ESS gate ---
     ess_val_raw = row.get("ESS")
-    ess_val = float(ess_val_raw) if ess_val_raw is not None and not np.isnan(float(ess_val_raw)) else None
+    ess_val = (
+        float(ess_val_raw)
+        if ess_val_raw is not None and not np.isnan(float(ess_val_raw))
+        else None
+    )
     ess_frac = (ess_val / n) if ess_val is not None else None
     # low_ess_frac is a fraction (e.g. 0.10); absolute threshold = frac * n
     ess_abs_threshold = thr.low_ess_frac * n
@@ -1710,7 +1744,7 @@ def gate_diagnostics(
     if ess_val is not None and ess_val < ess_abs_threshold:
         ess = GateResult(
             check="ess",
-            state="fail" if ess_frac is not None and ess_frac < 0.05 else "warn",
+            state="fail" if ess_frac is not None and ess_frac < 0.05 else "warn",  # noqa: PLR2004
             code=WARN_LOW_ESS,
             message=f"ESS={ess_val:.1f} (n={n}) is below threshold {ess_abs_threshold:.1f} ({thr.low_ess_frac:.0%}).",
             value=ess_val,
@@ -1721,14 +1755,20 @@ def gate_diagnostics(
             check="ess",
             state="pass",
             code="ESS_OK",
-            message=f"ESS={ess_val:.1f} is healthy." if ess_val is not None else "ESS not available.",
+            message=f"ESS={ess_val:.1f} is healthy."
+            if ess_val is not None
+            else "ESS not available.",
             value=ess_val,
             threshold=ess_abs_threshold,
         )
 
     # --- Calibration gate: prefer Pareto-k ---
     pareto_k_raw = row.get("pareto_k")
-    pareto_k = float(pareto_k_raw) if pareto_k_raw is not None and not np.isnan(float(pareto_k_raw)) else None
+    pareto_k = (
+        float(pareto_k_raw)
+        if pareto_k_raw is not None and not np.isnan(float(pareto_k_raw))
+        else None
+    )
 
     if pareto_k is not None and pareto_k > thr.high_pareto_k:
         cal = GateResult(
@@ -1741,7 +1781,9 @@ def gate_diagnostics(
         )
     else:
         cal_msg = (
-            f"Pareto-k={pareto_k:.3f} is healthy." if pareto_k is not None else "Pareto-k not available."
+            f"Pareto-k={pareto_k:.3f} is healthy."
+            if pareto_k is not None
+            else "Pareto-k not available."
         )
         cal = GateResult(
             check="calibration",

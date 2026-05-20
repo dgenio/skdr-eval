@@ -1,6 +1,7 @@
 """Test API imports and basic functionality."""
 
 import logging
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -448,7 +449,6 @@ def test_evaluate_sklearn_models_explicit_policy_train_no_warning() -> None:
     """Passing policy_train explicitly suppresses the DeprecationWarning."""
     logs, _, _ = skdr_eval.make_synth_logs(n=200, n_ops=3, seed=0)
     models = {"rf": RandomForestRegressor(n_estimators=5, random_state=0)}
-    import warnings
 
     with warnings.catch_warnings():
         warnings.simplefilter("error", DeprecationWarning)
@@ -464,8 +464,6 @@ def test_evaluate_sklearn_models_explicit_policy_train_no_warning() -> None:
 
 def test_evaluate_sklearn_models_none_policy_train_uses_pre_split() -> None:
     """evaluate_sklearn_models(policy_train=None) defaults to 'pre_split' behaviour."""
-    import warnings
-
     logs, _, _ = skdr_eval.make_synth_logs(n=300, n_ops=3, seed=1)
     models = {"rf": RandomForestRegressor(n_estimators=5, random_state=0)}
 

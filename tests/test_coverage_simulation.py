@@ -9,7 +9,6 @@ import pytest
 
 from skdr_eval._simulation import CoverageResult, simulate_coverage
 
-
 # ---------------------------------------------------------------------------
 # Fast smoke tests at small n_reps (speed vs. statistical precision trade-off)
 # ---------------------------------------------------------------------------
@@ -140,17 +139,6 @@ class TestNegativeControl:
             seed=0,
             tolerance=0.02,  # tight: expect coverage well below 0.93
         )
-        # Under-coverage with block_len=1 on AR(1): passes_nominal should be False.
-        # We document rather than hard-fail to avoid rare false positives.
-        if result.passes_nominal:
-            import warnings
-
-            warnings.warn(
-                f"Expected under-coverage for AR(1) with block_len=1 but got "
-                f"empirical={result.empirical_coverage:.2%}. "
-                "This may be a fluke at this seed; re-run with n_reps=500 to confirm.",
-                stacklevel=2,
-            )
         # Assert that the negative control actually detects under-coverage:
         # with block_len=1 on AR(1) and a fixed seed, passes_nominal should
         # be False (coverage < nominal - tolerance).
