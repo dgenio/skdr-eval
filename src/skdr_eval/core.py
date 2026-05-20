@@ -1147,6 +1147,24 @@ def _build_contributions_payload(
     return payload
 
 
+def _sndr_bootstrap_values(
+    q_pi: np.ndarray,
+    w_clip: np.ndarray,
+    Y: np.ndarray,
+    q_hat: np.ndarray,
+) -> np.ndarray:
+    """Compute SNDR pseudo-outcomes for bootstrap CI.
+
+    Uses the self-normalised formula: q_pi + (n/Σw)*w*(Y - q_hat)
+    so that mean(bootstrap_values) == V_SNDR.
+    """
+    w_sum = float(w_clip.sum())
+    n = len(Y)
+    if w_sum > 0:
+        return q_pi + (n * w_clip / w_sum) * (Y - q_hat)
+    return q_pi.copy()
+
+
 def block_bootstrap_ci(
     values_num: np.ndarray,
     values_den: np.ndarray | None,
@@ -1524,14 +1542,9 @@ def evaluate_sklearn_models(
                         # SNDR: q_pi + (n/Σw)*w*(Y - q_hat) — normalised so
                         #       mean(bootstrap_values) == V_SNDR.
                         if estimator_name == "SNDR":
-                            w_sum = float(w_clip.sum())
-                            _n = len(eval_design.Y)
-                            if w_sum > 0:
-                                bootstrap_values = q_pi + (_n * w_clip / w_sum) * (
-                                    eval_design.Y - q_hat
-                                )
-                            else:
-                                bootstrap_values = q_pi.copy()
+                            bootstrap_values = _sndr_bootstrap_values(
+                                q_pi, w_clip, eval_design.Y, q_hat
+                            )
                         else:
                             bootstrap_values = q_pi + w_clip * (eval_design.Y - q_hat)
 
@@ -2417,14 +2430,9 @@ def evaluate_pairwise_models(
                             # DR: q_pi + w*(Y - q_hat)  # noqa: ERA001
                             # SNDR: q_pi + (n/Σw)*w*(Y - q_hat)  # noqa: ERA001
                             if estimator_name == "SNDR":
-                                w_sum = float(w_clip.sum())
-                                _n = len(Y)
-                                if w_sum > 0:
-                                    bootstrap_values = q_pi + (_n * w_clip / w_sum) * (
-                                        Y - q_hat
-                                    )
-                                else:
-                                    bootstrap_values = q_pi.copy()
+                                bootstrap_values = _sndr_bootstrap_values(
+                                    q_pi, w_clip, Y, q_hat
+                                )
                             else:
                                 bootstrap_values = q_pi + w_clip * (Y - q_hat)
 

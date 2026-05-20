@@ -595,3 +595,63 @@ class TestBootstrapCICoverageDGP:
             f"SNDR CI failed to contain V_hat in {bad}/{B} seeds after issue #58 fix. "
             "The SNDR CI pseudo-outcome may still be using DR contributions."
         )
+
+    def test_sndr_ci_covers_oracle_at_nominal_rate(self) -> None:
+        """SNDR CI should bracket the SNDR oracle V* at ≥70% rate (coverage-probability proof).
+
+        Analogous to test_dr_ci_covers_oracle_at_nominal_rate but for SNDR.
+        The oracle V*_SNDR is computed on the full dataset with policy_train='all'
+        (no split) to approximate the population SNDR value.
+        """
+        B = 50
+        covered = 0
+
+        for seed in range(B):
+            logs, _, _ = skdr_eval.make_synth_logs(n=2000, n_ops=3, seed=seed)
+
+            # Oracle SNDR V* on full data (no split)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                model = RandomForestRegressor(n_estimators=20, random_state=0)
+                oracle_art = skdr_eval.evaluate_sklearn_models(
+                    logs=logs,
+                    models={"oracle": model},
+                    fit_models=True,
+                    n_splits=3,
+                    ci_bootstrap=False,
+                    policy_train="all",
+                    random_state=0,
+                )
+            sndr_oracle = oracle_art.report[
+                oracle_art.report["estimator"] == "SNDR"
+            ].iloc[0]
+            v_star = float(sndr_oracle["V_hat"])
+
+            # Evaluate with pre_split + bootstrap CI
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                model = RandomForestRegressor(n_estimators=20, random_state=seed)
+                report = skdr_eval.evaluate_sklearn_models(
+                    logs=logs,
+                    models={"m": model},
+                    fit_models=True,
+                    n_splits=3,
+                    ci_bootstrap=True,
+                    alpha=0.05,
+                    policy_train="pre_split",
+                    random_state=seed,
+                ).report
+
+            sndr_rows = report[report["estimator"] == "SNDR"]
+            if sndr_rows.empty:
+                continue
+            row = sndr_rows.iloc[0]
+            if row["ci_lower"] <= v_star <= row["ci_upper"]:
+                covered += 1
+
+        coverage = covered / B
+        min_coverage = 0.70
+        assert coverage >= min_coverage, (
+            f"SNDR CI coverage of oracle V* = {coverage:.0%} ({covered}/{B}) "
+            f"is below the {min_coverage:.0%} threshold."
+        )
