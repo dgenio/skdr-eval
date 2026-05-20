@@ -46,6 +46,20 @@ speed = [
 viz = [
     "matplotlib>=3.5",
 ]
+cli = [
+    "typer>=0.12",
+    "joblib>=1.3",
+    "pyarrow>=14",
+]
+mlflow = [
+    "mlflow>=2.10",
+]
+wandb = [
+    "wandb>=0.17",
+]
+aim = [
+    "aim>=3.20",
+]
 dev = [
     "pytest",
     "pytest-cov",
@@ -58,16 +72,23 @@ dev = [
     "twine",
     "pre-commit",
     "matplotlib",
+    "typer>=0.12",
+    "joblib>=1.3",
+    "pyarrow>=14",
 ]
 examples = [
     "jupyter",
     "matplotlib",
 ]
 
+[project.scripts]
+skdr-eval = "skdr_eval.cli:app"
+
 [project.urls]
-Homepage = "https://github.com/dandrsantos/skdr-eval"
-Repository = "https://github.com/dandrsantos/skdr-eval"
-Issues = "https://github.com/dandrsantos/skdr-eval/issues"
+Homepage = "https://github.com/dgenio/skdr-eval"
+Repository = "https://github.com/dgenio/skdr-eval"
+Issues = "https://github.com/dgenio/skdr-eval/issues"
+Changelog = "https://github.com/dgenio/skdr-eval/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -164,5 +185,18 @@ module = [
     "jinja2.*",
     "pydantic.*",
     "yaml.*",
+    "typer.*",
+    "joblib.*",
+    "mlflow.*",
+    "wandb.*",
+    "aim.*",
 ]
 ignore_missing_imports = true
+
+# The Typer CLI module uses ``@app.command(...)`` decorators that mypy
+# (correctly) flags as untyped because Typer's command decorator is
+# overloaded; suppress only that one error code so the rest of the strict
+# config still applies.
+[[tool.mypy.overrides]]
+module = ["skdr_eval.cli"]
+disable_error_code = ["untyped-decorator"]

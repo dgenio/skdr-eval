@@ -29,6 +29,7 @@ from .core import (
     induce_policy_from_sklearn,
 )
 from .diagnostics import PropensityDiagnostics
+from .doctor import Check, DoctorReport, doctor
 from .exceptions import (
     BootstrapError,
     ConfigurationError,
@@ -54,15 +55,23 @@ from .models import (
 )
 from .pairwise import PairwiseDesign
 from .reporting import (
+    CARD_SCHEMA_VERSION,
     SCHEMA_VERSION,
     ArtifactSchema,
+    CoverageSimBlock,
     DiagnosticGate,
+    DiagnosticsBlock,
     EvaluationArtifact,
+    EvaluationCard,
     GateResult,
+    HeadlineBlock,
+    ProvenanceBlock,
     Reason,
     Recommendation,
     RecommendationPolicy,
+    SensitivityBlock,
     SupportHealthThresholds,
+    TrustBlock,
     attach_warnings,
     build_evaluation_artifact,
     export_results,
@@ -84,6 +93,7 @@ from .statistical import (
     t_test,
 )
 from .synth import make_pairwise_synth, make_synth_logs
+from .trackers import FileTracker, NullTracker, Tracker
 from .validation import validate_logs, validate_pairwise_inputs
 
 try:
@@ -110,22 +120,30 @@ except ImportError:
     pass
 
 __all__ = [
+    "CARD_SCHEMA_VERSION",
     "HAS_VISUALIZATION",
     "SCHEMA_VERSION",
     "ArtifactSchema",
     "BootstrapError",
+    "Check",
     "ConfigManager",
     "ConfigurationError",
     "ConvergenceError",
     "CoverageResult",
+    "CoverageSimBlock",
     "DRResult",
     "DataValidationError",
     "Design",
     "DiagnosticGate",
+    "DiagnosticsBlock",
+    "DoctorReport",
     "EstimationError",
     "EvaluationArtifact",
+    "EvaluationCard",
     "EvaluationConfig",
+    "FileTracker",
     "GateResult",
+    "HeadlineBlock",
     "InsufficientDataError",
     "MemoryError",
     "ModelConfig",
@@ -133,18 +151,23 @@ __all__ = [
     "ModelFactory",
     "ModelSelector",
     "ModelValidationError",
+    "NullTracker",
     "OutcomeModelError",
     "PairwiseDesign",
     "PairwiseEvaluationError",
     "PolicyInductionError",
     "PropensityDiagnostics",
     "PropensityScoreError",
+    "ProvenanceBlock",
     "Reason",
     "Recommendation",
     "RecommendationPolicy",
+    "SensitivityBlock",
     "SkdrEvalError",
     "StatisticalTest",
     "SupportHealthThresholds",
+    "Tracker",
+    "TrustBlock",
     "VersionError",
     "VisualizationConfig",
     "__version__",
@@ -155,6 +178,7 @@ __all__ = [
     "build_evaluation_artifact",
     "chi_square_test",
     "create_model_ensemble",
+    "doctor",
     "dr_value_with_clip",
     "evaluate_pairwise_models",
     "evaluate_propensity_diagnostics",
