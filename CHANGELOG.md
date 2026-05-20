@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-20
+
 ### Added
 - **SNDR bootstrap CI fix** ([#58]). The moving-block bootstrap CI for the
   SNDR estimator now uses the correct normalised pseudo-outcome
@@ -73,6 +75,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   error paths).
 - Extended `tests/test_api.py` with `policy_train` deprecation warning tests
   and import checks for new public symbols.
+
+[#58]: https://github.com/dgenio/skdr-eval/issues/58
+[#60]: https://github.com/dgenio/skdr-eval/issues/60
+[#81]: https://github.com/dgenio/skdr-eval/issues/81
+[#82]: https://github.com/dgenio/skdr-eval/issues/82
+[#83]: https://github.com/dgenio/skdr-eval/issues/83
+[#99]: https://github.com/dgenio/skdr-eval/issues/99
 
 ## [0.7.0] - 2026-05-17
 
