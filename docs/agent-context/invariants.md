@@ -7,6 +7,11 @@
 ## Implementation Guardrails
 - **Thresholds**: Constants like `DIRECT_STRATEGY_THRESHOLD` exist to prevent Out-Of-Memory (OOM) errors during heavy dataframe operations. Do not blindly increase these limits or remove fallback strategies without explicit memory profiling.
 
+## Strategy Seam (Issue #86)
+- **Protocol-only seam**: `skdr_eval.estimators.WeightTransform` and `skdr_eval.estimators.OutcomeLoss` are the only sanctioned extension points for new DR-family estimators. Do not fork `dr_value_with_clip` to add a variant; build a `WeightTransform` (or `OutcomeLoss` for variance-reducing q̂ refits) and a named `EstimatorStrategy` instead.
+- **Clip transform is the floor**: `ClipTransform` remains the default for DR/SNDR. Any new strategy that bypasses the propensity bound entirely (i.e. returns ``1/pi_obs`` with no cap) must document the variance trade-off and ship with a simulation proof that bounded variance is preserved under the target DGP.
+- **MIPS bias**: MIPS is biased when the action embedding is not a sufficient statistic for the reward distribution. Code that exposes MIPS through `evaluate_sklearn_models` / `evaluate_pairwise_models` must also surface the `embedding_sufficiency_diagnostic` to the user (the standard `quickstart_mips.py` example shows the wiring).
+
 ## Domain Vocabulary (Hard Separation)
 - **treatment**: The action taken in the *historical* data (actual logs).
 - **policy**: The action recommended by the *model* currently being evaluated.

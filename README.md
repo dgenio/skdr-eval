@@ -347,6 +347,47 @@ See `examples/quickstart.py` for a complete example, or run:
 python examples/quickstart.py
 ```
 
+### Estimator family (DR, SNDR, MRDR, SWITCH-DR, DRos, MIPS)
+
+The strategy seam introduced in `skdr_eval.estimators` (issues #85, #86) lets
+you opt into additional DR variants without leaving the high-level API:
+
+```python
+import skdr_eval
+from sklearn.ensemble import HistGradientBoostingRegressor
+
+logs, _, _ = skdr_eval.make_synth_logs(n=2000, n_ops=5, seed=0)
+artifact = skdr_eval.evaluate_sklearn_models(
+    logs=logs,
+    models={"hgb": HistGradientBoostingRegressor(random_state=0)},
+    fit_models=True,
+    policy_train="pre_split",
+    n_splits=3,
+    random_state=0,
+    estimators=("DR", "SNDR", "MRDR", "SWITCH-DR", "DRos"),
+    switch_tau=10.0,
+    dros_lam=2.0,
+)
+print(artifact.report[["estimator", "V_hat", "SE_if", "ESS"]])
+```
+
+For `MIPS` (Marginalized IPS), supply an `action_embedding` matrix of shape
+`(n_actions, embed_dim)`; the
+`skdr_eval.embedding_sufficiency_diagnostic(...)` helper flags whether the
+embedding captures enough of the action-driven reward signal for MIPS to
+be approximately unbiased.
+
+See `examples/quickstart_estimators.py` and `examples/quickstart_mips.py`
+for runnable walkthroughs.
+
+### Slate / top-K off-policy evaluation
+
+The `skdr_eval.slate` subpackage (issue #75) ships four ranking-OPE
+estimators — `slate_standard_ips`, `reward_interaction_ips`,
+`pseudo_inverse_ips`, and `slate_cascade_dr` — plus a synthetic
+cascade-click generator `make_slate_synth(...)` with closed-form ground
+truth. See `examples/quickstart_slate.py`.
+
 ## Development
 
 ### Setup
