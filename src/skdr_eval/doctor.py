@@ -463,6 +463,18 @@ def doctor(
         checks.append(input_err)
         return _finalize_report(checks)
 
+    if kind not in ("standard", "pairwise"):
+        checks.append(
+            Check(
+                name="kind",
+                status="fail",
+                message=f"Unknown kind={kind!r}. Expected 'standard' or 'pairwise'.",
+                fix_hint="Pass kind='standard' or kind='pairwise'.",
+                category="input",
+            )
+        )
+        return _finalize_report(checks)
+
     if kind == "pairwise":
         checks.append(
             _check_pairwise_schema(logs, op_daily_df, metric_col, strict=strict)
@@ -475,7 +487,7 @@ def doctor(
         outcome_cols: tuple[str, ...] = (metric_col,)
     else:
         checks.append(_check_logs_schema(logs, strict=strict))
-        checks.append(_check_no_duplicates(logs, key_cols=["client_id", "ts"]))
+        checks.append(_check_no_duplicates(logs, key_cols=["client_id", "arrival_ts"]))
         outcome_cols = ("service_time", "reward", "y")
 
     checks.append(_check_finite_outcomes(logs, outcome_cols=outcome_cols))

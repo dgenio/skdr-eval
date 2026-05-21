@@ -278,3 +278,120 @@ class TestDoNotDeployExit:
     def test_do_not_deploy_exit_code_constant(self):
         # Stability guard for CI gates.
         assert EXIT_DO_NOT_DEPLOY == 3
+
+
+class TestEvaluateSubcommand:
+    def test_evaluate_catches_model_errors(
+        self, synth_logs_parquet: Path, fitted_model_path: tuple[Path, dict], tmp_path: Path
+    ):
+        """Evaluate exits cleanly with EXIT_DATA when model features mismatch."""
+        model_path, _ = fitted_model_path
+        out_dir = tmp_path / "eval_out"
+        result = runner.invoke(
+            app,
+            [
+                "evaluate",
+                str(synth_logs_parquet),
+                "--model",
+                f"HGB={model_path}",
+                "--out",
+                str(out_dir),
+                "--n-splits",
+                "2",
+                "--policy-train",
+                "pre_split",
+            ],
+        )
+        # Model trained on wrong features → SkdrEvalError → clean exit code 1
+        assert result.exit_code == EXIT_DATA
+
+    def test_evaluate_invalid_model_path_exits_1(
+        self, synth_logs_parquet: Path, tmp_path: Path
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "evaluate",
+                str(synth_logs_parquet),
+                "--model",
+                "BAD=/nonexistent/model.joblib",
+                "--out",
+                str(tmp_path / "out"),
+            ],
+        )
+        assert result.exit_code == EXIT_DATA
+
+    def test_evaluate_remote_model_refused(
+        self, synth_logs_parquet: Path, tmp_path: Path
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "evaluate",
+                str(synth_logs_parquet),
+                "--model",
+                "M=https://evil.com/model.pkl",
+                "--out",
+                str(tmp_path / "out"),
+            ],
+        )
+        assert result.exit_code == EXIT_DATA
+
+
+class TestPairwiseSubcommand:
+    def test_pairwise_catches_model_errors(
+        self, pairwise_inputs: tuple[Path, Path], tmp_path: Path
+    ):
+        """Pairwise exits cleanly with EXIT_DATA when model features mismatch."""
+        p_logs, p_op = pairwise_inputs
+        # Train a model on wrong features to trigger SkdrEvalError
+        logs_df, op_df = skdr_eval.make_pairwise_synth(
+            n_days=4, n_clients_day=80, n_ops=3, seed=0
+        )
+        model = HistGradientBoostingRegressor(max_iter=10, random_state=0)
+        feature_cols = [c for c in logs_df.columns if c.startswith("cli_")]
+        model.fit(logs_df[feature_cols].to_numpy(), logs_df["service_time"].to_numpy())
+        model_path = tmp_path / "pw_model.joblib"
+        joblib.dump(model, model_path)
+
+        out_dir = tmp_path / "pw_out"
+        result = runner.invoke(
+            app,
+            [
+                "pairwise",
+                str(p_logs),
+                str(p_op),
+                "--model",
+                f"PW={model_path}",
+                "--metric-col",
+                "service_time",
+                "--out",
+                str(out_dir),
+                "--n-splits",
+                "2",
+            ],
+        )
+        # Model feature mismatch → SkdrEvalError → clean exit code 1
+        assert result.exit_code == EXIT_DATA
+
+    def test_pairwise_invalid_task_type_exits_1(
+        self, pairwise_inputs: tuple[Path, Path], tmp_path: Path
+    ):
+        p_logs, p_op = pairwise_inputs
+        model_path = tmp_path / "fake.joblib"
+        joblib.dump("not_a_model", model_path)
+        result = runner.invoke(
+            app,
+            [
+                "pairwise",
+                str(p_logs),
+                str(p_op),
+                "--model",
+                f"X={model_path}",
+                "--task-type",
+                "invalid",
+                "--out",
+                str(tmp_path / "out"),
+            ],
+        )
+        assert result.exit_code == EXIT_DATA

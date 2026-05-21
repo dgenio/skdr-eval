@@ -107,12 +107,12 @@ class FileTracker:
     Writes a run directory containing:
 
     - ``metrics.jsonl`` — one JSON object per ``log_metric`` call,
-      append-only, deterministic.
+      append-only (includes a wall-clock timestamp per record).
     - ``tags.json`` — flat dict of tags (written on every ``set_tag`` call).
     - ``artifacts/`` — files copied from ``log_artifact`` (or sub-paths
       under it when ``artifact_path`` is provided).
-    - ``cards/<model_name>.card.yaml`` — YAML dump of each ``log_card``
-      payload.
+    - ``cards/<model_name>_<estimator>.card.yaml`` — YAML dump of each
+      ``log_card`` payload.
 
     Parameters
     ----------
@@ -152,7 +152,14 @@ class FileTracker:
         if not src.exists():
             raise FileNotFoundError(f"Artifact not found: {src}")
         sub = artifact_path or src.name
-        dest = self.root / "artifacts" / sub
+        artifacts_dir = (self.root / "artifacts").resolve()
+        dest = (artifacts_dir / sub).resolve()
+        if not str(dest).startswith(str(artifacts_dir)):
+            raise ValueError(
+                f"artifact_path {artifact_path!r} resolves outside the "
+                f"artifacts directory. Only relative, non-traversing paths "
+                f"are allowed."
+            )
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(src.read_bytes())
 

@@ -95,8 +95,6 @@ def _normalize_loaded_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     - Object columns whose first cell is a numpy ndarray are unboxed to
       Python lists (matches the in-memory shape produced by
       :func:`skdr_eval.make_pairwise_synth`).
-    - Object columns whose first cell parses as a datetime are coerced via
-      :func:`pandas.to_datetime` so the design builder accepts them.
     """
     import numpy as np  # noqa: PLC0415
 
@@ -346,16 +344,23 @@ def evaluate_cmd(
     logs_df = _load_dataframe(logs)
     models = _parse_model_specs(model)
     tracker = FileTracker(tracker_dir) if tracker_dir is not None else None
-    artifact = skdr_eval.evaluate_sklearn_models(
-        logs=logs_df,
-        models=models,
-        fit_models=False,
-        n_splits=n_splits,
-        random_state=random_state,
-        ci_bootstrap=ci_bootstrap,
-        policy_train=policy_train,
-        tracker=tracker,
-    )
+    try:
+        artifact = skdr_eval.evaluate_sklearn_models(
+            logs=logs_df,
+            models=models,
+            fit_models=False,
+            n_splits=n_splits,
+            random_state=random_state,
+            ci_bootstrap=ci_bootstrap,
+            policy_train=policy_train,
+            tracker=tracker,
+        )
+    except skdr_eval.SkdrEvalError as exc:
+        typer.secho(f"Evaluation error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=EXIT_DATA) from exc
+    except ValueError as exc:
+        typer.secho(f"Evaluation error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=EXIT_DATA) from exc
     paths = _write_artifact_outputs(artifact, out)
     typer.echo(f"Wrote {len(paths)} files to {out}.")
     raise typer.Exit(code=_verdict_exit_code(artifact))
@@ -407,19 +412,26 @@ def pairwise_cmd(
     op_df = _load_dataframe(op_daily)
     models = _parse_model_specs(model)
     tracker = FileTracker(tracker_dir) if tracker_dir is not None else None
-    artifact = skdr_eval.evaluate_pairwise_models(
-        logs_df=logs_df,
-        op_daily_df=op_df,
-        models=models,
-        metric_col=metric_col,
-        task_type=task_type,  # type: ignore[arg-type]
-        direction=direction,  # type: ignore[arg-type]
-        n_splits=n_splits,
-        strategy=strategy,  # type: ignore[arg-type]
-        random_state=random_state,
-        ci_bootstrap=ci_bootstrap,
-        tracker=tracker,
-    )
+    try:
+        artifact = skdr_eval.evaluate_pairwise_models(
+            logs_df=logs_df,
+            op_daily_df=op_df,
+            models=models,
+            metric_col=metric_col,
+            task_type=task_type,  # type: ignore[arg-type]
+            direction=direction,  # type: ignore[arg-type]
+            n_splits=n_splits,
+            strategy=strategy,  # type: ignore[arg-type]
+            random_state=random_state,
+            ci_bootstrap=ci_bootstrap,
+            tracker=tracker,
+        )
+    except skdr_eval.SkdrEvalError as exc:
+        typer.secho(f"Evaluation error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=EXIT_DATA) from exc
+    except ValueError as exc:
+        typer.secho(f"Evaluation error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=EXIT_DATA) from exc
     paths = _write_artifact_outputs(artifact, out)
     typer.echo(f"Wrote {len(paths)} files to {out}.")
     raise typer.Exit(code=_verdict_exit_code(artifact))
