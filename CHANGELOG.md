@@ -80,10 +80,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the umbrella tracker adapters: ``[mlflow]``, ``[wandb]``, ``[aim]``.
   The ``skdr-eval`` script is registered via ``[project.scripts]``.
 
+- **Repositioning, onboarding, and citability sweep** ([#67], [#69], [#77], [#78], [#90], [#98]).
+  - **README**: rewrite the headline + opening paragraph for general-purpose
+    offline policy evaluation (was service-time-only); add a "When should I
+    use this?" plain-language section; add an Open-in-Colab badge table for
+    five quickstart notebooks; add a use-case gallery section pointing at the
+    new `examples/use_cases/` scripts; fix CI / Coverage / dev-clone badges
+    and URLs from `dandrsantos` to `dgenio`. ([#67], [#98])
+  - **`pyproject.toml`**: fix `[project.urls]` Homepage / Repository / Issues
+    to `dgenio/skdr-eval`; add Changelog / Documentation URLs; broaden
+    `description` from "service-time minimization" to general-purpose OPE;
+    broaden `keywords`. ([#67], [#98])
+  - **`examples/notebooks/`** (new) — five nbmake-tested Colab notebooks:
+    `01_quickstart`, `02_pairwise_quickstart`, `03_ecommerce_ranking`,
+    `04_ad_targeting`, `05_healthcare_cate`. Each is < 12 cells, runs in
+    under 60 s, opens directly in Colab via the README badge table. ([#69], [#90])
+  - **`examples/use_cases/`** (new) — four runnable domain walk-throughs:
+    `01_ecommerce_ranking.py`, `02_ad_targeting.py`, `03_healthcare_cate.py`,
+    `04_call_routing.py`. Each reuses the existing synth generators with
+    domain-flavored framing and stakeholder summaries. ([#78])
+  - **CI** — new `notebooks-smoke` job runs
+    `pytest --nbmake examples/notebooks/` on every PR; new `use-cases-smoke`
+    job runs the four domain scripts. Both gate on the `test` job so
+    notebook / example rot is caught at PR time. ([#69], [#78], [#90])
+  - **`Makefile`** — new `notebooks` and `use-cases` targets mirror the new
+    CI jobs locally; help text updated.
+  - **`CITATION.cff`** — bump `version` to `0.7.0`, fix URLs to
+    `dgenio/skdr-eval`, broaden keywords / abstract, add `identifiers` block
+    with a DOI placeholder, add a `preferred-citation` block. ([#77])
+  - **`.zenodo.json`** (new) — Zenodo metadata for the next tagged release
+    so the GitHub → Zenodo binding mints a concept DOI automatically. ([#77])
+  - **`docs/zenodo.md`** (new) — one-time maintainer checklist for the
+    GitHub → Zenodo binding. ([#77])
+  - **`docs/methods.md`** (new) — short methods-note outline (positioning vs.
+    Open Bandit Pipeline / SCOPE-RL / banditml; references). ([#77])
+- **`[notebooks]` optional extra** in `pyproject.toml` — installs
+  `jupyter`, `matplotlib`, `nbformat`, `nbclient` for users who want to run
+  the new notebooks locally (`pip install 'skdr-eval[notebooks]'`).
+- **`nbmake>=1.5` and `nbformat>=5.0`** added to the `[dev]` extra so CI
+  can execute the new notebook smoke job.
+
 ### Changed
 - ``[project.urls]`` Homepage/Repository/Issues now point at
   ``dgenio/skdr-eval`` (was the legacy ``dandrsantos`` URL); a new
   ``Changelog`` URL is published alongside.
+- **`pyproject.toml`** `description` now reads "General-purpose offline policy
+  evaluation for sklearn-compatible models with time-aware Doubly Robust (DR)
+  and Stabilized DR (SNDR) estimators, calibrated propensities, and
+  stakeholder evaluation cards" — reflects the actual scope (no statistical
+  change).
 
 ### Tests
 - New ``tests/test_card_schema.py`` (22 tests) covering ``card_schema()``,
@@ -105,10 +150,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Typer's ``CliRunner``; exit-code stability guard for
   ``EXIT_DO_NOT_DEPLOY == 3``.
 
+[#67]: https://github.com/dgenio/skdr-eval/issues/67
+[#69]: https://github.com/dgenio/skdr-eval/issues/69
+[#77]: https://github.com/dgenio/skdr-eval/issues/77
+[#78]: https://github.com/dgenio/skdr-eval/issues/78
 [#88]: https://github.com/dgenio/skdr-eval/issues/88
 [#89]: https://github.com/dgenio/skdr-eval/issues/89
+[#90]: https://github.com/dgenio/skdr-eval/issues/90
 [#91]: https://github.com/dgenio/skdr-eval/issues/91
 [#93]: https://github.com/dgenio/skdr-eval/issues/93
+[#98]: https://github.com/dgenio/skdr-eval/issues/98
 
 ## [0.8.0] - 2026-05-20
 
