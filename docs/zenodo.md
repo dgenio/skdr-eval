@@ -23,7 +23,7 @@ permanent landing page independent of GitHub.
 
 ## First release that gets a DOI
 
-The next tagged release (after `v0.7.0`) will automatically:
+The next tagged release (after `v0.8.0`) will automatically:
 
 1. Trigger the existing `release.yml` workflow.
 2. Notify Zenodo via the GitHub webhook.
