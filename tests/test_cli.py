@@ -282,7 +282,10 @@ class TestDoNotDeployExit:
 
 class TestEvaluateSubcommand:
     def test_evaluate_catches_model_errors(
-        self, synth_logs_parquet: Path, fitted_model_path: tuple[Path, dict], tmp_path: Path
+        self,
+        synth_logs_parquet: Path,
+        fitted_model_path: tuple[Path, dict],
+        tmp_path: Path,
     ):
         """Evaluate exits cleanly with EXIT_DATA when model features mismatch."""
         model_path, _ = fitted_model_path

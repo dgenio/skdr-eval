@@ -196,7 +196,9 @@ def _write_artifact_outputs(
             if estimator not in artifact.detailed[model_name]:
                 continue
             card = artifact.card_schema(model_name, estimator=estimator)
-            safe_name = model_name.replace("/", "_").replace("\\", "_").replace("..", "_")
+            safe_name = (
+                model_name.replace("/", "_").replace("\\", "_").replace("..", "_")
+            )
             yaml_path = cards_dir / f"{safe_name}_{estimator}.card.yaml"
             json_path_card = cards_dir / f"{safe_name}_{estimator}.card.json"
             card.to_yaml(yaml_path)
@@ -564,9 +566,7 @@ def _card_from_artifact_schema(
         min_pscore=_coerce_float(row.min_pscore),
         tail_mass=_coerce_float(row.tail_mass),
         ece=_coerce_float(diag_payload.ece) if diag_payload else None,
-        brier_score=(
-            _coerce_float(diag_payload.brier_score) if diag_payload else None
-        ),
+        brier_score=(_coerce_float(diag_payload.brier_score) if diag_payload else None),
         gate=None,
     )
     sensitivity_block = (
