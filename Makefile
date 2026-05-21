@@ -1,6 +1,6 @@
 # Makefile for skdr-eval development
 
-.PHONY: help install install-dev clean lint format typecheck test test-cov build docs check validate smoke coverage-sim all
+.PHONY: help install install-dev clean lint format typecheck test test-cov build docs check validate smoke coverage-sim notebooks use-cases all
 
 # Default target
 help:
@@ -18,6 +18,9 @@ help:
 	@echo "  check        Run all quality checks (lint + typecheck + test)"
 	@echo "  validate     Run comprehensive contribution validation (AI agent friendly)"
 	@echo "  coverage-sim Run moving-block bootstrap coverage simulation (issues #81 #62)"
+	@echo "  smoke        Run examples/preflight.py and examples/quickstart.py"
+	@echo "  notebooks    Execute examples/notebooks/ via nbmake (needs [dev] extra)"
+	@echo "  use-cases    Run all examples/use_cases/*.py scripts"
 	@echo "  all          Run clean + check + build"
 
 # Installation targets
@@ -79,6 +82,20 @@ coverage-sim:
 smoke:
 	python examples/preflight.py
 	python examples/quickstart.py
+
+# Notebook smoke (mirrors CI notebooks-smoke job; requires [dev] for nbmake)
+notebooks:
+	python -m pytest --nbmake examples/notebooks/ \
+		--nbmake-timeout=300 \
+		--override-ini="addopts=" \
+		-p no:cacheprovider
+
+# Use-case smoke (mirrors CI use-cases-smoke job)
+use-cases:
+	python examples/use_cases/01_ecommerce_ranking.py
+	python examples/use_cases/02_ad_targeting.py
+	python examples/use_cases/03_healthcare_cate.py
+	python examples/use_cases/04_call_routing.py
 
 # Composite targets
 check: lint typecheck test smoke

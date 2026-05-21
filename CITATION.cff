@@ -1,24 +1,57 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
-title: "skdr-eval: Offline Policy Evaluation for Service-Time Minimization"
-version: "0.1.0"
-date-released: "2024-08-12"
-url: "https://github.com/dandrsantos/skdr-eval"
-repository-code: "https://github.com/dandrsantos/skdr-eval"
+title: "skdr-eval: Offline Policy Evaluation for sklearn-Compatible Models with Time-Aware Doubly Robust Estimators"
+version: "0.8.0"
+date-released: "2026-05-20"
+url: "https://github.com/dgenio/skdr-eval"
+repository-code: "https://github.com/dgenio/skdr-eval"
 license: MIT
 authors:
   - family-names: "Santos"
     given-names: "Diogo"
     email: "diogofcul@gmail.com"
-    orcid: "https://orcid.org/0000-0000-0000-0000"
+identifiers:
+  - type: url
+    value: "https://github.com/dgenio/skdr-eval"
+    description: "GitHub repository"
+  # Zenodo DOI is minted on the next tagged release once the GitHub→Zenodo
+  # integration is enabled (see docs/zenodo.md). Replace the placeholder below
+  # with the concept DOI after the first Zenodo-archived release.
+  - type: doi
+    value: "10.5281/zenodo.0000000"
+    description: "Concept DOI (replace with real value after first Zenodo release)"
 keywords:
-  - "offline evaluation"
+  - "offline policy evaluation"
+  - "OPE"
   - "doubly robust"
-  - "bandits"
+  - "stabilized doubly robust"
+  - "SNDR"
+  - "counterfactual evaluation"
+  - "contextual bandits"
   - "causal inference"
-  - "policy evaluation"
+  - "treatment effects"
+  - "ranking"
+  - "recommender systems"
+  - "scikit-learn"
 abstract: >-
-  A Python library for offline policy evaluation using Doubly Robust (DR) and
-  Stabilized Doubly Robust (SNDR) estimators with time-aware splits and calibration
-  for service-time minimization problems.
+  skdr-eval is a Python library for offline policy evaluation (OPE) of
+  sklearn-compatible decision policies. It implements time-aware Doubly Robust
+  (DR) and Stabilized Doubly Robust (SNDR) estimators with calibrated
+  propensity scores, moving-block bootstrap confidence intervals, and a
+  bundled `EvaluationArtifact` carrying per-decision diagnostics, clip-grid
+  sensitivity, PSIS Pareto-k support-health, propensity calibration (ECE /
+  Brier), and an HTML stakeholder card. Applications include recommender and
+  ranking systems, ad targeting, uplift modeling, healthcare CATE, call
+  routing, and any contextual-bandit setting where running a live A/B test
+  on a candidate policy is impractical or risky.
+preferred-citation:
+  type: software
+  title: "skdr-eval: Offline Policy Evaluation for sklearn-Compatible Models with Time-Aware Doubly Robust Estimators"
+  authors:
+    - family-names: "Santos"
+      given-names: "Diogo"
+      email: "diogofcul@gmail.com"
+  version: "0.8.0"
+  year: 2026
+  url: "https://github.com/dgenio/skdr-eval"

@@ -5,13 +5,31 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "skdr-eval"
 dynamic = ["version"]
-description = "Offline policy evaluation using Doubly Robust and Stabilized DR estimators"
+description = "General-purpose offline policy evaluation for sklearn-compatible models with time-aware Doubly Robust (DR) and Stabilized DR (SNDR) estimators, calibrated propensities, and stakeholder evaluation cards"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
     {name = "Diogo Santos", email = "diogofcul@gmail.com"}
 ]
-keywords = ["offline evaluation", "doubly robust", "policy evaluation", "service time", "time series", "autoscaling", "bandits", "causal inference"]
+keywords = [
+    "offline policy evaluation",
+    "ope",
+    "doubly robust",
+    "stabilized doubly robust",
+    "sndr",
+    "counterfactual evaluation",
+    "contextual bandits",
+    "causal inference",
+    "treatment effects",
+    "ranking",
+    "recommender systems",
+    "ad targeting",
+    "uplift modeling",
+    "autoscaling",
+    "service time",
+    "time series",
+    "scikit-learn",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -58,16 +76,26 @@ dev = [
     "twine",
     "pre-commit",
     "matplotlib",
+    "nbmake>=1.5",
+    "nbformat>=5.0",
 ]
 examples = [
     "jupyter",
     "matplotlib",
 ]
+notebooks = [
+    "jupyter",
+    "matplotlib>=3.5",
+    "nbformat>=5.0",
+    "nbclient>=0.10",
+]
 
 [project.urls]
-Homepage = "https://github.com/dandrsantos/skdr-eval"
-Repository = "https://github.com/dandrsantos/skdr-eval"
-Issues = "https://github.com/dandrsantos/skdr-eval/issues"
+Homepage = "https://github.com/dgenio/skdr-eval"
+Repository = "https://github.com/dgenio/skdr-eval"
+Issues = "https://github.com/dgenio/skdr-eval/issues"
+Changelog = "https://github.com/dgenio/skdr-eval/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/dgenio/skdr-eval#readme"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
