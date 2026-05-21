@@ -224,6 +224,7 @@ ignore_missing_imports = true
 # (correctly) flags as untyped because Typer's command decorator is
 # overloaded; suppress only that one error code so the rest of the strict
 # config still applies.
+# NOTE: These overrides mirror mypy.ini (which takes precedence at runtime).
 [[tool.mypy.overrides]]
 module = ["skdr_eval.cli"]
 disable_error_code = ["untyped-decorator"]

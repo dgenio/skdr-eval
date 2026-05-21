@@ -154,12 +154,14 @@ class FileTracker:
         sub = artifact_path or src.name
         artifacts_dir = (self.root / "artifacts").resolve()
         dest = (artifacts_dir / sub).resolve()
-        if not str(dest).startswith(str(artifacts_dir)):
+        try:
+            dest.relative_to(artifacts_dir)
+        except ValueError:
             raise ValueError(
                 f"artifact_path {artifact_path!r} resolves outside the "
                 f"artifacts directory. Only relative, non-traversing paths "
                 f"are allowed."
-            )
+            ) from None
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(src.read_bytes())
 

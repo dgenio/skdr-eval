@@ -2023,7 +2023,12 @@ class EvaluationCard(BaseModel):
 
     @classmethod
     def from_yaml(cls, path_or_str: str | Path) -> EvaluationCard:
-        """Load from a YAML file path or YAML string."""
+        """Load from a YAML file path or YAML string.
+
+        A ``Path`` is always treated as a file. A plain string is treated as
+        a file path only when it is short (< 4096 chars), contains no
+        newlines, and the file exists; otherwise it is parsed as inline YAML.
+        """
         import yaml as _yaml  # noqa: PLC0415
 
         text = _read_path_or_string(path_or_str)

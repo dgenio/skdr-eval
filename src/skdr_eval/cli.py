@@ -116,7 +116,12 @@ def _normalize_loaded_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _load_model(path: Path) -> Any:
-    """Load a pickled / joblib model. Refuse non-local schemes."""
+    """Load a pickled / joblib model. Refuse non-local schemes.
+
+    .. warning::
+        ``joblib.load`` uses pickle under the hood and can execute arbitrary
+        code. Only load model files that you or your team created.
+    """
     if "://" in str(path):
         typer.secho(
             f"Refusing to load model from {path}: only local paths are allowed.",
@@ -191,8 +196,9 @@ def _write_artifact_outputs(
             if estimator not in artifact.detailed[model_name]:
                 continue
             card = artifact.card_schema(model_name, estimator=estimator)
-            yaml_path = cards_dir / f"{model_name}_{estimator}.card.yaml"
-            json_path_card = cards_dir / f"{model_name}_{estimator}.card.json"
+            safe_name = model_name.replace("/", "_").replace("\\", "_").replace("..", "_")
+            yaml_path = cards_dir / f"{safe_name}_{estimator}.card.yaml"
+            json_path_card = cards_dir / f"{safe_name}_{estimator}.card.json"
             card.to_yaml(yaml_path)
             card.to_json(json_path_card)
             paths[yaml_path.name] = yaml_path
@@ -484,8 +490,19 @@ def _card_from_artifact_schema(
         ProvenanceBlock,
         SensitivityBlock,
         TrustBlock,
-        _coerce_optional_float,
     )
+
+    def _coerce_float(value: Any) -> float | None:
+        """Coerce to float | None; non-finite → None."""
+        if value is None:
+            return None
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return None
+        import math  # noqa: PLC0415
+
+        return v if math.isfinite(v) else None
 
     row = next(
         (
@@ -523,13 +540,13 @@ def _card_from_artifact_schema(
 
     headline = HeadlineBlock(
         estimator=estimator,
-        V_hat=_coerce_optional_float(row.V_hat),
-        ci_lower=_coerce_optional_float(row.ci_lower),
-        ci_upper=_coerce_optional_float(row.ci_upper),
-        ci_alpha=_coerce_optional_float(schema.metadata.get("alpha")),
+        V_hat=_coerce_float(row.V_hat),
+        ci_lower=_coerce_float(row.ci_lower),
+        ci_upper=_coerce_float(row.ci_upper),
+        ci_alpha=_coerce_float(schema.metadata.get("alpha")),
         baseline=None,
         delta_vs_baseline=None,
-        clip=_coerce_optional_float(row.clip),
+        clip=_coerce_float(row.clip),
     )
     trust = TrustBlock(
         support_health=row.support_health,
@@ -538,17 +555,17 @@ def _card_from_artifact_schema(
         primary_blocker=None,
     )
     n = int(schema.metadata.get("n_samples", 0)) or None
-    ess_val = _coerce_optional_float(row.ESS)
+    ess_val = _coerce_float(row.ESS)
     diagnostics_block = DiagnosticsBlock(
         ESS=ess_val,
         ess_frac=(ess_val / n) if (ess_val is not None and n) else None,
-        match_rate=_coerce_optional_float(row.match_rate),
-        pareto_k=_coerce_optional_float(row.pareto_k),
-        min_pscore=_coerce_optional_float(row.min_pscore),
-        tail_mass=_coerce_optional_float(row.tail_mass),
-        ece=_coerce_optional_float(diag_payload.ece) if diag_payload else None,
+        match_rate=_coerce_float(row.match_rate),
+        pareto_k=_coerce_float(row.pareto_k),
+        min_pscore=_coerce_float(row.min_pscore),
+        tail_mass=_coerce_float(row.tail_mass),
+        ece=_coerce_float(diag_payload.ece) if diag_payload else None,
         brier_score=(
-            _coerce_optional_float(diag_payload.brier_score) if diag_payload else None
+            _coerce_float(diag_payload.brier_score) if diag_payload else None
         ),
         gate=None,
     )
@@ -556,12 +573,12 @@ def _card_from_artifact_schema(
         SensitivityBlock()
         if sens is None
         else SensitivityBlock(
-            V_min=_coerce_optional_float(sens.V_min),
-            V_max=_coerce_optional_float(sens.V_max),
-            V_range=_coerce_optional_float(sens.V_range),
-            chosen_clip=_coerce_optional_float(sens.chosen_clip),
-            chosen_V=_coerce_optional_float(sens.chosen_V),
-            argmin_MSE_clip=_coerce_optional_float(sens.argmin_MSE_clip),
+            V_min=_coerce_float(sens.V_min),
+            V_max=_coerce_float(sens.V_max),
+            V_range=_coerce_float(sens.V_range),
+            chosen_clip=_coerce_float(sens.chosen_clip),
+            chosen_V=_coerce_float(sens.chosen_V),
+            argmin_MSE_clip=_coerce_float(sens.argmin_MSE_clip),
             dr_sndr_agree=bool(sens.dr_sndr_agree),
             stable=bool(sens.stable),
         )
