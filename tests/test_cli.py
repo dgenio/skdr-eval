@@ -345,7 +345,7 @@ class TestPairwiseSubcommand:
         """Pairwise exits cleanly with EXIT_DATA when model features mismatch."""
         p_logs, p_op = pairwise_inputs
         # Train a model on wrong features to trigger SkdrEvalError
-        logs_df, op_df = skdr_eval.make_pairwise_synth(
+        logs_df, _op_df = skdr_eval.make_pairwise_synth(
             n_days=4, n_clients_day=80, n_ops=3, seed=0
         )
         model = HistGradientBoostingRegressor(max_iter=10, random_state=0)
