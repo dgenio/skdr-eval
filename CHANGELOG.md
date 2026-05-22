@@ -8,6 +8,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`EvaluationCard` Pydantic v2 schema** ([#88]). New
+  ``skdr_eval.EvaluationCard`` (the machine-readable sibling of the HTML
+  evaluation card) bundles the headline result, trust signals, diagnostics,
+  sensitivity, and provenance for a single ``(model, estimator)`` row into
+  a typed payload that is JSON/YAML round-trippable and has a
+  ``json_schema()`` export for downstream tooling. Build a card via
+  ``EvaluationArtifact.card_schema(model_name, *, estimator='SNDR',
+  baseline=None, include_gate=True, include_recommendation=True)``. Round-
+  trip with ``card.to_yaml(path)`` / ``card.to_json(path)`` /
+  ``EvaluationCard.from_yaml(...)`` / ``EvaluationCard.from_json(...)``.
+  New constant ``CARD_SCHEMA_VERSION = "1.0.0"``. Block models
+  ``HeadlineBlock``, ``TrustBlock``, ``DiagnosticsBlock``,
+  ``SensitivityBlock``, ``ProvenanceBlock``, and ``CoverageSimBlock`` are
+  all exported. ``ConfigDict(extra="allow")`` keeps schemas forward-
+  compatible: unknown fields are preserved on round-trip.
+
+- **`skdr_eval.doctor()`** ([#91]). New preflight diagnostic surface
+  composing the existing public validators (``validate_logs`` /
+  ``validate_pairwise_inputs``) and ``get_capabilities()`` into a single
+  non-raising ``DoctorReport`` with concrete fix hints. Each row is a
+  ``Check(name, status, message, fix_hint, category)``; the report
+  exposes ``ok``, ``summary``, ``to_dict()``, ``to_markdown()``,
+  ``to_text(color=…)``, and ``print(color=…)``. The doctor never mutates
+  its input DataFrame and never raises — even on a non-DataFrame input
+  the report surfaces the failure as a ``Check`` with ``status="fail"``.
+
+- **`Tracker` protocol + `NullTracker` + `FileTracker`** ([#93]). The new
+  ``skdr_eval.trackers`` package defines the minimum tracker surface
+  (``log_metric`` / ``log_artifact`` / ``log_card`` / ``set_tag`` + context
+  management) and ships a no-op ``NullTracker`` (default) plus a disk-based
+  ``FileTracker`` that writes ``metrics.jsonl``, ``tags.json``,
+  ``artifacts/``, and ``cards/<model>_<estimator>.card.yaml``. Both
+  ``evaluate_sklearn_models`` and ``evaluate_pairwise_models`` accept a new
+  ``tracker=`` kwarg (default ``None``); the evaluator auto-logs
+  ``V_hat/ci_lower/ci_upper/ESS/match_rate/pareto_k`` per ``(model,
+  estimator)`` row, run-level tags, and one ``EvaluationCard`` per row.
+  Stubs ``skdr_eval.trackers.mlflow.MLflowTracker``,
+  ``skdr_eval.trackers.wandb.WandbTracker``,
+  ``skdr_eval.trackers.aim.AimTracker`` raise ``NotImplementedError`` on
+  construction — full adapters tracked by umbrella issue #73.
+
+- **`skdr-eval` CLI** ([#89]). New Typer-based CLI gated behind the
+  ``[cli]`` extra. Subcommands:
+
+  - ``skdr-eval evaluate LOGS --model NAME=PATH --out DIR`` — run the
+    sklearn evaluator on local logs + pickled models, write artifact
+    JSON + HTML report + one ``EvaluationCard`` YAML/JSON per row.
+  - ``skdr-eval pairwise LOGS OP_DAILY --model NAME=PATH ...`` — the
+    pairwise counterpart.
+  - ``skdr-eval card ARTIFACT_JSON --model NAME --estimator DR|SNDR --out
+    PATH --format yaml|json`` — re-render an ``EvaluationCard`` directly
+    from a saved ``artifact.json``.
+  - ``skdr-eval validate-schema LOGS [--kind standard|pairwise]
+    [--op-daily PATH] [--metric-col COL] [--strict]`` — call the public
+    validators and exit non-zero on failure.
+  - ``skdr-eval doctor LOGS [--kind ...] [--json]`` — print the preflight
+    report (text or JSON) and exit non-zero when the doctor reports
+    ``fail``.
+  - ``skdr-eval version`` — print the package version.
+
+  Input format auto-detection covers ``.parquet`` / ``.csv`` / ``.tsv`` /
+  ``.feather``. The CLI normalizes parquet-round-trip quirks (e.g. object
+  cells coming back as ``ndarray``) before handing them to the public
+  validators. Exit codes are stable for CI gates: ``0`` ok, ``1`` data /
+  schema error, ``2`` env error, ``3`` ``do_not_deploy`` recommendation
+  on at least one row.
+
+- **New optional dependency extras**: ``[cli]`` (``typer>=0.12``,
+  ``joblib>=1.3``, ``pyarrow>=14``), and three placeholder extras for
+  the umbrella tracker adapters: ``[mlflow]``, ``[wandb]``, ``[aim]``.
+  The ``skdr-eval`` script is registered via ``[project.scripts]``.
+
 - **Repositioning, onboarding, and citability sweep** ([#67], [#69], [#77], [#78], [#90], [#98]).
   - **README**: rewrite the headline + opening paragraph for general-purpose
     offline policy evaluation (was service-time-only); add a "When should I
@@ -49,17 +121,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can execute the new notebook smoke job.
 
 ### Changed
+- ``[project.urls]`` Homepage/Repository/Issues now point at
+  ``dgenio/skdr-eval`` (was the legacy ``dandrsantos`` URL); a new
+  ``Changelog`` URL is published alongside.
 - **`pyproject.toml`** `description` now reads "General-purpose offline policy
   evaluation for sklearn-compatible models with time-aware Doubly Robust (DR)
   and Stabilized DR (SNDR) estimators, calibrated propensities, and
   stakeholder evaluation cards" — reflects the actual scope (no statistical
   change).
 
+### Tests
+- New ``tests/test_card_schema.py`` (22 tests) covering ``card_schema()``,
+  YAML/JSON round-trip (string and file paths), ``json_schema()`` export,
+  forward-compatibility under ``ConfigDict(extra="allow")``, and the
+  schema-version stability guard.
+- New ``tests/test_doctor.py`` (18 tests) covering the per-check pass /
+  warn / fail paths, the never-raise contract, idempotence, and the
+  ``to_dict``/``to_markdown``/``to_text`` renderers.
+- New ``tests/test_trackers.py`` (19 tests) covering ``NullTracker``
+  no-op semantics, ``FileTracker`` metrics/tags/artifacts/cards writes,
+  evaluator wiring (``tracker=None`` artifact-identical to
+  ``tracker=NullTracker()``), the pairwise evaluator's ``tracker=`` kwarg,
+  and the ``MLflowTracker`` / ``WandbTracker`` / ``AimTracker`` stub
+  contracts.
+- New ``tests/test_cli.py`` (15 tests) covering ``--help`` /
+  ``version`` / ``doctor`` / ``validate-schema`` / ``evaluate`` (via the
+  ``card`` round-trip) / ``card`` (YAML and JSON output formats) using
+  Typer's ``CliRunner``; exit-code stability guard for
+  ``EXIT_DO_NOT_DEPLOY == 3``.
+
 [#67]: https://github.com/dgenio/skdr-eval/issues/67
 [#69]: https://github.com/dgenio/skdr-eval/issues/69
 [#77]: https://github.com/dgenio/skdr-eval/issues/77
 [#78]: https://github.com/dgenio/skdr-eval/issues/78
+[#88]: https://github.com/dgenio/skdr-eval/issues/88
+[#89]: https://github.com/dgenio/skdr-eval/issues/89
 [#90]: https://github.com/dgenio/skdr-eval/issues/90
+[#91]: https://github.com/dgenio/skdr-eval/issues/91
+[#93]: https://github.com/dgenio/skdr-eval/issues/93
 [#98]: https://github.com/dgenio/skdr-eval/issues/98
 
 ## [0.8.0] - 2026-05-20

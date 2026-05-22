@@ -50,6 +50,11 @@ If you need *slate* / top-K ranking estimators (Cascade-DR, Reward-Interaction I
 - **Comparing against another OPE library?** See [`docs/methods.md`](docs/methods.md) for the positioning vs. Open Bandit Pipeline / SCOPE-RL / banditml.
 - **Looking for end-to-end examples by domain?** Browse [`examples/use_cases/`](examples/use_cases/) for runnable scripts (e-commerce ranking, ad targeting, healthcare CATE, call routing).
 
+> The `skdr-eval` CLI (`pip install 'skdr-eval[cli]'`) makes the same
+> evaluators reachable from a terminal — see [Command-line interface](#command-line-interface).
+> Run `skdr-eval doctor logs.parquet` before evaluation to catch schema and
+> environment problems early.
+
 ## Table of Contents
 
 - [Features](#features)
@@ -382,6 +387,106 @@ print(artifact.report[['model', 'estimator', 'V_hat', 'ci_lower', 'ci_upper']])
 - **Proper statistical inference**: Uses bootstrap distribution of DR contributions
 - **Automatic fallback**: Falls back to normal approximation if bootstrap fails
 - **Configurable parameters**: Control bootstrap samples, block length, and significance level
+
+## Command-line interface
+
+The `skdr-eval` CLI ships behind the `[cli]` extra and exposes the same
+evaluation surface to teams that don't want to write Python.
+
+```bash
+pip install 'skdr-eval[cli]'
+
+# Quick environment + schema probe before evaluation.
+skdr-eval doctor logs.parquet
+skdr-eval doctor logs.parquet --json | jq .
+
+# Validate logs against the schema (exit code 1 on failure — useful in CI).
+skdr-eval validate-schema logs.parquet --strict
+skdr-eval validate-schema pw_logs.parquet --kind pairwise \
+    --op-daily pw_op.parquet --metric-col service_time
+
+# Run a full evaluation from disk.
+skdr-eval evaluate logs.parquet \
+    --model HGB=model.joblib \
+    --policy-train pre_split \
+    --n-splits 3 \
+    --out ./run \
+    --tracker-dir ./tracker_runs/2026-05-20
+
+# Re-render a card directly from a saved artifact.json.
+skdr-eval card ./run/artifact.json --model HGB --estimator DR \
+    --out ./run/card.yaml --format yaml
+
+# Stable exit codes (good for CI gates):
+#   0 — success
+#   1 — data / schema error
+#   2 — environment / import error
+#   3 — at least one model row's recommendation verdict is 'do_not_deploy'
+```
+
+## Preflight diagnostics: `skdr_eval.doctor`
+
+`skdr_eval.doctor(logs, *, kind='standard'|'pairwise', op_daily_df=None,
+metric_col='service_time', n_splits=3, strict=False)` returns a non-raising
+`DoctorReport` that surfaces environment + schema + statistical sanity
+failures with actionable fix hints.
+
+```python
+import skdr_eval
+
+logs, _, _ = skdr_eval.make_synth_logs(n=5000, n_ops=3, seed=0)
+report = skdr_eval.doctor(logs)
+report.print()            # text table with status glyphs
+report.to_markdown()      # copy-pasteable Markdown
+report.to_dict()          # JSON-serializable
+assert report.ok          # True iff no Check has status='fail'
+```
+
+## Machine-readable cards: `EvaluationCard`
+
+`EvaluationArtifact.card_schema(model_name, estimator='SNDR')` builds an
+`EvaluationCard` — the typed sibling of the HTML stakeholder card. The card
+is YAML/JSON round-trippable, exposes a stable `json_schema()` for downstream
+tooling, and is ideal for CI gates and Git-pinned snapshots of an evaluation.
+
+```python
+artifact = skdr_eval.evaluate_sklearn_models(logs=logs, models=models, fit_models=True)
+card = artifact.card_schema("RandomForest", estimator="DR")
+
+card.to_yaml("artifacts/rf.card.yaml")
+card.to_json("artifacts/rf.card.json")
+
+# Round-trip
+loaded = skdr_eval.EvaluationCard.from_yaml("artifacts/rf.card.yaml")
+assert loaded == card
+
+# CI gate
+if card.trust.recommendation and card.trust.recommendation["verdict"] == "do_not_deploy":
+    raise SystemExit(1)
+```
+
+## Experiment tracker
+
+`evaluate_sklearn_models` and `evaluate_pairwise_models` both accept a
+`tracker=` kwarg. The default `NullTracker` is a no-op (so the evaluator is
+unchanged when omitted). `FileTracker` writes a deterministic run directory
+to disk; external adapters (`MLflowTracker`, `WandbTracker`, `AimTracker`)
+ship as stubs behind the `[mlflow]` / `[wandb]` / `[aim]` extras and are
+filled in under umbrella issue #73.
+
+```python
+from skdr_eval import FileTracker
+
+with FileTracker(root="runs/2026-05-20") as tracker:
+    artifact = skdr_eval.evaluate_sklearn_models(
+        logs=logs, models=models, fit_models=True, tracker=tracker,
+    )
+# Writes:
+#   runs/2026-05-20/metrics.jsonl          (one row per logged metric)
+#   runs/2026-05-20/tags.json
+#   runs/2026-05-20/artifacts/...
+#   runs/2026-05-20/cards/<model>_<estimator>.card.yaml
+```
 
 ## Examples
 

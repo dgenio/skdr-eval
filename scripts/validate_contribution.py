@@ -326,6 +326,28 @@ class ContributionValidator:
         print("Examples smoke passed (mirrors CI examples-smoke job)")
         return True
 
+    def check_cli_smoke(self) -> bool:
+        """Run CLI smoke checks (mirrors CI cli-smoke job)."""
+        print("Running CLI smoke...")
+        self.total_checks += 1
+
+        cli_commands = [
+            [sys.executable, "-m", "skdr_eval.cli", "version"],
+        ]
+        for cmd in cli_commands:
+            code, stdout, stderr = self.run_command(cmd)
+            if code != 0:
+                self.errors.append(
+                    f"CLI smoke failed: {' '.join(cmd)}\n"
+                    f"stdout:\n{stdout}\nstderr:\n{stderr}"
+                )
+                return False
+            print(f"PASS {' '.join(cmd[-2:])}")
+
+        self.success_count += 1
+        print("CLI smoke passed (mirrors CI cli-smoke job)")
+        return True
+
     def validate_all(self) -> bool:
         """Run all validation checks."""
         print("Starting contribution validation...\n")
@@ -337,6 +359,7 @@ class ContributionValidator:
             self.check_type_checking,
             self.check_tests,
             self.check_examples_smoke,
+            self.check_cli_smoke,
             self.check_documentation,
             self.check_commit_messages,
         ]

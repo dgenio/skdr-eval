@@ -83,6 +83,15 @@ smoke:
 	python examples/preflight.py
 	python examples/quickstart.py
 
+# CLI smoke (mirrors CI cli-smoke job). Requires the [cli] extra.
+cli-smoke:
+	skdr-eval version
+	python -c "import skdr_eval, tempfile, pathlib; \
+		td = pathlib.Path(tempfile.mkdtemp()); \
+		logs, _, _ = skdr_eval.make_synth_logs(n=800, n_ops=3, seed=0); \
+		p = td / 'logs.parquet'; logs.to_parquet(p); print(p)" \
+		| tail -1 | xargs -I {} skdr-eval doctor {} --json
+
 # Notebook smoke (mirrors CI notebooks-smoke job; requires [dev] for nbmake)
 notebooks:
 	python -m pytest --nbmake examples/notebooks/ \

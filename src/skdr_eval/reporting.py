@@ -1068,6 +1068,61 @@ class EvaluationArtifact:
         return _build_recommendation(self, model_name, estimator, _policy)
 
     # ------------------------------------------------------------------ #
+    # Card schema (#88)                                                   #
+    # ------------------------------------------------------------------ #
+
+    def card_schema(
+        self,
+        model_name: str,
+        *,
+        estimator: str = "SNDR",
+        baseline: float | None = None,
+        include_gate: bool = True,
+        include_recommendation: bool = True,
+    ) -> EvaluationCard:
+        """Build a machine-readable :class:`EvaluationCard` for one model row.
+
+        The card is the typed sibling of :meth:`card` (HTML) and is intended
+        to be pinned in Git, posted to a tracker (#93), or gated in CI (e.g.,
+        ``if card.trust.recommendation['verdict'] == 'do_not_deploy': exit(1)``).
+
+        Parameters
+        ----------
+        model_name : str
+            Model present in :attr:`detailed`.
+        estimator : str, default ``"SNDR"``
+            ``"DR"`` or ``"SNDR"``.
+        baseline : float or None
+            Baseline policy value used in :class:`HeadlineBlock` and in the
+            recommendation. Defaults to ``0.0`` for the recommendation when
+            ``None`` is passed.
+        include_gate : bool, default True
+            Whether to embed the :func:`gate_diagnostics` result in the
+            diagnostics block. Failures are swallowed (rendered as ``None``).
+        include_recommendation : bool, default True
+            Whether to embed the :class:`Recommendation` dict in the trust
+            block. Failures are swallowed (rendered as ``None``).
+
+        Returns
+        -------
+        EvaluationCard
+            A validated card view of the row.
+
+        Raises
+        ------
+        DataValidationError
+            If the ``(model_name, estimator)`` row is not present.
+        """
+        return _build_card_from_row(
+            self,
+            model_name,
+            estimator,
+            baseline=baseline,
+            include_gate=include_gate,
+            include_recommendation=include_recommendation,
+        )
+
+    # ------------------------------------------------------------------ #
     # Per-decision contributions (#92)                                    #
     # ------------------------------------------------------------------ #
 
@@ -1804,6 +1859,394 @@ def gate_diagnostics(
         overall = "pass"
 
     return DiagnosticGate(overlap=overlap, ess=ess, calibration=cal, overall=overall)
+
+
+# --------------------------------------------------------------------------- #
+# EvaluationCard schema (#88)                                                  #
+# --------------------------------------------------------------------------- #
+
+# Bump CARD_SCHEMA_VERSION when the card layout changes incompatibly. The card
+# is the machine-readable sibling of the HTML stakeholder card and is intended
+# to be CI-gateable.
+CARD_SCHEMA_VERSION = "1.0.0"
+
+_CARD_MODEL_CONFIG = ConfigDict(extra="allow", protected_namespaces=())
+
+
+class HeadlineBlock(BaseModel):
+    """Headline metrics for a card."""
+
+    model_config = _CARD_MODEL_CONFIG
+
+    estimator: str
+    V_hat: float | None
+    ci_lower: float | None = None
+    ci_upper: float | None = None
+    ci_alpha: float | None = None
+    baseline: float | None = None
+    delta_vs_baseline: float | None = None
+    clip: float | None = None
+
+
+class TrustBlock(BaseModel):
+    """Support-health / recommendation summary."""
+
+    model_config = _CARD_MODEL_CONFIG
+
+    support_health: str | None = None
+    warning_codes: list[str] = Field(default_factory=list)
+    recommendation: dict[str, Any] | None = None
+    primary_blocker: str | None = None
+
+
+class DiagnosticsBlock(BaseModel):
+    """Diagnostic metrics carried on the report row."""
+
+    model_config = _CARD_MODEL_CONFIG
+
+    ESS: float | None = None
+    ess_frac: float | None = None
+    match_rate: float | None = None
+    pareto_k: float | None = None
+    min_pscore: float | None = None
+    tail_mass: float | None = None
+    ece: float | None = None
+    brier_score: float | None = None
+    gate: dict[str, Any] | None = None
+
+
+class SensitivityBlock(BaseModel):
+    """Clip-grid sensitivity summary for the card row."""
+
+    model_config = _CARD_MODEL_CONFIG
+
+    V_min: float | None = None
+    V_max: float | None = None
+    V_range: float | None = None
+    chosen_clip: float | None = None
+    chosen_V: float | None = None
+    argmin_MSE_clip: float | None = None
+    dr_sndr_agree: bool | None = None
+    stable: bool | None = None
+
+
+class ProvenanceBlock(BaseModel):
+    """Run provenance metadata."""
+
+    model_config = _CARD_MODEL_CONFIG
+
+    skdr_eval_version: str = "unknown"
+    schema_version: str = SCHEMA_VERSION
+    timestamp: str = ""
+    n_samples: int | None = None
+    n_splits: int | None = None
+    random_state: int | None = None
+    evaluator: str | None = None
+
+
+class CoverageSimBlock(BaseModel):
+    """Reference to the last coverage simulation run, if any."""
+
+    model_config = _CARD_MODEL_CONFIG
+
+    dgp: str | None = None
+    n_reps: int | None = None
+    empirical_coverage: float | None = None
+    passes_nominal: bool | None = None
+
+
+class EvaluationCard(BaseModel):
+    """Machine-readable sibling of the HTML evaluation card (#88).
+
+    Bundles the headline result, trust signals, diagnostics, sensitivity, and
+    provenance for a single ``(model, estimator)`` row. Designed to be:
+
+    - YAML/JSON serializable for pinning in Git.
+    - JSON-Schema exportable for downstream tooling.
+    - CI-gateable (``card.trust.recommendation['verdict'] == 'do_not_deploy'``).
+
+    See Also
+    --------
+    EvaluationArtifact.card_schema : Build a card from a finished artifact.
+    """
+
+    model_config = ConfigDict(extra="allow", protected_namespaces=())
+
+    card_schema_version: str = Field(default=CARD_SCHEMA_VERSION)
+    model_name: str
+    headline: HeadlineBlock
+    trust: TrustBlock
+    diagnostics: DiagnosticsBlock
+    sensitivity: SensitivityBlock = Field(default_factory=SensitivityBlock)
+    provenance: ProvenanceBlock = Field(default_factory=ProvenanceBlock)
+    coverage_sim: CoverageSimBlock | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a plain JSON-serializable dict."""
+        result: dict[str, Any] = self.model_dump(mode="json")
+        return result
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvaluationCard:
+        """Build from a plain dict (validates)."""
+        loaded: EvaluationCard = cls.model_validate(data)
+        return loaded
+
+    def to_json(self, path: str | Path | None = None, *, indent: int = 2) -> str:
+        """Serialize to JSON, optionally writing to ``path``. Returns the JSON text."""
+        text: str = self.model_dump_json(indent=indent)
+        if path is not None:
+            Path(path).write_text(text + "\n", encoding="utf-8")
+        return text
+
+    @classmethod
+    def from_json(cls, path_or_str: str | Path) -> EvaluationCard:
+        """Load from a JSON file path or JSON string.
+
+        Distinguishes a ``Path`` (or a short string that resolves to an
+        existing file) from inline JSON content. Long JSON strings are never
+        interpreted as paths even on filesystems that would error on the
+        length check.
+        """
+        text = _read_path_or_string(path_or_str)
+        loaded: EvaluationCard = cls.model_validate_json(text)
+        return loaded
+
+    def to_yaml(self, path: str | Path | None = None) -> str:
+        """Serialize to YAML, optionally writing to ``path``. Returns the YAML text."""
+        import yaml as _yaml  # noqa: PLC0415
+
+        text: str = _yaml.safe_dump(self.to_dict(), sort_keys=False)
+        if path is not None:
+            Path(path).write_text(text, encoding="utf-8")
+        return text
+
+    @classmethod
+    def from_yaml(cls, path_or_str: str | Path) -> EvaluationCard:
+        """Load from a YAML file path or YAML string.
+
+        A ``Path`` is always treated as a file. A plain string is treated as
+        a file path only when it is short (< 4096 chars), contains no
+        newlines, and the file exists; otherwise it is parsed as inline YAML.
+        """
+        import yaml as _yaml  # noqa: PLC0415
+
+        text = _read_path_or_string(path_or_str)
+        data = _yaml.safe_load(text)
+        if not isinstance(data, dict):
+            raise DataValidationError(
+                f"EvaluationCard.from_yaml expected a YAML mapping, got {type(data).__name__}"
+            )
+        loaded: EvaluationCard = cls.model_validate(data)
+        return loaded
+
+    @classmethod
+    def json_schema(cls) -> dict[str, Any]:
+        """Return the Pydantic-generated JSON Schema for this card."""
+        schema: dict[str, Any] = cls.model_json_schema()
+        return schema
+
+
+# NAME_MAX is 255 on most filesystems; 4096 leaves room for full paths
+# without triggering ``OSError: File name too long`` when a long YAML/JSON
+# blob is mistakenly passed in place of a file path.
+_PATH_MAX_LIKELY = 4096
+
+
+def _read_path_or_string(path_or_str: str | Path) -> str:
+    """Return file content if ``path_or_str`` is a readable file, else the string.
+
+    A :class:`Path` instance is always treated as a path. A plain string is
+    treated as a path only when (a) it is short enough to be a valid filename
+    on the host filesystem and (b) the file exists. Otherwise the string is
+    returned verbatim. This lets ``from_yaml``/``from_json`` accept either
+    inline document text or a path without falling over on long inline text.
+    """
+    if isinstance(path_or_str, Path):
+        return path_or_str.read_text(encoding="utf-8")
+    s = str(path_or_str)
+    if len(s) > _PATH_MAX_LIKELY or "\n" in s:
+        return s
+    try:
+        p = Path(s)
+        if p.is_file():
+            return p.read_text(encoding="utf-8")
+    except OSError:
+        pass
+    return s
+
+
+def _coerce_optional_float(value: Any) -> float | None:
+    """Coerce numeric values to ``float | None``; non-finite → None."""
+    if value is None:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(v):
+        return None
+    return v
+
+
+def _build_card_from_row(
+    artifact: EvaluationArtifact,
+    model_name: str,
+    estimator: str,
+    *,
+    baseline: float | None = None,
+    include_gate: bool = True,
+    include_recommendation: bool = True,
+) -> EvaluationCard:
+    """Internal: assemble an EvaluationCard from one ``(model, estimator)`` row."""
+    if model_name not in artifact.detailed:
+        raise DataValidationError(
+            f"model {model_name!r} not in artifact "
+            f"(known: {sorted(artifact.detailed)})",
+        )
+    est_map = artifact.detailed[model_name]
+    if estimator not in est_map:
+        raise DataValidationError(
+            f"estimator {estimator!r} not in detailed[{model_name!r}] "
+            f"(known: {sorted(est_map)})",
+        )
+
+    report = artifact.report
+    row_mask = (report["model"] == model_name) & (report["estimator"] == estimator)
+    rows = report[row_mask]
+    if rows.empty:
+        raise DataValidationError(
+            f"No report row for model={model_name!r}, estimator={estimator!r}.",
+        )
+    row = rows.iloc[0]
+
+    v_hat = _coerce_optional_float(row.get("V_hat"))
+    ci_lower = _coerce_optional_float(row.get("ci_lower"))
+    ci_upper = _coerce_optional_float(row.get("ci_upper"))
+    delta = (v_hat - baseline) if (v_hat is not None and baseline is not None) else None
+    alpha = artifact.metadata.get("alpha")
+
+    headline = HeadlineBlock(
+        estimator=estimator,
+        V_hat=v_hat,
+        ci_lower=ci_lower,
+        ci_upper=ci_upper,
+        ci_alpha=_coerce_optional_float(alpha),
+        baseline=baseline,
+        delta_vs_baseline=delta,
+        clip=_coerce_optional_float(row.get("clip")),
+    )
+
+    support_health = row.get("support_health")
+    warn_codes_raw = row.get("diagnostic_warnings", "")
+    warning_codes = (
+        [c.strip() for c in str(warn_codes_raw).split(",") if c.strip()]
+        if warn_codes_raw
+        else []
+    )
+    rec_dict: dict[str, Any] | None = None
+    primary_blocker: str | None = None
+    if include_recommendation:
+        try:
+            rec = artifact.recommendation(
+                model_name,
+                estimator=estimator,
+                baseline=baseline if baseline is not None else 0.0,
+            )
+            rec_dict = rec.to_dict()
+            primary_blocker = rec.primary_blocker
+        except (DataValidationError, KeyError, ValueError):
+            rec_dict = None
+
+    trust = TrustBlock(
+        support_health=(str(support_health) if support_health is not None else None),
+        warning_codes=warning_codes,
+        recommendation=rec_dict,
+        primary_blocker=primary_blocker,
+    )
+
+    n = int(artifact.metadata.get("n_samples", 0)) or None
+    ess_val = _coerce_optional_float(row.get("ESS"))
+    ess_frac = (ess_val / n) if (ess_val is not None and n) else None
+
+    diag = artifact.diagnostics.get(model_name)
+    diag_gate: dict[str, Any] | None = None
+    if include_gate:
+        try:
+            gate = gate_diagnostics(artifact, model_name, estimator=estimator)
+            diag_gate = gate.to_dict()
+        except (DataValidationError, KeyError, ValueError):
+            diag_gate = None
+
+    diagnostics = DiagnosticsBlock(
+        ESS=ess_val,
+        ess_frac=ess_frac,
+        match_rate=_coerce_optional_float(row.get("match_rate")),
+        pareto_k=_coerce_optional_float(row.get("pareto_k")),
+        min_pscore=_coerce_optional_float(row.get("min_pscore")),
+        tail_mass=_coerce_optional_float(row.get("tail_mass")),
+        ece=_coerce_optional_float(getattr(diag, "ece", None)) if diag else None,
+        brier_score=(
+            _coerce_optional_float(getattr(diag, "brier_score", None)) if diag else None
+        ),
+        gate=diag_gate,
+    )
+
+    sens_mask = (artifact.sensitivity["model"] == model_name) & (
+        artifact.sensitivity["estimator"] == estimator
+    )
+    sens_rows = artifact.sensitivity[sens_mask]
+    if sens_rows.empty:
+        sensitivity = SensitivityBlock()
+    else:
+        s = sens_rows.iloc[0]
+        sensitivity = SensitivityBlock(
+            V_min=_coerce_optional_float(s.get("V_min")),
+            V_max=_coerce_optional_float(s.get("V_max")),
+            V_range=_coerce_optional_float(s.get("V_range")),
+            chosen_clip=_coerce_optional_float(s.get("chosen_clip")),
+            chosen_V=_coerce_optional_float(s.get("chosen_V")),
+            argmin_MSE_clip=_coerce_optional_float(s.get("argmin_MSE_clip")),
+            dr_sndr_agree=bool(s["dr_sndr_agree"])
+            if "dr_sndr_agree" in s and s["dr_sndr_agree"] is not None
+            else None,
+            stable=bool(s["stable"])
+            if "stable" in s and s["stable"] is not None
+            else None,
+        )
+
+    provenance = ProvenanceBlock(
+        skdr_eval_version=str(artifact.metadata.get("skdr_eval_version", "unknown")),
+        schema_version=str(artifact.metadata.get("schema_version", SCHEMA_VERSION)),
+        timestamp=str(artifact.metadata.get("timestamp", "")),
+        n_samples=(int(n) if n is not None else None),
+        n_splits=(
+            int(artifact.metadata["n_splits"])
+            if "n_splits" in artifact.metadata
+            and artifact.metadata["n_splits"] is not None
+            else None
+        ),
+        random_state=(
+            int(artifact.metadata["random_state"])
+            if "random_state" in artifact.metadata
+            and artifact.metadata["random_state"] is not None
+            else None
+        ),
+        evaluator=(
+            str(artifact.metadata["evaluator"])
+            if artifact.metadata.get("evaluator") is not None
+            else None
+        ),
+    )
+
+    return EvaluationCard(
+        model_name=model_name,
+        headline=headline,
+        trust=trust,
+        diagnostics=diagnostics,
+        sensitivity=sensitivity,
+        provenance=provenance,
+    )
 
 
 def _render_sensitivity_plot(result: DRResult, estimator: str) -> str | None:
