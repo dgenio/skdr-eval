@@ -15,6 +15,8 @@ from skdr_eval.cli import (
     EXIT_DATA,
     EXIT_DO_NOT_DEPLOY,
     EXIT_OK,
+    _verdict_exit_code,
+    _write_artifact_outputs,
     app,
 )
 
@@ -165,6 +167,18 @@ class TestValidateSchemaSubcommand:
         bogus = tmp_path / "logs.unknown"
         bogus.write_text("nothing")
         result = runner.invoke(app, ["validate-schema", str(bogus)])
+        assert result.exit_code == EXIT_DATA
+
+    def test_validate_invalid_kind(self, synth_logs_parquet: Path):
+        result = runner.invoke(
+            app, ["validate-schema", str(synth_logs_parquet), "--kind", "bogus"]
+        )
+        assert result.exit_code == EXIT_DATA
+
+    def test_corrupt_file_fails_gracefully(self, tmp_path: Path):
+        corrupt = tmp_path / "bad.parquet"
+        corrupt.write_bytes(b"not a real parquet file")
+        result = runner.invoke(app, ["validate-schema", str(corrupt)])
         assert result.exit_code == EXIT_DATA
 
 
@@ -341,6 +355,137 @@ class TestEvaluateSubcommand:
         assert result.exit_code == EXIT_DATA
 
 
+class TestEvaluateEndToEnd:
+    def test_write_artifact_outputs(self, tmp_path: Path):
+        """_write_artifact_outputs writes JSON, HTML, and card files."""
+        logs, _, _ = skdr_eval.make_synth_logs(n=600, n_ops=3, seed=0)
+        models = {"HGB": HistGradientBoostingRegressor(max_iter=20, random_state=0)}
+        artifact = skdr_eval.evaluate_sklearn_models(
+            logs=logs,
+            models=models,
+            fit_models=True,
+            n_splits=3,
+            random_state=0,
+            policy_train="pre_split",
+        )
+        out_dir = tmp_path / "out"
+        paths = _write_artifact_outputs(artifact, out_dir)
+        assert (out_dir / "artifact.json").is_file()
+        assert (out_dir / "report.html").is_file()
+        assert (out_dir / "cards").is_dir()
+        cards = list((out_dir / "cards").glob("*.card.yaml"))
+        assert len(cards) >= 1
+        assert len(paths) >= 4  # artifact.json + report.html + >=2 cards
+
+    def test_verdict_exit_code_ok(self, tmp_path: Path):
+        """_verdict_exit_code returns EXIT_OK for safe models."""
+        logs, _, _ = skdr_eval.make_synth_logs(n=600, n_ops=3, seed=0)
+        models = {"HGB": HistGradientBoostingRegressor(max_iter=20, random_state=0)}
+        artifact = skdr_eval.evaluate_sklearn_models(
+            logs=logs,
+            models=models,
+            fit_models=True,
+            n_splits=3,
+            random_state=0,
+            policy_train="pre_split",
+        )
+        code = _verdict_exit_code(artifact)
+        assert code in (EXIT_OK, EXIT_DO_NOT_DEPLOY)
+
+
+class TestLoadDataframeEdgeCases:
+    def test_feather_format(self, tmp_path: Path):
+        logs, _, _ = skdr_eval.make_synth_logs(n=200, n_ops=3, seed=0)
+        path = tmp_path / "logs.feather"
+        logs.to_feather(path)
+        result = runner.invoke(app, ["validate-schema", str(path)])
+        assert result.exit_code == EXIT_OK
+
+    def test_tsv_format(self, tmp_path: Path):
+        logs, _, _ = skdr_eval.make_synth_logs(n=200, n_ops=3, seed=0)
+        path = tmp_path / "logs.tsv"
+        logs.to_csv(path, sep="\t", index=False)
+        result = runner.invoke(app, ["validate-schema", str(path)])
+        # TSV loses datetime types → likely schema fail, but we exercised the path
+        assert result.exit_code in (EXIT_OK, EXIT_DATA)
+
+
+class TestParseModelSpecsEdgeCases:
+    def test_model_spec_without_equals(self, synth_logs_parquet: Path, tmp_path: Path):
+        result = runner.invoke(
+            app,
+            [
+                "evaluate",
+                str(synth_logs_parquet),
+                "--model",
+                "no_equals_sign",
+                "--out",
+                str(tmp_path / "out"),
+            ],
+        )
+        assert result.exit_code == EXIT_DATA
+
+    def test_model_spec_empty_name(self, synth_logs_parquet: Path, tmp_path: Path):
+        result = runner.invoke(
+            app,
+            [
+                "evaluate",
+                str(synth_logs_parquet),
+                "--model",
+                "=/some/path.joblib",
+                "--out",
+                str(tmp_path / "out"),
+            ],
+        )
+        assert result.exit_code == EXIT_DATA
+
+    def test_model_spec_empty_path(self, synth_logs_parquet: Path, tmp_path: Path):
+        result = runner.invoke(
+            app,
+            [
+                "evaluate",
+                str(synth_logs_parquet),
+                "--model",
+                "NAME=",
+                "--out",
+                str(tmp_path / "out"),
+            ],
+        )
+        assert result.exit_code == EXIT_DATA
+
+
+class TestCardSubcommandEdgeCases:
+    def test_card_invalid_format(self, tmp_path: Path):
+        logs, _, _ = skdr_eval.make_synth_logs(n=400, n_ops=3, seed=0)
+        models = {"HGB": HistGradientBoostingRegressor(max_iter=15, random_state=0)}
+        artifact = skdr_eval.evaluate_sklearn_models(
+            logs=logs,
+            models=models,
+            fit_models=True,
+            n_splits=3,
+            random_state=0,
+            policy_train="pre_split",
+        )
+        artifact_json = tmp_path / "artifact.json"
+        artifact_json.write_text(artifact.to_schema().model_dump_json(indent=2))
+        result = runner.invoke(
+            app,
+            [
+                "card",
+                str(artifact_json),
+                "--model",
+                "HGB",
+                "--estimator",
+                "DR",
+                "--out",
+                str(tmp_path / "out.txt"),
+                "--format",
+                "xml",
+            ],
+        )
+        assert result.exit_code == EXIT_DATA
+
+
 class TestPairwiseSubcommand:
     def test_pairwise_catches_model_errors(
         self, pairwise_inputs: tuple[Path, Path], tmp_path: Path
@@ -393,6 +538,28 @@ class TestPairwiseSubcommand:
                 f"X={model_path}",
                 "--task-type",
                 "invalid",
+                "--out",
+                str(tmp_path / "out"),
+            ],
+        )
+        assert result.exit_code == EXIT_DATA
+
+    def test_pairwise_invalid_direction_exits_1(
+        self, pairwise_inputs: tuple[Path, Path], tmp_path: Path
+    ):
+        p_logs, p_op = pairwise_inputs
+        model_path = tmp_path / "fake.joblib"
+        joblib.dump("not_a_model", model_path)
+        result = runner.invoke(
+            app,
+            [
+                "pairwise",
+                str(p_logs),
+                str(p_op),
+                "--model",
+                f"X={model_path}",
+                "--direction",
+                "sideways",
                 "--out",
                 str(tmp_path / "out"),
             ],

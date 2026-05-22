@@ -227,3 +227,28 @@ class TestTrackerStubs:
     def test_aim_stub_raises_on_construct(self):
         with pytest.raises(NotImplementedError, match=r"aim"):
             AimTracker()
+
+
+class TestFileTrackerEdgeCases:
+    def test_corrupt_tags_json_recovers(self, tmp_path: Path):
+        """FileTracker gracefully handles corrupted tags.json."""
+        root = tmp_path / "run-corrupt"
+        root.mkdir(parents=True)
+        (root / "artifacts").mkdir()
+        (root / "cards").mkdir()
+        # Write garbage to tags.json before constructing tracker.
+        (root / "tags.json").write_text("{invalid json", encoding="utf-8")
+        tracker = FileTracker(root)
+        # Should recover with empty tags.
+        tracker.set_tag("new", "value")
+        tags = json.loads((root / "tags.json").read_text(encoding="utf-8"))
+        assert tags == {"new": "value"}
+
+    def test_log_artifact_path_traversal_raises(self, tmp_path: Path):
+        """log_artifact rejects paths that escape the artifacts directory."""
+        root = tmp_path / "run-traversal"
+        tracker = FileTracker(root)
+        src = tmp_path / "evil.txt"
+        src.write_text("pwned")
+        with pytest.raises(ValueError, match=r"outside"):
+            tracker.log_artifact(src, artifact_path="../../escape.txt")
