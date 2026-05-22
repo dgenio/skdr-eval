@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-05-22
+
 ### Added
 - **`EvaluationCard` Pydantic v2 schema** ([#88]). New
   ``skdr_eval.EvaluationCard`` (the machine-readable sibling of the HTML
@@ -149,6 +151,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ``card`` round-trip) / ``card`` (YAML and JSON output formats) using
   Typer's ``CliRunner``; exit-code stability guard for
   ``EXIT_DO_NOT_DEPLOY == 3``.
+- Additional coverage for ``_build_card_from_row`` fallback paths and
+  ``OSError`` branch in ``reporting.py``; direct unit tests for CLI path
+  guards, ``coerce_float``, ``doctor`` ``kind`` parameter, and the
+  path-resolver helper ([#101], [#102]).
+
+### Fixed
+- **CLI path-traversal and filename-sanitization** ([#101]). Output paths
+  in the ``evaluate``, ``pairwise``, and ``card`` subcommands are now
+  validated to stay inside the declared ``--out`` directory; model
+  filenames are sanitized before use in filesystem operations. ``doctor``
+  column handling is corrected. Notebook ``pip install`` calls are guarded
+  behind a Colab-detection check to avoid unintended side-effects in
+  non-Colab environments.
 
 [#67]: https://github.com/dgenio/skdr-eval/issues/67
 [#69]: https://github.com/dgenio/skdr-eval/issues/69
@@ -160,6 +175,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#91]: https://github.com/dgenio/skdr-eval/issues/91
 [#93]: https://github.com/dgenio/skdr-eval/issues/93
 [#98]: https://github.com/dgenio/skdr-eval/issues/98
+[#101]: https://github.com/dgenio/skdr-eval/pull/101
+[#102]: https://github.com/dgenio/skdr-eval/pull/102
 
 ## [0.8.0] - 2026-05-20
 
@@ -543,4 +560,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 74% test coverage
 - Follows modern Python packaging standards
 
+[0.9.0]: https://github.com/dgenio/skdr-eval/compare/v0.8.0...v0.9.0
 [0.1.0]: https://github.com/dandrsantos/skdr-eval/releases/tag/v0.1.0

@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
 title: "skdr-eval: Offline Policy Evaluation for sklearn-Compatible Models with Time-Aware Doubly Robust Estimators"
-version: "0.8.0"
-date-released: "2026-05-20"
+version: "0.9.0"
+date-released: "2026-05-22"
 url: "https://github.com/dgenio/skdr-eval"
 repository-code: "https://github.com/dgenio/skdr-eval"
 license: MIT
