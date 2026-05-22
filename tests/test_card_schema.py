@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+import pandas as pd
 import pytest
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 import skdr_eval
+from skdr_eval import reporting as _rep
 from skdr_eval.exceptions import DataValidationError
 from skdr_eval.reporting import (
     CARD_SCHEMA_VERSION,
@@ -19,6 +21,7 @@ from skdr_eval.reporting import (
     SensitivityBlock,
     TrustBlock,
     _coerce_optional_float,
+    _read_path_or_string,
 )
 
 if TYPE_CHECKING:
@@ -257,3 +260,60 @@ class TestCoerceOptionalFloat:
 
     def test_nan_returns_none(self):
         assert _coerce_optional_float(float("nan")) is None
+
+
+class TestReadPathOrStringOSError:
+    """Cover the OSError branch in _read_path_or_string (line 2073-2075)."""
+
+    def test_oserror_falls_through_to_return_string(self):
+        # A filename > 255 chars (ext4 NAME_MAX) triggers OSError from
+        # is_file() on Linux. On Windows it just returns False — either way
+        # the function returns the original string.
+        bad = "a" * 300 + ".yaml"
+        result = _read_path_or_string(bad)
+        assert result == bad
+
+
+class TestBuildCardFallbackPaths:
+    """Cover fallback branches in _build_card_from_row."""
+
+    def test_recommendation_fallback_on_error(self, monkeypatch):
+        """When recommendation() raises, card_schema still returns a card with rec=None."""
+        art = _build_artifact()
+
+        def _raise(*args, **kwargs):
+            raise ValueError("simulated failure")
+
+        monkeypatch.setattr(art, "recommendation", _raise)
+        card = art.card_schema("HGB", estimator="DR", include_recommendation=True)
+        assert card.trust.recommendation is None
+
+    def test_gate_fallback_on_error(self, monkeypatch):
+        """When gate_diagnostics raises, card_schema returns card with gate=None."""
+        art = _build_artifact()
+
+        def _raise(*args, **kwargs):
+            raise KeyError("simulated gate failure")
+
+        monkeypatch.setattr(_rep, "gate_diagnostics", _raise)
+        card = art.card_schema("HGB", estimator="DR", include_gate=True)
+        assert card.diagnostics.gate is None
+
+    def test_empty_sensitivity_returns_empty_block(self):
+        """When sensitivity has no matching rows, SensitivityBlock defaults."""
+        art = _build_artifact()
+        # Wipe sensitivity data for the model
+        art.sensitivity = pd.DataFrame(columns=art.sensitivity.columns)
+        card = art.card_schema("HGB", estimator="DR")
+        assert isinstance(card.sensitivity, SensitivityBlock)
+        assert card.sensitivity.V_min is None
+        assert card.sensitivity.V_max is None
+
+    def test_report_row_missing_raises(self):
+        """When estimator is in detailed but not in report, raises DataValidationError."""
+        art = _build_artifact()
+        # Remove the DR row from the report DataFrame
+        art.report = art.report[art.report["estimator"] != "DR"].reset_index(drop=True)
+        # Estimator still in detailed but not in report → line 2118
+        with pytest.raises(DataValidationError, match="No report row"):
+            art.card_schema("HGB", estimator="DR")
