@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import joblib
 import pytest
+from click.exceptions import Exit
 from sklearn.ensemble import HistGradientBoostingRegressor
 from typer.testing import CliRunner
 
@@ -15,6 +16,8 @@ from skdr_eval.cli import (
     EXIT_DATA,
     EXIT_DO_NOT_DEPLOY,
     EXIT_OK,
+    _load_model,
+    _parse_model_specs,
     _verdict_exit_code,
     _write_artifact_outputs,
     app,
@@ -565,3 +568,27 @@ class TestPairwiseSubcommand:
             ],
         )
         assert result.exit_code == EXIT_DATA
+
+
+class TestLoadModelDirect:
+    """Direct unit tests for _load_model to ensure coverage of guard paths."""
+
+    def test_url_scheme_refused(self):
+        with pytest.raises(Exit):
+            _load_model(__import__("pathlib").Path("http://evil.com/model.pkl"))
+
+    def test_nonexistent_path_refused(self, tmp_path: Path):
+        with pytest.raises(Exit):
+            _load_model(tmp_path / "does_not_exist.joblib")
+
+    def test_parse_model_specs_no_equals(self):
+        with pytest.raises(Exit):
+            _parse_model_specs(["no_equals"])
+
+    def test_parse_model_specs_empty_name(self):
+        with pytest.raises(Exit):
+            _parse_model_specs(["=/path"])
+
+    def test_parse_model_specs_empty_path(self):
+        with pytest.raises(Exit):
+            _parse_model_specs(["name="])

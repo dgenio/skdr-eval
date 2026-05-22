@@ -18,6 +18,7 @@ from skdr_eval.reporting import (
     ProvenanceBlock,
     SensitivityBlock,
     TrustBlock,
+    _coerce_optional_float,
 )
 
 if TYPE_CHECKING:
@@ -206,3 +207,53 @@ class TestCardForwardCompatibility:
     def test_card_schema_version_stable(self):
         # Stability guard: any bump must update tests + CHANGELOG.
         assert CARD_SCHEMA_VERSION == "1.0.0"
+
+
+class TestReadPathOrString:
+    """Exercises the _read_path_or_string heuristic in reporting.py."""
+
+    def test_from_yaml_with_inline_string(self):
+        """from_yaml with a multi-line YAML string (contains newlines)."""
+        art = _build_artifact()
+        card = art.card_schema("HGB", estimator="DR")
+        yaml_text = card.to_yaml()
+        assert "\n" in yaml_text
+        loaded = EvaluationCard.from_yaml(yaml_text)
+        assert loaded == card
+
+    def test_from_yaml_with_short_nonexistent_path(self):
+        """from_yaml with a short string that's not a valid file falls through."""
+        # This hits the try/Path(s)/is_file() → False → return s path.
+        with pytest.raises((DataValidationError, Exception)):
+            # "no_such_file.yaml" is short, no newlines, but doesn't exist
+            # as a file. _read_path_or_string returns it as-is, then YAML
+            # parsing of that string fails or produces a non-mapping.
+            EvaluationCard.from_yaml("no_such_file.yaml")
+
+    def test_from_json_with_inline_string(self):
+        """from_json with an inline JSON string."""
+        art = _build_artifact()
+        card = art.card_schema("HGB", estimator="DR")
+        json_text = card.to_json()
+        loaded = EvaluationCard.from_json(json_text)
+        assert loaded == card
+
+
+class TestCoerceOptionalFloat:
+    """Exercises edge cases in _coerce_optional_float."""
+
+    def test_none_value(self):
+        assert _coerce_optional_float(None) is None
+
+    def test_valid_float(self):
+        assert _coerce_optional_float(3.14) == pytest.approx(3.14)
+
+    def test_non_convertible_string(self):
+        assert _coerce_optional_float("not_a_number") is None
+
+    def test_inf_returns_none(self):
+        assert _coerce_optional_float(float("inf")) is None
+        assert _coerce_optional_float(float("-inf")) is None
+
+    def test_nan_returns_none(self):
+        assert _coerce_optional_float(float("nan")) is None

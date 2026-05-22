@@ -165,3 +165,12 @@ class TestDoctorBadKwargs:
         # --kind value lives in test_cli.py.
         report = doctor(logs, kind="standard")
         assert isinstance(report, DoctorReport)
+
+    def test_unknown_kind_returns_fail(self):
+        """Doctor returns fail (not raise) when kind is unrecognized."""
+        logs = _good_logs()
+        report = doctor(logs, kind="bogus")  # type: ignore[arg-type]
+        assert report.summary == "fail"
+        assert any(
+            "kind" in c.name.lower() or "bogus" in c.message for c in report.checks
+        )
