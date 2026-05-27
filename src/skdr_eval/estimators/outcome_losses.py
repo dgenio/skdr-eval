@@ -10,7 +10,7 @@ Doubly Robust (MRDR) estimator (Farajtabar, Chow & Ghavamzadeh 2018).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
@@ -70,7 +70,7 @@ class MRDRWeightedLoss:
         # MRDR weights are positive; clip to a finite ceiling to avoid
         # numeric instability if the user supplies very small propensities.
         weights = np.minimum(weights, 1.0 / (self.clip_floor**2))
-        return weights.astype(np.float64)
+        return cast("np.ndarray", weights.astype(np.float64))
 
 
 def _assert_protocols() -> None:  # pragma: no cover - type-check only

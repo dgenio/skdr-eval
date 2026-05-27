@@ -16,7 +16,7 @@ change.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pandas as pd
@@ -65,7 +65,9 @@ def _matched_mask(pi_obs: np.ndarray, A: np.ndarray, elig: np.ndarray) -> np.nda
     """Standard ``matched`` mask shared with the clip-grid path."""
     A_int = A.astype(int)
     elig_bool = elig.astype(bool)
-    return (pi_obs > 0) & elig_bool[np.arange(pi_obs.shape[0]), A_int]
+    return cast(
+        "np.ndarray", (pi_obs > 0) & elig_bool[np.arange(pi_obs.shape[0]), A_int]
+    )
 
 
 def dr_value_with_strategy(

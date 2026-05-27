@@ -12,7 +12,7 @@ masking.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
@@ -201,7 +201,7 @@ class MIPSTransform:
         # Row-normalise so each row sums to 1 — embedding-marginal probability.
         row_sum = k.sum(axis=1, keepdims=True)
         row_sum = np.where(row_sum > 0, row_sum, 1.0)
-        return k / row_sum
+        return cast("np.ndarray", k / row_sum)
 
     def __call__(self, context: TransformContext) -> np.ndarray:
         n, n_actions = context.policy_probs.shape
