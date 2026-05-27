@@ -1134,6 +1134,15 @@ def dr_value_with_clip(
 # These are evaluated *in addition* to the historical ``("DR", "SNDR")`` pair.
 EXTRA_ESTIMATORS = ("MRDR", "SWITCH-DR", "DRos", "MIPS")
 
+# Action-signal gap (output of ``embedding_sufficiency_diagnostic``) above which
+# the MIPS path warns that the embedding may be insufficient and MIPS biased.
+# Mirrors the diagnostic's own "approximately sufficient" band (gap < 1%).
+_MIPS_SUFFICIENCY_WARN_GAP = 0.01
+
+# A per-action (2D) ``q_hat`` carries one column per action; the observed-action
+# prediction is then a gather along axis 1.
+_PER_ACTION_NDIM = 2
+
 
 def _canonical_estimator_name(name: str) -> str:
     """Canonicalise estimator names so case / separators don't drift."""
@@ -1178,14 +1187,26 @@ def _apply_extra_estimators(
     chosen by :func:`dr_value_with_clip` — MRDR / SWITCH-DR / DRos reuse it
     so the operating point stays consistent with the base run.
     """
-    from .estimators import build_strategy, dr_value_with_strategy  # noqa: PLC0415
+    from .estimators import (  # noqa: PLC0415
+        build_strategy,
+        dr_value_with_strategy,
+        embedding_sufficiency_diagnostic,
+    )
 
     extras: dict[str, DRResult] = {}
     # MRDR uses a sample-weighted outcome refit; defer the refit until we
     # know whether MRDR is actually requested (cost amortises per model).
     mrdr_q_hat: np.ndarray | None = None
-    canonical_set = {_canonical_estimator_name(n) for n in estimators}
-    for canonical in canonical_set:
+    # Preserve the caller's estimator order (deduplicated) so the report rows
+    # are deterministic — a set iterates in hash-seed-dependent order.
+    seen_canonical: set[str] = set()
+    canonical_estimators: list[str] = []
+    for name in estimators:
+        canonical_name = _canonical_estimator_name(name)
+        if canonical_name not in seen_canonical:
+            seen_canonical.add(canonical_name)
+            canonical_estimators.append(canonical_name)
+    for canonical in canonical_estimators:
         if canonical in {"DR", "SNDR"}:
             continue
         if canonical == "MIPS" and action_embedding is None:
@@ -1225,6 +1246,29 @@ def _apply_extra_estimators(
             q_hat_for_strategy = mrdr_q_hat
         else:
             q_hat_for_strategy = q_hat
+
+        if canonical == "MIPS":
+            # invariants.md: MIPS is biased when the embedding is not a
+            # sufficient statistic for the reward, so surface the
+            # embedding-sufficiency diagnostic to the user. ``q_hat`` may be
+            # per-action (2D); the diagnostic wants the observed-action slice.
+            assert action_embedding is not None  # guarded by the raise above
+            q_hat_obs = (
+                q_hat[np.arange(len(Y)), A.astype(int)]
+                if q_hat.ndim == _PER_ACTION_NDIM
+                else q_hat
+            )
+            sufficiency = embedding_sufficiency_diagnostic(
+                Y=Y, q_hat=q_hat_obs, A=A, action_embedding=action_embedding
+            )
+            if sufficiency.r2_action >= _MIPS_SUFFICIENCY_WARN_GAP:
+                warnings.warn(
+                    "MIPS embedding may be insufficient (action-signal gap="
+                    f"{sufficiency.r2_action:.3f}): {sufficiency.notes} MIPS can "
+                    "be biased; inspect skdr_eval.embedding_sufficiency_diagnostic().",
+                    UserWarning,
+                    stacklevel=2,
+                )
 
         result = dr_value_with_strategy(
             propensities=propensities,
