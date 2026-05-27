@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Composable estimator strategies** ([#86]). New `skdr_eval.estimators`
+  subpackage introduces `WeightTransform` and `OutcomeLoss` protocols that
+  decouple the DR pseudo-outcome from the clip-grid + MSE pair, plus three
+  new doubly-robust variants:
+  - `MRDR` — More-Robust DR (Farajtabar, Chow & Ghavamzadeh 2018). Uses
+    `MRDRWeightedLoss` to refit the outcome model with `(π/e)^2` sample
+    weights for variance-minimising q̂.
+  - `SWITCH-DR` — Wang, Agarwal & Dudík 2017. Falls back to the direct
+    method when the raw IPS weight exceeds the user-supplied threshold
+    `tau`.
+  - `DRos` — DR with optimistic shrinkage (Su et al. 2020). Replaces the
+    importance weight with `w · λ / (w² + λ)` so `λ → 0` collapses to the
+    direct method and `λ → ∞` recovers raw IPS.
+  Each strategy plugs into the high-level `evaluate_sklearn_models` /
+  `evaluate_pairwise_models` via the new `estimators=` kwarg and the
+  per-estimator dataclasses `EstimatorStrategy`, `ClipTransform`,
+  `IdentityTransform`, `SwitchTauTransform`, `DRosShrinkTransform`,
+  `MSEOutcomeLoss`, `MRDRWeightedLoss`.
+
+- **MIPS (Marginalized IPS) estimator** ([#85]). New `MIPSTransform`
+  replaces the per-action propensity with an embedding-marginal
+  propensity, restoring common support in large-action settings (operator
+  pools, candidate-set rerankers). Exposed as `estimators=(..., "MIPS")`
+  with the `action_embedding=`, `mips_bandwidth=` kwargs on
+  `evaluate_sklearn_models` / `evaluate_pairwise_models`, plus the
+  free-function `skdr_eval.mips_value(...)` convenience wrapper. Pairs with
+  the new `embedding_sufficiency_diagnostic(...)` probe that flags when
+  the embedding has lost too much action-specific reward signal for MIPS
+  to be approximately unbiased.
+
+- **Slate / top-K off-policy estimators** ([#75]). New `skdr_eval.slate`
+  subpackage ships four ranking-OPE estimators —
+  `slate_standard_ips`, `reward_interaction_ips`, `pseudo_inverse_ips`,
+  `slate_cascade_dr` (Kiyohara et al. 2022) — plus the synthetic
+  cascade-click generator `make_slate_synth(...)` with closed-form ground
+  truth so unit tests can verify recovery.
+
+- **`fit_outcome_crossfit(..., sample_weight=...)`**. Optional per-row
+  non-negative weights forwarded to the underlying estimator's
+  `fit(..., sample_weight=...)`. Required by MRDR; falls back to
+  unweighted MSE when omitted (current default).
+
+- **Statistical-integrity simulation proofs**
+  (`tests/test_estimator_recovery_simulation.py`). Monte-Carlo recovery
+  proofs for DR / SNDR / MRDR / SWITCH-DR / DRos / MIPS against a closed-form
+  ground-truth `V*`, and slate-OPE recovery under the cascade click model,
+  satisfying the `.claude/CLAUDE.md` §2 / `review-checklist.md`
+  simulation-proof requirement.
+
+- **Examples**: `examples/quickstart_estimators.py`,
+  `examples/quickstart_mips.py`, `examples/quickstart_slate.py` walk
+  through the new estimator family, MIPS workflow, and slate-OPE pipeline.
+
+### Changed
+- **`evaluate_sklearn_models` / `evaluate_pairwise_models` signature**.
+  New kwargs `estimators=("DR", "SNDR")` (tuple of estimator names),
+  `action_embedding=None`, `switch_tau=5.0`, `dros_lam=1.0`,
+  `mips_bandwidth=1.0`. Default `estimators=("DR","SNDR")` preserves the
+  historical report shape exactly. The new `estimators=` row order in the
+  report follows the order in the kwarg.
+
 ## [0.9.0] - 2026-05-22
 
 ### Added
@@ -299,6 +361,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#66]: https://github.com/dgenio/skdr-eval/pull/66
 [#80]: https://github.com/dgenio/skdr-eval/issues/80
 [#84]: https://github.com/dgenio/skdr-eval/issues/84
+[#75]: https://github.com/dgenio/skdr-eval/issues/75
+[#85]: https://github.com/dgenio/skdr-eval/issues/85
+[#86]: https://github.com/dgenio/skdr-eval/issues/86
 [#92]: https://github.com/dgenio/skdr-eval/issues/92
 
 ## [0.6.0] - 2026-05-12

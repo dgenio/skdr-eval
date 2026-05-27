@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 
 import joblib
 import pytest
-from click.exceptions import Exit
 from sklearn.ensemble import HistGradientBoostingRegressor
+from typer import Exit
 from typer.testing import CliRunner
 
 import skdr_eval
