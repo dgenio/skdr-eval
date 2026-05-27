@@ -40,6 +40,45 @@ def test_validate_logs_action_not_in_elig_columns():
         skdr_eval.validate_logs(logs)
 
 
+def test_validate_logs_int_action_vs_str_elig_hints_dtype():
+    """#115: int actions with str elig column names surface a dtype-cast hint."""
+    logs, _ops, _ = skdr_eval.make_synth_logs(n=100, n_ops=3, seed=42)
+    logs = logs.copy()
+    elig_cols = [c for c in logs.columns if c.endswith("_elig")]
+    ops = [c.removesuffix("_elig") for c in elig_cols]
+    mapping = {op: i for i, op in enumerate(ops)}
+    logs["action"] = logs["action"].map(mapping)
+    logs = logs.rename(
+        columns={c: f"{mapping[c.removesuffix('_elig')]}_elig" for c in elig_cols}
+    )
+
+    with pytest.raises(DataValidationError, match="dtype is") as excinfo:
+        skdr_eval.validate_logs(logs)
+    assert "astype(str)" in str(excinfo.value)
+
+
+def test_validate_logs_unrelated_action_message_has_no_dtype_hint():
+    """#115: genuinely-unrelated string actions keep the original message (no hint)."""
+    logs, _ops, _ = skdr_eval.make_synth_logs(n=50, n_ops=2, seed=4)
+    logs = logs.copy()
+    logs.loc[logs.index[0], "action"] = "op_ghost"
+    with pytest.raises(DataValidationError) as excinfo:
+        skdr_eval.validate_logs(logs)
+    assert "dtype is" not in str(excinfo.value)
+
+
+def test_validate_logs_custom_y_col():
+    """#105: validate_logs accepts a non-default reward column via y_col."""
+    logs, _ops, _ = skdr_eval.make_synth_logs(n=200, n_ops=3, seed=0)
+    renamed = logs.rename(columns={"service_time": "reward"})
+
+    # Default y_col now fails because 'service_time' is gone...
+    with pytest.raises(DataValidationError, match="missing required columns"):
+        skdr_eval.validate_logs(renamed)
+    # ...but passing the actual column name validates cleanly.
+    skdr_eval.validate_logs(renamed, y_col="reward")
+
+
 def test_validate_logs_no_feature_columns():
     logs, _ops, _ = skdr_eval.make_synth_logs(n=50, n_ops=2, seed=5)
     feature_cols = [

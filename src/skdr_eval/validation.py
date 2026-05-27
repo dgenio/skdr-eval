@@ -162,6 +162,58 @@ def validate_sklearn_estimator(
             )
 
 
+def validate_models_dict(models: Any, name: str = "models") -> None:
+    """Validate the ``{name: estimator}`` contract shared by the evaluators.
+
+    Both :func:`skdr_eval.evaluate_sklearn_models` and
+    :func:`skdr_eval.evaluate_pairwise_models` accept a ``models`` mapping.
+    Passing a bare estimator (the most common first-use mistake) otherwise
+    fails much later with an opaque ``AttributeError`` deep in the fit loop;
+    this surfaces an actionable error at the entry point instead.
+
+    Parameters
+    ----------
+    models : Any
+        The value passed as ``models``; expected to be a ``dict`` of
+        ``{name: estimator}``.
+    name : str, default="models"
+        Parameter name for error messages.
+
+    Raises
+    ------
+    DataValidationError
+        If ``models`` is not a non-empty dict of string keys mapping to
+        estimators (objects exposing a ``fit`` method).
+    """
+    if not isinstance(models, dict):
+        type_name = type(models).__name__
+        suggestion = ""
+        if hasattr(models, "fit"):
+            # Looks like a single estimator handed in directly.
+            suggestion = f'; did you mean {name}={{"model": {type_name}(...)}}?'
+        raise DataValidationError(
+            f"{name} must be a dict of {{name: estimator}}, got {type_name}{suggestion}"
+        )
+    if not models:
+        raise DataValidationError(
+            f"{name} dict is empty; provide at least one {{name: estimator}} entry"
+        )
+    bad_keys = [k for k in models if not isinstance(k, str)]
+    if bad_keys:
+        raise DataValidationError(
+            f"{name} keys must be strings (model names); got non-string keys: "
+            f"{bad_keys!r}"
+        )
+    bad_values = sorted(
+        k for k, v in models.items() if v is None or not hasattr(v, "fit")
+    )
+    if bad_values:
+        raise DataValidationError(
+            f"{name} values must be estimators with a 'fit' method; offending "
+            f"keys: {bad_values}"
+        )
+
+
 def validate_probabilities(
     probs: np.ndarray,
     name: str,
@@ -401,6 +453,7 @@ def validate_logs(
     *,
     cli_pref: str = "cli_",
     st_pref: str = "st_",
+    y_col: str = "service_time",
     strict: bool = False,
 ) -> None:
     """Validate a single-action logs DataFrame for ``evaluate_sklearn_models``.
@@ -408,7 +461,8 @@ def validate_logs(
     Performs a fast, surface-level check that ``logs`` carries the canonical
     schema consumed by :func:`skdr_eval.build_design`:
 
-    - required columns ``arrival_ts``, ``action``, ``service_time``;
+    - required columns ``arrival_ts``, ``action``, and the reward column
+      ``y_col`` (``"service_time"`` by default);
     - at least one eligibility column matching ``*_elig``;
     - at least one feature column matching ``cli_pref`` or ``st_pref``;
     - every ``action`` value is present as an ``*_elig`` operator;
@@ -422,6 +476,10 @@ def validate_logs(
         Prefix for client feature columns.
     st_pref : str, default="st_"
         Prefix for service-time feature columns.
+    y_col : str, default="service_time"
+        Name of the reward/outcome column. Defaults to ``"service_time"`` for
+        backward compatibility; pass your own column name for general-purpose
+        OPE logs whose reward is named e.g. ``"reward"`` or ``"click"``.
     strict : bool, default=False
         When True, additionally require:
 
@@ -443,7 +501,7 @@ def validate_logs(
     validate_dataframe(
         logs,
         "logs",
-        required_columns=["arrival_ts", "action", "service_time"],
+        required_columns=["arrival_ts", "action", y_col],
         min_rows=1,
     )
 
@@ -464,9 +522,23 @@ def validate_logs(
     ops_all = [c.removesuffix("_elig") for c in elig_cols]
     invalid_actions = set(logs["action"]) - set(ops_all)
     if invalid_actions:
+        # Common newcomer mistake: actions encoded as ints (0, 1, 2) while the
+        # '*_elig' column names parse as str ('0', '1', '2'). The two lists
+        # then look identical in the message, so surface the dtype gap when a
+        # str-cast of the actions would have matched. Genuinely-unrelated
+        # values (action 'op_X', elig 'op_A'/'op_B') leave the message intact.
+        hint = ""
+        if set(logs["action"].astype(str)) <= set(ops_all):
+            hint = (
+                f" -- logs.action dtype is {logs['action'].dtype} but the "
+                "'*_elig' column names parse as str; cast the actions with "
+                "logs['action'] = logs['action'].astype(str), or rename the "
+                "eligibility columns to match the action values"
+            )
         raise DataValidationError(
             f"logs.action contains values not present as '*_elig' columns: "
             f"{sorted(invalid_actions)} (eligible operators: {sorted(ops_all)})"
+            f"{hint}"
         )
 
     elig_values = logs[elig_cols].to_numpy()
@@ -498,8 +570,8 @@ def validate_logs(
     feature_values = logs[feature_cols].to_numpy(dtype=float, copy=False)
     validate_finite_values(feature_values, "logs[feature_cols]")
 
-    service_time = logs["service_time"].to_numpy(dtype=float, copy=False)
-    validate_finite_values(service_time, "logs.service_time")
+    reward = logs[y_col].to_numpy(dtype=float, copy=False)
+    validate_finite_values(reward, f"logs.{y_col}")
 
     # arrival_ts must be numeric or datetime64 -- build_design uses
     # ``.values.astype(float)`` which silently treats datetime64 as ns-since-

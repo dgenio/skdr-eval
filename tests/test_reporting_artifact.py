@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import math
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -37,9 +37,6 @@ from skdr_eval.reporting import (
     render_evaluation_card,
     summarize_sensitivity,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 # --------------------------------------------------------------------------- #
 # Helpers                                                                     #
@@ -466,6 +463,7 @@ def test_to_json_includes_diagnostics(tmp_path: Path):
 def test_to_html_contains_key_sections(tmp_path: Path):
     art = _run_eval()
     p = art.to_html(tmp_path / "art.html")
+    assert isinstance(p, Path)
     src = p.read_text()
     assert "<title>skdr-eval evaluation report</title>" in src
     assert "Headline results" in src
@@ -476,6 +474,34 @@ def test_to_html_contains_key_sections(tmp_path: Path):
     assert "HGB" in src
     # Schema version is rendered.
     assert SCHEMA_VERSION in src
+
+
+def test_to_json_no_arg_returns_string(tmp_path: Path):
+    """#108: to_json() with no path returns the JSON string; to_json(path) writes."""
+    art = _run_eval()
+
+    text = art.to_json()
+    assert isinstance(text, str)
+    payload = json.loads(text)
+    assert payload["schema_version"] == SCHEMA_VERSION
+
+    # The string return must match what gets written to disk.
+    written = art.to_json(tmp_path / "art.json")
+    assert isinstance(written, Path)
+    assert written.read_text() == text
+
+
+def test_to_html_no_arg_returns_string(tmp_path: Path):
+    """#108: to_html() with no path returns the HTML string; to_html(path) writes."""
+    art = _run_eval()
+
+    html = art.to_html()
+    assert isinstance(html, str)
+    assert "<title>skdr-eval evaluation report</title>" in html
+
+    written = art.to_html(tmp_path / "art.html")
+    assert isinstance(written, Path)
+    assert written.read_text() == html
 
 
 def test_export_writes_both_formats(tmp_path: Path):

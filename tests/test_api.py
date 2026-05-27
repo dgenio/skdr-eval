@@ -9,7 +9,11 @@ import pytest
 from sklearn.ensemble import RandomForestRegressor
 
 import skdr_eval
-from skdr_eval.exceptions import PolicyInductionError
+from skdr_eval.exceptions import (
+    DataValidationError,
+    InsufficientDataError,
+    PolicyInductionError,
+)
 
 
 def test_imports():
@@ -54,6 +58,15 @@ def test_make_synth_logs_signature():
     # Check eligibility columns
     elig_cols = [col for col in logs.columns if col.endswith("_elig")]
     assert len(elig_cols) == 3
+
+
+def test_make_pairwise_synth_docstring_shapes():
+    """#113: make_pairwise_synth output matches the shapes quoted in its docstring."""
+    logs_df, op_daily_df = skdr_eval.make_pairwise_synth(
+        n_days=3, n_clients_day=100, n_ops=10
+    )
+    assert logs_df.shape == (300, 14)
+    assert op_daily_df.shape == (30, 6)
 
 
 def test_build_design_signature():
@@ -204,10 +217,10 @@ def test_evaluate_sklearn_models_signature():
 
 
 def test_evaluate_sklearn_models_empty_models_raises():
-    """Test that evaluate_sklearn_models raises ValueError for an empty models dict."""
+    """#109: an empty models dict raises a clear DataValidationError."""
     logs, _, _ = skdr_eval.make_synth_logs(n=10, n_ops=3, seed=4)
 
-    with pytest.raises(ValueError, match="models dict must not be empty"):
+    with pytest.raises(DataValidationError, match="models dict is empty"):
         skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models={},
@@ -216,7 +229,7 @@ def test_evaluate_sklearn_models_empty_models_raises():
             random_state=42,
         )
 
-    with pytest.raises(ValueError, match="models dict values must not be None"):
+    with pytest.raises(DataValidationError, match="must be estimators"):
         skdr_eval.evaluate_sklearn_models(
             logs=logs,
             models={"rf": None},
@@ -224,6 +237,116 @@ def test_evaluate_sklearn_models_empty_models_raises():
             n_splits=2,
             random_state=42,
         )
+
+
+def test_evaluate_sklearn_models_single_estimator_hint():
+    """#109: passing a bare estimator (not a dict) raises with a did-you-mean hint."""
+    logs, _, _ = skdr_eval.make_synth_logs(n=200, n_ops=3, seed=42)
+
+    with pytest.raises(DataValidationError, match="did you mean"):
+        skdr_eval.evaluate_sklearn_models(
+            logs=logs,
+            models=RandomForestRegressor(random_state=42),  # bug: should be a dict
+            fit_models=True,
+            n_splits=3,
+            policy_train="pre_split",
+        )
+
+
+def test_evaluate_sklearn_models_non_estimator_value_raises():
+    """#109: a dict value lacking a fit method raises a clear type error."""
+    logs, _, _ = skdr_eval.make_synth_logs(n=200, n_ops=3, seed=42)
+
+    with pytest.raises(DataValidationError, match="must be estimators with a 'fit'"):
+        skdr_eval.evaluate_sklearn_models(
+            logs=logs,
+            models={"x": 42},
+            fit_models=True,
+            n_splits=3,
+            policy_train="pre_split",
+        )
+
+
+def test_evaluate_sklearn_models_y_col_matches_default(recwarn):
+    """#105: a custom y_col reproduces the default service_time path numerically."""
+    logs, _, _ = skdr_eval.make_synth_logs(n=400, n_ops=3, seed=42)
+    logs_renamed = logs.rename(columns={"service_time": "reward"})
+
+    art_default = skdr_eval.evaluate_sklearn_models(
+        logs=logs,
+        models={"rf": RandomForestRegressor(random_state=0)},
+        fit_models=True,
+        n_splits=3,
+        random_state=0,
+        policy_train="pre_split",
+    )
+    art_custom = skdr_eval.evaluate_sklearn_models(
+        logs=logs_renamed,
+        models={"rf": RandomForestRegressor(random_state=0)},
+        fit_models=True,
+        n_splits=3,
+        random_state=0,
+        policy_train="pre_split",
+        y_col="reward",
+    )
+
+    np.testing.assert_allclose(
+        art_custom.report["V_hat"].to_numpy(),
+        art_default.report["V_hat"].to_numpy(),
+    )
+
+
+def test_evaluate_sklearn_models_y_col_missing_column_errors():
+    """#105: requesting a y_col that is absent surfaces the missing-column error."""
+    logs, _, _ = skdr_eval.make_synth_logs(n=200, n_ops=3, seed=42)
+
+    with pytest.raises(DataValidationError, match="missing required columns"):
+        skdr_eval.evaluate_sklearn_models(
+            logs=logs,
+            models={"rf": RandomForestRegressor(random_state=0)},
+            fit_models=True,
+            n_splits=3,
+            policy_train="pre_split",
+            y_col="reward",  # not present (column is 'service_time')
+        )
+
+
+def test_pre_split_small_input_error_mentions_context():
+    """#114: a too-small pre_split input names the input count and policy_train_frac."""
+    logs, _, _ = skdr_eval.make_synth_logs(n=20, n_ops=3, seed=42)
+
+    with pytest.raises(InsufficientDataError) as excinfo:
+        skdr_eval.evaluate_sklearn_models(
+            logs=logs,
+            models={"rf": RandomForestRegressor(random_state=0)},
+            n_splits=3,
+            policy_train="pre_split",
+            policy_train_frac=0.85,
+            fit_models=True,
+        )
+    message = str(excinfo.value)
+    assert "pre_split" in message
+    assert "20 input rows" in message
+    assert "85%" in message
+
+
+def test_all_policy_train_small_input_error_unchanged():
+    """#114: with policy_train='all' the original split message is left intact."""
+    # n=10 clears build_design's min_rows=10 floor; n_splits=8 makes the
+    # time-series split (not build_design) the binding constraint.
+    logs, _, _ = skdr_eval.make_synth_logs(n=10, n_ops=3, seed=42)
+
+    with pytest.raises(InsufficientDataError) as excinfo:
+        skdr_eval.evaluate_sklearn_models(
+            logs=logs,
+            models={"rf": RandomForestRegressor(random_state=0)},
+            n_splits=8,
+            policy_train="all",
+            fit_models=True,
+        )
+    message = str(excinfo.value)
+    assert "Need at least" in message
+    assert "pre_split" not in message
 
 
 def test_induce_policy_from_sklearn_vectorized_matches_scalar_reference():

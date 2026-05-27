@@ -88,12 +88,10 @@ If you need *slate* / top-K ranking estimators (Cascade-DR, Reward-Interaction I
 pip install skdr-eval
 ```
 
-### Optional Dependencies
+Conditional-logit choice models work out of the box — SciPy is a core
+dependency, so no extra install is required.
 
-For choice models (conditional logit):
-```bash
-pip install skdr-eval[choice]
-```
+### Optional Dependencies
 
 For speed optimizations (PyArrow, Polars):
 ```bash
@@ -160,7 +158,12 @@ artifact = skdr_eval.evaluate_sklearn_models(
     fit_models=True,
     n_splits=3,
     random_state=42,
+    policy_train="pre_split",  # reserve a holdout slice for policy training
 )
+# `policy_train="pre_split"` fits the policy on the first 85% of the data and
+# evaluates on the held-out tail, avoiding training-on-test bias when
+# `fit_models=True`. Omitting it falls back to `"pre_split"` with a
+# DeprecationWarning; pass it explicitly to keep the output clean.
 
 # 4. View results
 print(artifact.report[['model', 'estimator', 'V_hat', 'ESS', 'match_rate']])
@@ -181,6 +184,7 @@ artifact = skdr_eval.evaluate_sklearn_models(
     fit_models=True,
     n_splits=3,
     random_state=42,
+    policy_train="pre_split",
     keep_contributions=True,  # attach per-decision DR/SNDR pseudo-outcomes
 )
 contribs = artifact.contributions("RandomForest", estimator="DR", top_k=5)
@@ -218,6 +222,7 @@ artifact = skdr_eval.evaluate_pairwise_models(
     strategy="auto",
     n_splits=3,
     random_state=42,
+    policy_train="pre_split",
 )
 
 # 4. View results
@@ -252,6 +257,10 @@ Evaluate sklearn models using DR and SNDR estimators.
 - `fit_models`: Whether to fit models (default: True)
 - `n_splits`: Number of time-series splits (default: 3)
 - `random_state`: Random seed for reproducibility
+- `y_col`: Name of the reward/outcome column (keyword-only, default:
+  `"service_time"`). Set it for general-purpose OPE logs whose reward is named
+  e.g. `"reward"`, `"click"`, or `"revenue"`:
+  `evaluate_sklearn_models(logs=logs, models=models, y_col="reward")`.
 
 **Temporal split controls (keyword-only):**
 - `gap`: Samples skipped between train and test in each CV fold
@@ -299,7 +308,7 @@ Evaluate models using pairwise (client-operator) evaluation with autoscaling.
 - `random_state`: Random seed for reproducibility (default: 0)
 
 **Returns:**
-- `EvaluationArtifact`: bundled result. Use `.report` for the summary DataFrame, `.detailed` for per-model `DRResult`s, `.warnings` for support-health warnings, `.sensitivity` for clip-grid stability, `.diagnostics` for propensity diagnostics, and `.to_json` / `.to_html` / `.card` / `.export` for stakeholder artifacts.
+- `EvaluationArtifact`: bundled result. Use `.report` for the summary DataFrame, `.detailed` for per-model `DRResult`s, `.warnings` for support-health warnings, `.sensitivity` for clip-grid stability, `.diagnostics` for propensity diagnostics, and `.to_json` / `.to_html` / `.card` / `.export` for stakeholder artifacts. `.to_json()` / `.to_html()` return a string when called with no argument, and write the file (returning its `Path`) when given a `path`.
 
 #### `make_pairwise_synth(n_days=14, n_clients_day=2000, n_ops=200, **kwargs)`
 Generate synthetic pairwise (client-operator) data for evaluation.
@@ -377,6 +386,7 @@ artifact = skdr_eval.evaluate_sklearn_models(
     models=models,
     ci_bootstrap=True,
     alpha=0.05,  # 95% confidence
+    policy_train="pre_split",
 )
 
 print(artifact.report[['model', 'estimator', 'V_hat', 'ci_lower', 'ci_upper']])
@@ -450,7 +460,9 @@ is YAML/JSON round-trippable, exposes a stable `json_schema()` for downstream
 tooling, and is ideal for CI gates and Git-pinned snapshots of an evaluation.
 
 ```python
-artifact = skdr_eval.evaluate_sklearn_models(logs=logs, models=models, fit_models=True)
+artifact = skdr_eval.evaluate_sklearn_models(
+    logs=logs, models=models, fit_models=True, policy_train="pre_split"
+)
 card = artifact.card_schema("RandomForest", estimator="DR")
 
 card.to_yaml("artifacts/rf.card.yaml")
@@ -479,7 +491,8 @@ from skdr_eval import FileTracker
 
 with FileTracker(root="runs/2026-05-20") as tracker:
     artifact = skdr_eval.evaluate_sklearn_models(
-        logs=logs, models=models, fit_models=True, tracker=tracker,
+        logs=logs, models=models, fit_models=True,
+        policy_train="pre_split", tracker=tracker,
     )
 # Writes:
 #   runs/2026-05-20/metrics.jsonl          (one row per logged metric)
@@ -614,7 +627,7 @@ If Trusted Publishing is not configured:
 ### Trusted Publishing Setup
 1. Go to https://pypi.org/manage/project/skdr-eval/settings/publishing/
 2. Add GitHub repository as trusted publisher:
-   - **Repository**: `dandrsantos/skdr-eval`
+   - **Repository**: `dgenio/skdr-eval`
    - **Workflow**: `release.yml`
    - **Environment**: `release`
 
@@ -628,7 +641,7 @@ If you use this software in your research, please cite:
   author  = {Santos, Diogo},
   year    = {2026},
   url     = {https://github.com/dgenio/skdr-eval},
-  version = {0.7.0},
+  version = {0.9.0},
   license = {MIT}
 }
 ```

@@ -3,7 +3,7 @@
 
 Run this before kicking off a longer evaluation to confirm:
 - the package imports cleanly,
-- optional extras (``[choice]``, ``[viz]``, ``[speed]``) are available
+- optional extras (``[viz]``, ``[speed]``) are available
   if your pipeline needs them,
 - your logs DataFrame matches the schema consumed by
   :func:`skdr_eval.evaluate_sklearn_models`,

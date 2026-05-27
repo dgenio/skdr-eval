@@ -231,7 +231,7 @@ if not data:
 ## 🚀 CI/CD Pipeline (GitHub Actions)
 
 ### Automated Checks (Must Pass)
-1. **Linting**: `ruff check` on Python 3.9-3.12
+1. **Linting**: `ruff check` on Python 3.11-3.14
 2. **Formatting**: `ruff format --check`
 3. **Type checking**: `mypy src/skdr_eval/`
 4. **Testing**: `pytest` with coverage report
@@ -278,7 +278,7 @@ git push origin v1.2.0
 ## 🛠️ Development Environment Setup
 
 ### Prerequisites
-- Python 3.9+ (tested on 3.9, 3.10, 3.11, 3.12)
+- Python 3.11+ (tested on 3.11, 3.12, 3.13, 3.14)
 - Git
 - GitHub account with SSH keys configured
 

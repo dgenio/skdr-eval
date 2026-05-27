@@ -1,9 +1,36 @@
 """Tests for skdr_eval.capabilities."""
 
 import importlib
+import re
+import tomllib
+from pathlib import Path
 
 import skdr_eval
 from skdr_eval import capabilities as cap_module
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_documented_extras_are_declared_in_pyproject():
+    """#107: every 'pip install skdr-eval[<extra>]' in the README is a real extra.
+
+    Guards against doc/packaging drift such as the removed ``[choice]`` extra,
+    where the README advertised an install target that pip could not satisfy.
+    """
+    readme = (_REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    pyproject = tomllib.loads(
+        (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    declared = set(pyproject["project"]["optional-dependencies"])
+
+    documented = set(re.findall(r"(?:skdr-eval|\.)\[([a-z0-9_-]+)\]", readme))
+    assert documented, "expected at least one documented extra in the README"
+
+    undeclared = documented - declared
+    assert not undeclared, (
+        f"README documents pip extras that are not declared in pyproject.toml: "
+        f"{sorted(undeclared)} (declared: {sorted(declared)})"
+    )
 
 
 def test_get_capabilities_schema():
