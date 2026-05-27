@@ -136,8 +136,11 @@ class MIPSTransform:
         ``p_e(x_i) = Σ_a π_log(a | x_i) · k(E_a, E_{A_i})``
 
     where ``k`` is a row-normalised Gaussian kernel over embeddings. The
-    target-policy embedding-marginal is computed the same way and the working
-    weight is ``π_e / p_e``.
+    working weight is the inverse logging embedding-marginal ``1 / p_e``; no
+    target-policy embedding-marginal numerator is formed here because the
+    target policy enters separately through the DR core's ``q_pi`` term. When
+    the kernel is the identity matrix this reduces to skdr-eval's per-action
+    IPS weight ``1 / π_log(A_i | x_i)``.
 
     Parameters
     ----------

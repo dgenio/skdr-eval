@@ -32,6 +32,10 @@ __all__ = [
     "dr_value_with_strategy",
 ]
 
+# q_hat may be 1D (marginal) or 2D (per-action). 2D arrays carry one column
+# per action, so the observed-action prediction is a gather along axis 1.
+_PER_ACTION_NDIM = 2
+
 
 @dataclass
 class StrategyResult:
@@ -148,18 +152,24 @@ def dr_value_with_strategy(
     # clip-grid path: q_hat may be 1D (marginal) or 2D (per-action).
     q_pi = np.sum(policy_probs * q_hat.reshape(n_samples, -1), axis=1)
 
+    # Observed-action prediction for the DR residual. A 2D (per-action) q_hat
+    # must be indexed at the logged action; a 1D q_hat already is the
+    # observed-action prediction. Without this slice, (Y - q_hat) would
+    # mis-broadcast (n,) against (n, n_actions) on the 2D path.
+    q_hat_obs = q_hat[rows, A_int] if q_hat.ndim == _PER_ACTION_NDIM else q_hat
+
     if strategy.self_normalised:
         denom = w.sum()
         if denom > 0:
-            V_hat = float(q_pi.mean() + (w * (Y - q_hat)).sum() / denom)
+            V_hat = float(q_pi.mean() + (w * (Y - q_hat_obs)).sum() / denom)
         else:
             V_hat = float(q_pi.mean())
     else:
-        V_hat = float((q_pi + w * (Y - q_hat)).mean())
+        V_hat = float((q_pi + w * (Y - q_hat_obs)).mean())
 
     ess = float(w.sum() ** 2 / (w**2).sum()) if (w**2).sum() > 0 else 0.0
     tail_mass = float((w == 0).mean())  # zero-weight fraction
-    se_if = float(np.std(q_pi + w * (Y - q_hat)) / np.sqrt(n_samples))
+    se_if = float(np.std(q_pi + w * (Y - q_hat_obs)) / np.sqrt(n_samples))
     mse_est = float(se_if**2)
 
     grid_df = pd.DataFrame(

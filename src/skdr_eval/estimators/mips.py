@@ -10,6 +10,7 @@ marginalisation sufficient statistic.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -17,6 +18,9 @@ from .core import dr_value_with_strategy
 from .outcome_losses import MSEOutcomeLoss
 from .protocols import EstimatorStrategy
 from .weight_transforms import MIPSTransform
+
+if TYPE_CHECKING:
+    from ..core import DRResult
 
 __all__ = [
     "EmbeddingSufficiencyReport",
@@ -63,7 +67,7 @@ def mips_value(
     action_embedding: np.ndarray,
     bandwidth: float = 1.0,
     clip: float = float("inf"),
-) -> object:
+) -> DRResult:
     """Convenience wrapper around :func:`dr_value_with_strategy` for MIPS.
 
     Parameters mirror ``dr_value_with_clip``; ``action_embedding`` is the

@@ -117,7 +117,11 @@ def slate_standard_ips(logs: pd.DataFrame, target_policy: TargetPolicy) -> Slate
     w[safe] = target_probs[safe] / logging_probs[safe]
     contribs = w * rewards
     v_hat = float(contribs.mean()) if contribs.size > 0 else 0.0
-    se = float(contribs.std(ddof=1) / np.sqrt(max(contribs.size, 1)))
+    se = (
+        float(contribs.std(ddof=1) / np.sqrt(contribs.size))
+        if contribs.size > 1
+        else 0.0
+    )
     return SlateResult(
         name="SlateStandardIPS",
         V_hat=v_hat,
@@ -174,7 +178,11 @@ def reward_interaction_ips(
         contribs[i] = per_rank_contrib if slate_weight > 0 else 0.0
         weights[i] = slate_weight
     v_hat = float(contribs.mean()) if contribs.size > 0 else 0.0
-    se = float(contribs.std(ddof=1) / np.sqrt(max(contribs.size, 1)))
+    se = (
+        float(contribs.std(ddof=1) / np.sqrt(contribs.size))
+        if contribs.size > 1
+        else 0.0
+    )
     return SlateResult(
         name="RIPS",
         V_hat=v_hat,
@@ -227,7 +235,11 @@ def pseudo_inverse_ips(
         contribs[i] = per_rank_contrib
         weights[i] = norm_w
     v_hat = float(contribs.mean()) if contribs.size > 0 else 0.0
-    se = float(contribs.std(ddof=1) / np.sqrt(max(contribs.size, 1)))
+    se = (
+        float(contribs.std(ddof=1) / np.sqrt(contribs.size))
+        if contribs.size > 1
+        else 0.0
+    )
     return SlateResult(
         name="PI-IPS",
         V_hat=v_hat,
@@ -297,7 +309,11 @@ def slate_cascade_dr(
         contribs[i] = per_rank_contrib
         weights[i] = max_weight
     v_hat = float(contribs.mean()) if contribs.size > 0 else 0.0
-    se = float(contribs.std(ddof=1) / np.sqrt(max(contribs.size, 1)))
+    se = (
+        float(contribs.std(ddof=1) / np.sqrt(contribs.size))
+        if contribs.size > 1
+        else 0.0
+    )
     return SlateResult(
         name="SlateCascadeDR",
         V_hat=v_hat,

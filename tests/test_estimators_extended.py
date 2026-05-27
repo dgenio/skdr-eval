@@ -126,6 +126,44 @@ class TestMIPSIdentityRecoversIPS:
         assert abs(result_mips.V_hat - result_dr.V_hat) < 1e-3
 
 
+class TestQHat2DResidual:
+    """Regression proof for the 2D (per-action) q_hat residual slice (PR #103).
+
+    A 2D q_hat must be indexed at the logged action in the DR residual
+    ``Y - q_hat_obs``; previously ``Y - q_hat`` mis-broadcast ``(n,)`` against
+    ``(n, n_actions)``. With a target policy deterministic on the logged
+    action, ``q_pi`` reduces to the observed-action prediction, so the 2D
+    estimate must equal the 1D estimate built from that same column.
+    """
+
+    def test_2d_qhat_matches_observed_action_slice(self) -> None:
+        propensities, _policy_probs, Y, _q_hat1d, A, elig = _toy_problem()
+        n, n_actions = propensities.shape
+        rng = np.random.default_rng(7)
+        # Distinct per-action predictions so the observed-action slice matters.
+        q_hat_2d = rng.normal(loc=5.0, scale=0.5, size=(n, n_actions))
+        # Deterministic target on the logged action isolates the residual term.
+        policy_probs = np.zeros((n, n_actions))
+        policy_probs[np.arange(n), A] = 1.0
+        q_hat_obs = q_hat_2d[np.arange(n), A]
+
+        strategy = skdr_eval.build_strategy("DR", clip=float("inf"))
+        shared = {
+            "propensities": propensities,
+            "policy_probs": policy_probs,
+            "Y": Y,
+            "A": A,
+            "elig": elig,
+            "strategy": strategy,
+        }
+        result_2d = dr_value_with_strategy(q_hat=q_hat_2d, **shared)
+        result_1d = dr_value_with_strategy(q_hat=q_hat_obs, **shared)
+
+        assert np.isfinite(result_2d.V_hat)
+        assert abs(result_2d.V_hat - result_1d.V_hat) < 1e-9
+        assert abs(result_2d.SE_if - result_1d.SE_if) < 1e-9
+
+
 class TestEvaluateSklearnExtraEstimators:
     def test_evaluate_sklearn_with_mrdr_runs(self) -> None:
         logs, _, _ = skdr_eval.make_synth_logs(n=600, n_ops=3, seed=11)

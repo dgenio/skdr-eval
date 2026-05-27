@@ -688,8 +688,8 @@ def fit_outcome_crossfit(
             validate_finite_values(sample_weight, "sample_weight")
             if sample_weight.shape != (n_samples,):
                 raise DataValidationError(
-                    f"sample_weight shape {sample_weight.shape} must match "
-                    f"X_obs ({n_samples},)"
+                    f"sample_weight shape {sample_weight.shape} must be "
+                    f"(n_samples,) = ({n_samples},), matching X_obs.shape[0]"
                 )
             if np.any(sample_weight < 0):
                 raise DataValidationError(
@@ -1480,6 +1480,22 @@ def evaluate_sklearn_models(
         Hard cap on the number of evaluated decisions for which per-decision
         contributions may be captured. Raises :class:`DataValidationError`
         if ``n_eval`` exceeds this value while contributions are being kept.
+    estimators : tuple[str, ...], default=("DR", "SNDR")
+        Estimators to compute. Supported: ``"DR"``, ``"SNDR"``, ``"MRDR"``,
+        ``"SWITCH-DR"``, ``"DRos"``, ``"MIPS"``. Each maps to a built-in
+        strategy via :func:`skdr_eval.estimators.build_strategy`.
+    action_embedding : np.ndarray, optional
+        Per-action embedding of shape ``(n_actions, embed_dim)``. **Required
+        when** ``"MIPS"`` is requested; ignored by the other estimators.
+    switch_tau : float, default=5.0
+        SWITCH-DR importance-weight threshold: weights above ``switch_tau``
+        fall back to the direct method. Used only for ``"SWITCH-DR"``.
+    dros_lam : float, default=1.0
+        DRos optimistic-shrinkage parameter ``lambda``. Used only for
+        ``"DRos"``.
+    mips_bandwidth : float, default=1.0
+        Gaussian-kernel bandwidth for the MIPS embedding marginal. Used only
+        for ``"MIPS"``.
 
     Returns
     -------
@@ -2280,6 +2296,22 @@ def evaluate_pairwise_models(
         Hard cap on the number of evaluated decisions for which per-decision
         contributions may be captured. Raises :class:`DataValidationError`
         if ``n_eval`` exceeds this value while contributions are being kept.
+    estimators : tuple[str, ...], default=("DR", "SNDR")
+        Estimators to compute. Supported: ``"DR"``, ``"SNDR"``, ``"MRDR"``,
+        ``"SWITCH-DR"``, ``"DRos"``, ``"MIPS"``. Each maps to a built-in
+        strategy via :func:`skdr_eval.estimators.build_strategy`.
+    action_embedding : np.ndarray, optional
+        Per-action embedding of shape ``(n_actions, embed_dim)``. **Required
+        when** ``"MIPS"`` is requested; ignored by the other estimators.
+    switch_tau : float, default=5.0
+        SWITCH-DR importance-weight threshold: weights above ``switch_tau``
+        fall back to the direct method. Used only for ``"SWITCH-DR"``.
+    dros_lam : float, default=1.0
+        DRos optimistic-shrinkage parameter ``lambda``. Used only for
+        ``"DRos"``.
+    mips_bandwidth : float, default=1.0
+        Gaussian-kernel bandwidth for the MIPS embedding marginal. Used only
+        for ``"MIPS"``.
 
     Returns
     -------

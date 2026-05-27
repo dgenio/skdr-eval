@@ -91,9 +91,15 @@ def make_slate_synth(
     slate_size : int, default=5
         Slate length.
     click_model : {"cascade", "position_bias", "linear"}, default="cascade"
-        Click / reward model. ``"cascade"`` is the textbook cascade click
-        model; ``"position_bias"`` is inverse-rank attention; ``"linear"``
-        is a simple per-position additive reward.
+        Click / reward model. All three draw an independent Bernoulli click
+        per rank with probability ``gamma_k * attractiveness`` and differ only
+        in the per-position attention profile ``gamma_k``: ``"cascade"`` uses
+        geometric decay (``0.7**k`` — attention falls off fast down the
+        slate), ``"position_bias"`` uses inverse-rank ``1/(k+1)``, and
+        ``"linear"`` ramps ``gamma`` from 1.0 to 0.5 and also weights the
+        reward by ``gamma``. Note: ``"cascade"`` here is geometric position
+        attention, *not* the stop-on-first-click cascade model — a click at
+        one rank does not suppress clicks at lower ranks.
     seed : int, default=0
         RNG seed.
 
@@ -132,9 +138,10 @@ def make_slate_synth(
         attr = attractiveness[i, slate]
         # Per-position Bernoulli click given attractiveness.
         if click_model == "cascade":
-            # User examines each rank with prob gamma_k (geometric) and
-            # clicks with probability attractiveness. Reward is sum of
-            # clicks weighted by examination prob.
+            # Geometric position attention: rank k is attended with weight
+            # gamma_k = 0.7**k and clicked with prob gamma_k * attractiveness.
+            # Independent Bernoulli per rank (no stop-on-first-click); reward
+            # is the unweighted click count.
             click_probs = gamma * attr
             clicks = rng.binomial(1, np.clip(click_probs, 0.0, 1.0))
             reward = float(clicks.sum())
