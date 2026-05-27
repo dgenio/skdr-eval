@@ -103,6 +103,86 @@ jobs:
       run: |
         python examples/preflight.py
 
+  cli-smoke:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install with [cli] extra
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .[cli]
+
+    - name: skdr-eval CLI smoke (version + doctor on synth parquet)
+      run: |
+        skdr-eval version
+        python -c "import skdr_eval, pathlib; \
+            logs, _, _ = skdr_eval.make_synth_logs(n=800, n_ops=3, seed=0); \
+            logs.to_parquet('logs.parquet')"
+        skdr-eval doctor logs.parquet --json
+        skdr-eval validate-schema logs.parquet
+
+  notebooks-smoke:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install (dev extras include nbmake)
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .[dev]
+
+    - name: Execute Colab quickstart notebooks via nbmake
+      run: |
+        python -m pytest --nbmake examples/notebooks/ \
+          --nbmake-timeout=300 \
+          --override-ini="addopts=" \
+          -p no:cacheprovider
+
+  use-cases-smoke:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install (default extras only)
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+
+    - name: Run domain use-case scripts
+      run: |
+        python examples/use_cases/01_ecommerce_ranking.py
+        python examples/use_cases/02_ad_targeting.py
+        python examples/use_cases/03_healthcare_cate.py
+        python examples/use_cases/04_call_routing.py
+
   build:
     runs-on: ubuntu-latest
     needs: test

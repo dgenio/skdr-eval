@@ -5,13 +5,31 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "skdr-eval"
 dynamic = ["version"]
-description = "Offline policy evaluation using Doubly Robust and Stabilized DR estimators"
+description = "General-purpose offline policy evaluation for sklearn-compatible models with time-aware Doubly Robust (DR) and Stabilized DR (SNDR) estimators, calibrated propensities, and stakeholder evaluation cards"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
     {name = "Diogo Santos", email = "diogofcul@gmail.com"}
 ]
-keywords = ["offline evaluation", "doubly robust", "policy evaluation", "service time", "time series", "autoscaling", "bandits", "causal inference"]
+keywords = [
+    "offline policy evaluation",
+    "ope",
+    "doubly robust",
+    "stabilized doubly robust",
+    "sndr",
+    "counterfactual evaluation",
+    "contextual bandits",
+    "causal inference",
+    "treatment effects",
+    "ranking",
+    "recommender systems",
+    "ad targeting",
+    "uplift modeling",
+    "autoscaling",
+    "service time",
+    "time series",
+    "scikit-learn",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -46,6 +64,20 @@ speed = [
 viz = [
     "matplotlib>=3.5",
 ]
+cli = [
+    "typer>=0.12",
+    "joblib>=1.3",
+    "pyarrow>=14",
+]
+mlflow = [
+    "mlflow>=2.10",
+]
+wandb = [
+    "wandb>=0.17",
+]
+aim = [
+    "aim>=3.20",
+]
 dev = [
     "pytest",
     "pytest-cov",
@@ -58,16 +90,32 @@ dev = [
     "twine",
     "pre-commit",
     "matplotlib",
+    "typer>=0.12",
+    "joblib>=1.3",
+    "pyarrow>=14",
+    "nbmake>=1.5",
+    "nbformat>=5.0",
 ]
 examples = [
     "jupyter",
     "matplotlib",
 ]
+notebooks = [
+    "jupyter",
+    "matplotlib>=3.5",
+    "nbformat>=5.0",
+    "nbclient>=0.10",
+]
+
+[project.scripts]
+skdr-eval = "skdr_eval.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/dandrsantos/skdr-eval"
-Repository = "https://github.com/dandrsantos/skdr-eval"
-Issues = "https://github.com/dandrsantos/skdr-eval/issues"
+Homepage = "https://github.com/dgenio/skdr-eval"
+Repository = "https://github.com/dgenio/skdr-eval"
+Issues = "https://github.com/dgenio/skdr-eval/issues"
+Changelog = "https://github.com/dgenio/skdr-eval/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/dgenio/skdr-eval#readme"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -164,5 +212,19 @@ module = [
     "jinja2.*",
     "pydantic.*",
     "yaml.*",
+    "typer.*",
+    "joblib.*",
+    "mlflow.*",
+    "wandb.*",
+    "aim.*",
 ]
 ignore_missing_imports = true
+
+# The Typer CLI module uses ``@app.command(...)`` decorators that mypy
+# (correctly) flags as untyped because Typer's command decorator is
+# overloaded; suppress only that one error code so the rest of the strict
+# config still applies.
+# NOTE: These overrides mirror mypy.ini (which takes precedence at runtime).
+[[tool.mypy.overrides]]
+module = ["skdr_eval.cli"]
+disable_error_code = ["untyped-decorator"]

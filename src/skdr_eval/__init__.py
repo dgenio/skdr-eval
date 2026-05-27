@@ -31,6 +31,7 @@ from .core import (
     induce_policy_from_sklearn,
 )
 from .diagnostics import PropensityDiagnostics
+from .doctor import Check, DoctorReport, doctor
 from .estimators import (
     ClipTransform,
     DRosShrinkTransform,
@@ -74,15 +75,23 @@ from .models import (
 )
 from .pairwise import PairwiseDesign
 from .reporting import (
+    CARD_SCHEMA_VERSION,
     SCHEMA_VERSION,
     ArtifactSchema,
+    CoverageSimBlock,
     DiagnosticGate,
+    DiagnosticsBlock,
     EvaluationArtifact,
+    EvaluationCard,
     GateResult,
+    HeadlineBlock,
+    ProvenanceBlock,
     Reason,
     Recommendation,
     RecommendationPolicy,
+    SensitivityBlock,
     SupportHealthThresholds,
+    TrustBlock,
     attach_warnings,
     build_evaluation_artifact,
     export_results,
@@ -113,6 +122,7 @@ from .statistical import (
     t_test,
 )
 from .synth import make_pairwise_synth, make_synth_logs
+from .trackers import FileTracker, NullTracker, Tracker
 from .validation import validate_logs, validate_pairwise_inputs
 
 try:
@@ -139,26 +149,34 @@ except ImportError:
     pass
 
 __all__ = [
+    "CARD_SCHEMA_VERSION",
     "HAS_VISUALIZATION",
     "SCHEMA_VERSION",
     "ArtifactSchema",
     "BootstrapError",
+    "Check",
     "ClipTransform",
     "ConfigManager",
     "ConfigurationError",
     "ConvergenceError",
     "CoverageResult",
+    "CoverageSimBlock",
     "DRResult",
     "DRosShrinkTransform",
     "DataValidationError",
     "Design",
     "DiagnosticGate",
+    "DiagnosticsBlock",
+    "DoctorReport",
     "EmbeddingSufficiencyReport",
     "EstimationError",
     "EstimatorStrategy",
     "EvaluationArtifact",
+    "EvaluationCard",
     "EvaluationConfig",
+    "FileTracker",
     "GateResult",
+    "HeadlineBlock",
     "IdentityTransform",
     "InsufficientDataError",
     "MIPSTransform",
@@ -170,6 +188,7 @@ __all__ = [
     "ModelFactory",
     "ModelSelector",
     "ModelValidationError",
+    "NullTracker",
     "OutcomeLoss",
     "OutcomeModelError",
     "PairwiseDesign",
@@ -177,16 +196,20 @@ __all__ = [
     "PolicyInductionError",
     "PropensityDiagnostics",
     "PropensityScoreError",
+    "ProvenanceBlock",
     "Reason",
     "Recommendation",
     "RecommendationPolicy",
+    "SensitivityBlock",
     "SkdrEvalError",
     "SlateGroundTruth",
     "SlateResult",
     "StatisticalTest",
     "SupportHealthThresholds",
     "SwitchTauTransform",
+    "Tracker",
     "TransformContext",
+    "TrustBlock",
     "VersionError",
     "VisualizationConfig",
     "WeightTransform",
@@ -199,6 +222,7 @@ __all__ = [
     "build_strategy",
     "chi_square_test",
     "create_model_ensemble",
+    "doctor",
     "dr_value_with_clip",
     "dr_value_with_strategy",
     "embedding_sufficiency_diagnostic",

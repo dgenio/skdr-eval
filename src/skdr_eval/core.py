@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
     from .reporting import EvaluationArtifact, SupportHealthThresholds
+    from .trackers import Tracker
 
 import numpy as np
 import pandas as pd
@@ -54,6 +55,69 @@ from .validation import (
 )
 
 logger = logging.getLogger("skdr_eval")
+
+
+def _autolog_tracker(
+    tracker: "Tracker | None",
+    artifact: "EvaluationArtifact",
+    *,
+    evaluator: str,
+) -> None:
+    """Push metrics, tags, and one card per model to ``tracker`` (#93).
+
+    Silently returns when ``tracker is None`` (the default). Errors from the
+    tracker are logged but not re-raised — instrumentation must never break a
+    finished evaluation.
+    """
+    if tracker is None:
+        return
+    try:
+        tracker.set_tag("evaluator", evaluator)
+        version = artifact.metadata.get("skdr_eval_version")
+        if version is not None:
+            tracker.set_tag("skdr_eval_version", str(version))
+        seed = artifact.metadata.get("random_state")
+        if seed is not None:
+            tracker.set_tag("random_state", str(seed))
+        n_splits_meta = artifact.metadata.get("n_splits")
+        if n_splits_meta is not None:
+            tracker.set_tag("n_splits", str(n_splits_meta))
+        for _, row in artifact.report.iterrows():
+            prefix = f"{row['model']}/{row['estimator']}"
+            for col in (
+                "V_hat",
+                "ci_lower",
+                "ci_upper",
+                "ESS",
+                "match_rate",
+                "pareto_k",
+            ):
+                value = row.get(col)
+                if value is None:
+                    continue
+                try:
+                    fvalue = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if not np.isfinite(fvalue):
+                    continue
+                tracker.log_metric(f"{prefix}/{col}", fvalue)
+        for model_name in artifact.detailed:
+            for estimator in ("DR", "SNDR"):
+                if estimator not in artifact.detailed[model_name]:
+                    continue
+                try:
+                    card = artifact.card_schema(model_name, estimator=estimator)
+                    tracker.log_card(card)
+                except Exception as exc:
+                    logger.warning(
+                        "tracker.log_card failed for %s/%s: %s",
+                        model_name,
+                        estimator,
+                        exc,
+                    )
+    except Exception as exc:
+        logger.warning("tracker auto-log failed: %s", exc)
 
 
 def _make_time_series_split(
@@ -1426,6 +1490,7 @@ def evaluate_sklearn_models(
     switch_tau: float = 5.0,
     dros_lam: float = 1.0,
     mips_bandwidth: float = 1.0,
+    tracker: "Tracker | None" = None,
 ) -> "EvaluationArtifact":
     """Evaluate sklearn models using DR and SNDR estimators.
 
@@ -1794,7 +1859,7 @@ def evaluate_sklearn_models(
 
     from .reporting import build_evaluation_artifact  # noqa: PLC0415
 
-    return build_evaluation_artifact(
+    artifact = build_evaluation_artifact(
         report=report,
         detailed=detailed_results,
         n_samples=len(eval_design.Y),
@@ -1813,6 +1878,8 @@ def evaluate_sklearn_models(
             "estimators": list(estimators),
         },
     )
+    _autolog_tracker(tracker, artifact, evaluator="evaluate_sklearn_models")
+    return artifact
 
 
 def _get_outcome_estimator(estimator: str | Callable[[], Any], task_type: str) -> Any:
@@ -2198,6 +2265,7 @@ def evaluate_pairwise_models(
     switch_tau: float = 5.0,
     dros_lam: float = 1.0,
     mips_bandwidth: float = 1.0,
+    tracker: "Tracker | None" = None,
 ) -> "EvaluationArtifact":
     """Evaluate pairwise models using autoscale strategy.
 
@@ -2751,7 +2819,7 @@ def evaluate_pairwise_models(
 
     from .reporting import build_evaluation_artifact  # noqa: PLC0415
 
-    return build_evaluation_artifact(
+    artifact = build_evaluation_artifact(
         report=report,
         detailed=detailed_results,
         n_samples=len(Y),
@@ -2775,6 +2843,8 @@ def evaluate_pairwise_models(
             "estimators": list(estimators),
         },
     )
+    _autolog_tracker(tracker, artifact, evaluator="evaluate_pairwise_models")
+    return artifact
 
 
 def evaluate_propensity_diagnostics(

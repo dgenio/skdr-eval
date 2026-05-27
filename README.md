@@ -2,15 +2,58 @@
 
 [![PyPI version](https://badge.fury.io/py/skdr-eval.svg)](https://badge.fury.io/py/skdr-eval)
 [![Python versions](https://img.shields.io/pypi/pyversions/skdr-eval.svg)](https://pypi.org/project/skdr-eval/)
-[![CI](https://github.com/dandrsantos/skdr-eval/workflows/CI/badge.svg)](https://github.com/dandrsantos/skdr-eval/actions)
-[![Coverage](https://codecov.io/gh/dandrsantos/skdr-eval/branch/main/graph/badge.svg)](https://codecov.io/gh/dandrsantos/skdr-eval)
+[![CI](https://github.com/dgenio/skdr-eval/workflows/CI/badge.svg)](https://github.com/dgenio/skdr-eval/actions)
+[![Coverage](https://codecov.io/gh/dgenio/skdr-eval/branch/main/graph/badge.svg)](https://codecov.io/gh/dgenio/skdr-eval)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Offline policy evaluation for service-time minimization using Doubly Robust (DR) and Stabilized Doubly Robust (SNDR) estimators with time-aware splits and calibration. Now with pairwise evaluation and autoscaling support.**
+**General-purpose offline policy evaluation (OPE) for sklearn-compatible models, with time-aware Doubly Robust (DR) and Stabilized Doubly Robust (SNDR) estimators, calibrated propensities, PSIS support-health, and a stakeholder evaluation card you can hand to a PM.**
+
+Try it in your browser — no install needed:
+
+| Notebook | Open in Colab |
+|---|---|
+| Quickstart (contextual-bandit OPE) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/dgenio/skdr-eval/blob/main/examples/notebooks/01_quickstart.ipynb) |
+| Pairwise / autoscaling quickstart | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/dgenio/skdr-eval/blob/main/examples/notebooks/02_pairwise_quickstart.ipynb) |
+| E-commerce ranking use case | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/dgenio/skdr-eval/blob/main/examples/notebooks/03_ecommerce_ranking.ipynb) |
+| Ad targeting use case | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/dgenio/skdr-eval/blob/main/examples/notebooks/04_ad_targeting.ipynb) |
+| Healthcare CATE use case | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/dgenio/skdr-eval/blob/main/examples/notebooks/05_healthcare_cate.ipynb) |
 
 ## What is this?
 
-`skdr-eval` is a Python package for offline policy evaluation in service-time optimization scenarios. It implements state-of-the-art Doubly Robust (DR) and Stabilized Doubly Robust (SNDR) estimators with time-aware cross-validation and calibration. The package is designed for evaluating machine learning models that make decisions about service allocation, with special support for pairwise (client-operator) evaluation and autoscaling strategies.
+`skdr-eval` is a Python library for **offline policy evaluation** — estimating how well a candidate decision policy would have performed *from logged data alone*, without deploying it. It implements Doubly Robust (DR) and Stabilized Doubly Robust (SNDR) estimators on top of `scikit-learn`-protocol models, with first-class support for time-correlated logs, calibrated propensities, moving-block bootstrap confidence intervals, and a single bundled `EvaluationArtifact` that exposes per-decision diagnostics, clip-grid sensitivity, PSIS Pareto-k support-health, propensity calibration (ECE / Brier), and a renderable HTML stakeholder card.
+
+It started life as an internal tool for call-routing / service-time minimization (and still ships a pairwise / autoscaling layer for that use case), but the underlying machinery is general-purpose contextual-bandit OPE.
+
+## When should I use this?
+
+Reach for `skdr-eval` when **all** of the following are true:
+
+- You have **logged data** of the form `(context x, action a, reward y)` from a policy you no longer want to keep running unchanged.
+- You want to evaluate a **candidate policy** (a recommender, a ranker, a clinical decision rule, a routing model, an ad targeter) **before** A/B testing it, because A/B testing has a real cost (lost revenue, patient risk, SLA violations, operator overtime).
+- Your candidate policy is, or can be wrapped behind, a **scikit-learn-protocol** estimator — `fit` / `predict` (or `predict_proba`) is enough.
+- The logged decisions cover the actions the candidate policy *would* take with non-trivial probability (i.e., there is reasonable **overlap** / positivity). `skdr-eval` will warn you when overlap is thin via PSIS Pareto-k, ESS, and match-rate diagnostics.
+
+Typical use cases:
+
+- **Recommender / ranking systems** — evaluate a new model against logged session data.
+- **Ad targeting** — score a candidate bidding policy on Criteo-style counterfactual logs.
+- **Healthcare CATE** — compare a treatment-assignment rule to standard-of-care on retrospective records.
+- **Call routing / autoscaling** — choose between client-operator assignment policies on historical traffic (the original motivating use case, still first-class via `evaluate_pairwise_models`).
+- **Any contextual-bandit decision** where re-running history would be too expensive or risky to do live.
+
+If you need *slate* / top-K ranking estimators (Cascade-DR, Reward-Interaction IPS) or *MIPS* for very large action spaces, those are tracked on the roadmap (#75, #85) but not yet shipped.
+
+## Where to start
+
+- **Just want to see it work?** Click any "Open in Colab" badge above.
+- **Have logs already?** Skim [Quick Start](#quick-start) below; the standard / pairwise variants are both two screens long.
+- **Comparing against another OPE library?** See [`docs/methods.md`](docs/methods.md) for the positioning vs. Open Bandit Pipeline / SCOPE-RL / banditml.
+- **Looking for end-to-end examples by domain?** Browse [`examples/use_cases/`](examples/use_cases/) for runnable scripts (e-commerce ranking, ad targeting, healthcare CATE, call routing).
+
+> The `skdr-eval` CLI (`pip install 'skdr-eval[cli]'`) makes the same
+> evaluators reachable from a terminal — see [Command-line interface](#command-line-interface).
+> Run `skdr-eval doctor logs.parquet` before evaluation to catch schema and
+> environment problems early.
 
 ## Table of Contents
 
@@ -59,9 +102,15 @@ pip install skdr-eval[speed]
 
 For development:
 ```bash
-git clone https://github.com/dandrsantos/skdr-eval.git
+git clone https://github.com/dgenio/skdr-eval.git
 cd skdr-eval
 pip install -e .[dev]
+```
+
+To run the Colab quickstart notebooks locally:
+```bash
+pip install 'skdr-eval[notebooks]'
+jupyter notebook examples/notebooks/
 ```
 
 ## Quick Start
@@ -339,12 +388,137 @@ print(artifact.report[['model', 'estimator', 'V_hat', 'ci_lower', 'ci_upper']])
 - **Automatic fallback**: Falls back to normal approximation if bootstrap fails
 - **Configurable parameters**: Control bootstrap samples, block length, and significance level
 
-## Examples
+## Command-line interface
 
-See `examples/quickstart.py` for a complete example, or run:
+The `skdr-eval` CLI ships behind the `[cli]` extra and exposes the same
+evaluation surface to teams that don't want to write Python.
 
 ```bash
-python examples/quickstart.py
+pip install 'skdr-eval[cli]'
+
+# Quick environment + schema probe before evaluation.
+skdr-eval doctor logs.parquet
+skdr-eval doctor logs.parquet --json | jq .
+
+# Validate logs against the schema (exit code 1 on failure — useful in CI).
+skdr-eval validate-schema logs.parquet --strict
+skdr-eval validate-schema pw_logs.parquet --kind pairwise \
+    --op-daily pw_op.parquet --metric-col service_time
+
+# Run a full evaluation from disk.
+skdr-eval evaluate logs.parquet \
+    --model HGB=model.joblib \
+    --policy-train pre_split \
+    --n-splits 3 \
+    --out ./run \
+    --tracker-dir ./tracker_runs/2026-05-20
+
+# Re-render a card directly from a saved artifact.json.
+skdr-eval card ./run/artifact.json --model HGB --estimator DR \
+    --out ./run/card.yaml --format yaml
+
+# Stable exit codes (good for CI gates):
+#   0 — success
+#   1 — data / schema error
+#   2 — environment / import error
+#   3 — at least one model row's recommendation verdict is 'do_not_deploy'
+```
+
+## Preflight diagnostics: `skdr_eval.doctor`
+
+`skdr_eval.doctor(logs, *, kind='standard'|'pairwise', op_daily_df=None,
+metric_col='service_time', n_splits=3, strict=False)` returns a non-raising
+`DoctorReport` that surfaces environment + schema + statistical sanity
+failures with actionable fix hints.
+
+```python
+import skdr_eval
+
+logs, _, _ = skdr_eval.make_synth_logs(n=5000, n_ops=3, seed=0)
+report = skdr_eval.doctor(logs)
+report.print()            # text table with status glyphs
+report.to_markdown()      # copy-pasteable Markdown
+report.to_dict()          # JSON-serializable
+assert report.ok          # True iff no Check has status='fail'
+```
+
+## Machine-readable cards: `EvaluationCard`
+
+`EvaluationArtifact.card_schema(model_name, estimator='SNDR')` builds an
+`EvaluationCard` — the typed sibling of the HTML stakeholder card. The card
+is YAML/JSON round-trippable, exposes a stable `json_schema()` for downstream
+tooling, and is ideal for CI gates and Git-pinned snapshots of an evaluation.
+
+```python
+artifact = skdr_eval.evaluate_sklearn_models(logs=logs, models=models, fit_models=True)
+card = artifact.card_schema("RandomForest", estimator="DR")
+
+card.to_yaml("artifacts/rf.card.yaml")
+card.to_json("artifacts/rf.card.json")
+
+# Round-trip
+loaded = skdr_eval.EvaluationCard.from_yaml("artifacts/rf.card.yaml")
+assert loaded == card
+
+# CI gate
+if card.trust.recommendation and card.trust.recommendation["verdict"] == "do_not_deploy":
+    raise SystemExit(1)
+```
+
+## Experiment tracker
+
+`evaluate_sklearn_models` and `evaluate_pairwise_models` both accept a
+`tracker=` kwarg. The default `NullTracker` is a no-op (so the evaluator is
+unchanged when omitted). `FileTracker` writes a deterministic run directory
+to disk; external adapters (`MLflowTracker`, `WandbTracker`, `AimTracker`)
+ship as stubs behind the `[mlflow]` / `[wandb]` / `[aim]` extras and are
+filled in under umbrella issue #73.
+
+```python
+from skdr_eval import FileTracker
+
+with FileTracker(root="runs/2026-05-20") as tracker:
+    artifact = skdr_eval.evaluate_sklearn_models(
+        logs=logs, models=models, fit_models=True, tracker=tracker,
+    )
+# Writes:
+#   runs/2026-05-20/metrics.jsonl          (one row per logged metric)
+#   runs/2026-05-20/tags.json
+#   runs/2026-05-20/artifacts/...
+#   runs/2026-05-20/cards/<model>_<estimator>.card.yaml
+```
+
+## Examples
+
+`examples/` ships three kinds of runnable artifacts — pick the one that
+matches how you want to consume them:
+
+| Path | Format | Use when |
+|---|---|---|
+| [`examples/quickstart.py`](examples/quickstart.py) | `.py` | Headless / CI / no Jupyter installed. |
+| [`examples/quickstart_pairwise.py`](examples/quickstart_pairwise.py) | `.py` | Same, for the pairwise / autoscaling API. |
+| [`examples/preflight.py`](examples/preflight.py) | `.py` | One-shot capability + schema check before a long evaluation. |
+| [`examples/notebooks/`](examples/notebooks/) | `.ipynb` × 5 | Colab-runnable; click the badges at the top of this README. |
+| [`examples/use_cases/`](examples/use_cases/) | `.py` × 4 | Self-contained domain walk-throughs (e-commerce ranking, ad targeting, healthcare CATE, call routing). |
+
+CI exercises `examples/preflight.py`, `examples/quickstart.py`, every
+notebook in `examples/notebooks/`, and every script in
+`examples/use_cases/` on every PR — they cannot silently rot.
+
+To run a domain example locally:
+
+```bash
+python examples/use_cases/01_ecommerce_ranking.py
+python examples/use_cases/02_ad_targeting.py
+python examples/use_cases/03_healthcare_cate.py
+python examples/use_cases/04_call_routing.py
+```
+
+To open the notebooks locally:
+
+```bash
+pip install 'skdr-eval[notebooks]'
+jupyter notebook examples/notebooks/
 ```
 
 ### Estimator family (DR, SNDR, MRDR, SWITCH-DR, DRos, MIPS)
@@ -392,7 +566,7 @@ truth. See `examples/quickstart_slate.py`.
 
 ### Setup
 ```bash
-git clone https://github.com/dandrsantos/skdr-eval.git
+git clone https://github.com/dgenio/skdr-eval.git
 cd skdr-eval
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
@@ -449,14 +623,19 @@ If Trusted Publishing is not configured:
 If you use this software in your research, please cite:
 
 ```bibtex
-@software{santos2024skdr,
-  title = {skdr-eval: Offline Policy Evaluation for Service-Time Minimization},
-  author = {Santos, Diogo},
-  year = {2024},
-  url = {https://github.com/dandrsantos/skdr-eval},
-  version = {0.1.0}
+@software{santos2026skdreval,
+  title   = {{skdr-eval}: Offline Policy Evaluation for {sklearn}-Compatible Models with Time-Aware Doubly Robust Estimators},
+  author  = {Santos, Diogo},
+  year    = {2026},
+  url     = {https://github.com/dgenio/skdr-eval},
+  version = {0.7.0},
+  license = {MIT}
 }
 ```
+
+A Zenodo concept DOI is being minted on the next tagged release (see
+[`docs/zenodo.md`](docs/zenodo.md)); after that, `CITATION.cff` will carry
+the canonical DOI and replace the URL field above.
 
 ## License
 

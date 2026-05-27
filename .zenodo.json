@@ -1,0 +1,36 @@
+{
+  "title": "skdr-eval: Offline Policy Evaluation for sklearn-Compatible Models with Time-Aware Doubly Robust Estimators",
+  "description": "skdr-eval is a Python library for offline policy evaluation (OPE) of sklearn-compatible decision policies. It implements time-aware Doubly Robust (DR) and Stabilized Doubly Robust (SNDR) estimators with calibrated propensity scores, moving-block bootstrap confidence intervals, and a bundled EvaluationArtifact carrying per-decision diagnostics, clip-grid sensitivity, PSIS Pareto-k support-health, propensity calibration (ECE / Brier), and an HTML stakeholder card. Applications include recommender and ranking systems, ad targeting, uplift modeling, healthcare CATE, and any contextual-bandit setting where running a live A/B test on a candidate policy is impractical.",
+  "creators": [
+    {
+      "name": "Santos, Diogo",
+      "affiliation": ""
+    }
+  ],
+  "upload_type": "software",
+  "access_right": "open",
+  "license": "MIT",
+  "keywords": [
+    "offline policy evaluation",
+    "OPE",
+    "doubly robust",
+    "stabilized doubly robust",
+    "SNDR",
+    "counterfactual evaluation",
+    "contextual bandits",
+    "causal inference",
+    "treatment effects",
+    "ranking",
+    "recommender systems",
+    "scikit-learn",
+    "Python"
+  ],
+  "related_identifiers": [
+    {
+      "scheme": "url",
+      "identifier": "https://github.com/dgenio/skdr-eval",
+      "relation": "isSupplementTo",
+      "resource_type": "software"
+    }
+  ]
+}
