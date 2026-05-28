@@ -76,11 +76,16 @@ from .models import (
 from .pairwise import PairwiseDesign
 from .reporting import (
     CARD_SCHEMA_VERSION,
+    DEFAULT_ASSUMPTION_TAGS,
+    DEFAULT_ESTIMAND_SUMMARY,
+    DEFAULT_ESTIMAND_TEX,
     SCHEMA_VERSION,
     ArtifactSchema,
+    BaselineBlock,
     CoverageSimBlock,
     DiagnosticGate,
     DiagnosticsBlock,
+    EstimandBlock,
     EvaluationArtifact,
     EvaluationCard,
     GateResult,
@@ -150,9 +155,13 @@ except ImportError:
 
 __all__ = [
     "CARD_SCHEMA_VERSION",
+    "DEFAULT_ASSUMPTION_TAGS",
+    "DEFAULT_ESTIMAND_SUMMARY",
+    "DEFAULT_ESTIMAND_TEX",
     "HAS_VISUALIZATION",
     "SCHEMA_VERSION",
     "ArtifactSchema",
+    "BaselineBlock",
     "BootstrapError",
     "Check",
     "ClipTransform",
@@ -169,6 +178,7 @@ __all__ = [
     "DiagnosticsBlock",
     "DoctorReport",
     "EmbeddingSufficiencyReport",
+    "EstimandBlock",
     "EstimationError",
     "EstimatorStrategy",
     "EvaluationArtifact",

@@ -60,6 +60,26 @@ logger = logging.getLogger("skdr_eval")
 # transparent; PropensityDiagnostics payload fields default to ``None``).
 SCHEMA_VERSION = "1.1.0"
 
+# Canonical assumption tags surfaced on EvaluationCard.estimand (#128). The
+# prose for each tag lives in docs/concepts/estimands-and-assumptions.md;
+# downstream tooling should treat unknown tags as forward-compatible
+# additions and ignore them.
+DEFAULT_ASSUMPTION_TAGS: tuple[str, ...] = (
+    "unconfoundedness",
+    "overlap",
+    "sutva",
+    "double_robustness",
+    "stochastic_logging",
+    "bounded_weight_variance",
+    "time_structure_respected",
+)
+DEFAULT_ESTIMAND_TEX = r"V(\pi) = E_X [ E_{A \sim \pi(\cdot|X)} [ Y(X, A) ] ]"
+DEFAULT_ESTIMAND_SUMMARY = (
+    "Policy value of the target policy over the held-out evaluation slice"
+    " of the logs, under the assumptions listed in"
+    " docs/concepts/estimands-and-assumptions.md."
+)
+
 # Machine-readable warning codes. Do not localize.
 WARN_LOW_ESS = "LOW_ESS"
 WARN_EXTREME_CLIP = "EXTREME_CLIP"
@@ -728,6 +748,18 @@ class EvaluationArtifact:
     sensitivity: pd.DataFrame
     diagnostics: dict[str, PropensityDiagnostics] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # #128 — Statistical contract carried with the artifact and serialized
+    # on every card. Defaults are the standard contextual-bandit estimand
+    # and the seven canonical assumption tags.
+    estimand_tex: str = DEFAULT_ESTIMAND_TEX
+    estimand_summary: str = DEFAULT_ESTIMAND_SUMMARY
+    assumptions: list[str] = field(
+        default_factory=lambda: list(DEFAULT_ASSUMPTION_TAGS)
+    )
+    # #132 — Baseline configuration (kind, value) so the artifact carries
+    # how delta_V_hat columns on the report were computed.
+    baseline_kind: str | None = None
+    baseline_value: float | None = None
 
     # ------------------------------------------------------------------ #
     # Pydantic-backed payload                                            #
@@ -1890,7 +1922,7 @@ def gate_diagnostics(
 # Bump CARD_SCHEMA_VERSION when the card layout changes incompatibly. The card
 # is the machine-readable sibling of the HTML stakeholder card and is intended
 # to be CI-gateable.
-CARD_SCHEMA_VERSION = "1.0.0"
+CARD_SCHEMA_VERSION = "1.1.0"
 
 _CARD_MODEL_CONFIG = ConfigDict(extra="allow", protected_namespaces=())
 
@@ -1977,6 +2009,36 @@ class CoverageSimBlock(BaseModel):
     passes_nominal: bool | None = None
 
 
+class EstimandBlock(BaseModel):
+    """Target estimand and assumption tags carried with every card (#128).
+
+    The block makes the *statistical contract* of the report explicit on
+    the artifact and the YAML/JSON card so it travels with the headline.
+    Defaults match :data:`DEFAULT_ESTIMAND_TEX`,
+    :data:`DEFAULT_ESTIMAND_SUMMARY`, and :data:`DEFAULT_ASSUMPTION_TAGS`.
+    See ``docs/concepts/estimands-and-assumptions.md`` for the prose.
+    """
+
+    model_config = _CARD_MODEL_CONFIG
+
+    estimand_tex: str = DEFAULT_ESTIMAND_TEX
+    summary: str = DEFAULT_ESTIMAND_SUMMARY
+    assumptions: list[str] = Field(default_factory=lambda: list(DEFAULT_ASSUMPTION_TAGS))
+    docs_url: str | None = "docs/concepts/estimands-and-assumptions.md"
+
+
+class BaselineBlock(BaseModel):
+    """Baseline policy value and delta-vs-baseline summary (#132)."""
+
+    model_config = _CARD_MODEL_CONFIG
+
+    kind: str | None = None  # "scalar" | "logged" | "column" | None
+    value: float | None = None
+    delta_V_hat: float | None = None
+    delta_ci_lower: float | None = None
+    delta_ci_upper: float | None = None
+
+
 class EvaluationCard(BaseModel):
     """Machine-readable sibling of the HTML evaluation card (#88).
 
@@ -2002,6 +2064,8 @@ class EvaluationCard(BaseModel):
     sensitivity: SensitivityBlock = Field(default_factory=SensitivityBlock)
     provenance: ProvenanceBlock = Field(default_factory=ProvenanceBlock)
     coverage_sim: CoverageSimBlock | None = None
+    estimand: EstimandBlock = Field(default_factory=EstimandBlock)
+    baseline: BaselineBlock | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a plain JSON-serializable dict."""
@@ -2261,6 +2325,33 @@ def _build_card_from_row(
         ),
     )
 
+    estimand_block = EstimandBlock(
+        estimand_tex=artifact.estimand_tex,
+        summary=artifact.estimand_summary,
+        assumptions=list(artifact.assumptions),
+    )
+
+    baseline_block: BaselineBlock | None = None
+    if artifact.baseline_kind is not None or baseline is not None:
+        b_kind = artifact.baseline_kind or ("scalar" if baseline is not None else None)
+        b_val = artifact.baseline_value if artifact.baseline_value is not None else baseline
+        delta_v = _coerce_optional_float(row.get("delta_V_hat"))
+        d_lo = _coerce_optional_float(row.get("delta_ci_lower"))
+        d_hi = _coerce_optional_float(row.get("delta_ci_upper"))
+        if delta_v is None and v_hat is not None and b_val is not None:
+            delta_v = v_hat - float(b_val)
+        if d_lo is None and ci_lower is not None and b_val is not None:
+            d_lo = ci_lower - float(b_val)
+        if d_hi is None and ci_upper is not None and b_val is not None:
+            d_hi = ci_upper - float(b_val)
+        baseline_block = BaselineBlock(
+            kind=b_kind,
+            value=_coerce_optional_float(b_val),
+            delta_V_hat=delta_v,
+            delta_ci_lower=d_lo,
+            delta_ci_upper=d_hi,
+        )
+
     return EvaluationCard(
         model_name=model_name,
         headline=headline,
@@ -2268,6 +2359,8 @@ def _build_card_from_row(
         diagnostics=diagnostics,
         sensitivity=sensitivity,
         provenance=provenance,
+        estimand=estimand_block,
+        baseline=baseline_block,
     )
 
 

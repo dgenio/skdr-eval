@@ -46,7 +46,7 @@ def _build_artifact(
 
 class TestEvaluationCardSchema:
     def test_card_schema_version_constant(self):
-        assert CARD_SCHEMA_VERSION == "1.0.0"
+        assert CARD_SCHEMA_VERSION == "1.1.0"
 
     def test_card_schema_method_returns_card(self):
         art = _build_artifact()
@@ -209,7 +209,7 @@ class TestCardForwardCompatibility:
 
     def test_card_schema_version_stable(self):
         # Stability guard: any bump must update tests + CHANGELOG.
-        assert CARD_SCHEMA_VERSION == "1.0.0"
+        assert CARD_SCHEMA_VERSION == "1.1.0"
 
 
 class TestReadPathOrString:
