@@ -192,6 +192,20 @@ print(contribs)  # decision_id, q_pi, q_hat, weight, reward, contribution_to_V
 #  contribution_to_V.mean() == V_hat by construction (float64 precision)
 ```
 
+If your logs name the reward column anything other than `service_time` (e.g.,
+`reward`, `click`, `revenue`), pass it via the `y_col` keyword:
+
+```python
+artifact = skdr_eval.evaluate_sklearn_models(
+    logs=logs.rename(columns={"service_time": "reward"}),
+    models=models,
+    fit_models=True,
+    n_splits=3,
+    policy_train="pre_split",
+    y_col="reward",  # name of the reward column in your logs
+)
+```
+
 > **Breaking change in 0.6.0:** `evaluate_sklearn_models` and
 > `evaluate_pairwise_models` now return a single `EvaluationArtifact`
 > instead of the legacy `(report, detailed)` tuple. Unpack
