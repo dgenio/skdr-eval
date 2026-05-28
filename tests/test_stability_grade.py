@@ -81,9 +81,7 @@ def test_summarize_sensitivity_unstable_grade() -> None:
     detailed = {
         "HGB": {
             "DR": _result(v_grid={2.0: 10.0, 5.0: 15.0, 10.0: 25.0}, chosen_clip=5.0),
-            "SNDR": _result(
-                v_grid={2.0: 10.0, 5.0: 15.0, 10.0: 25.0}, chosen_clip=5.0
-            ),
+            "SNDR": _result(v_grid={2.0: 10.0, 5.0: 15.0, 10.0: 25.0}, chosen_clip=5.0),
         }
     }
     df = summarize_sensitivity(detailed)
@@ -96,9 +94,7 @@ def test_summarize_sensitivity_sensitive_grade() -> None:
     detailed = {
         "HGB": {
             "DR": _result(v_grid={2.0: 10.0, 5.0: 11.5, 10.0: 11.8}, chosen_clip=5.0),
-            "SNDR": _result(
-                v_grid={2.0: 10.0, 5.0: 11.5, 10.0: 11.8}, chosen_clip=5.0
-            ),
+            "SNDR": _result(v_grid={2.0: 10.0, 5.0: 11.5, 10.0: 11.8}, chosen_clip=5.0),
         }
     }
     df = summarize_sensitivity(detailed)

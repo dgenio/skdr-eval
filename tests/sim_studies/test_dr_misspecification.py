@@ -3,14 +3,14 @@
 The double-robustness property of DR/SNDR says: as long as *either* the
 propensity model OR the outcome model is correctly specified, the
 estimator is consistent. This study verifies the property by varying
-the outcome model q̂ while holding the (true) propensity fixed, then
-holding q̂ fixed (correct) while varying the propensity model.
+the outcome model q_hat while holding the (true) propensity fixed, then
+holding q_hat fixed (correct) while varying the propensity model.
 
 The convention used here is the library's: ``policy_probs`` carries the
 target-policy mass; ``q_hat`` is the cross-fitted prediction; the weight
 transform returns ``1/π_b``. Under that convention DR is
-``E[ q_π(X) + (1/π_b(A|X)) · (Y − q̂(X, A)) ]`` and the residual term
-contributes 0 in expectation whenever ``E[Y − q̂ | X, A] = 0``.
+``E[ q_π(X) + (1/π_b(A|X)) · (Y - q_hat(X, A)) ]`` and the residual term
+contributes 0 in expectation whenever ``E[Y - q_hat | X, A] = 0``.
 
 All studies are gated by ``SIM_REPS`` (default 30 for CI; set
 ``SIM_REPS=200`` locally for a thorough check).
@@ -84,7 +84,7 @@ def _q_perturbed(
 
 
 def test_dr_recovers_v_star_when_q_is_correct_simulation() -> None:
-    """Sanity: q̂ at the marginal mean → DR recovers V*."""
+    """Sanity: q_hat at the marginal mean → DR recovers V*."""
     biases, ses = [], []
     for seed in range(10_000, 10_000 + SIM_REPS):
         prob = _build_problem(seed)
@@ -97,13 +97,13 @@ def test_dr_recovers_v_star_when_q_is_correct_simulation() -> None:
         ses.append(se)
     med_bias = float(np.median(biases))
     med_se = float(np.median(ses))
-    # The marginal-mean q̂ is the canonical "good" baseline used by the
+    # The marginal-mean q_hat is the canonical "good" baseline used by the
     # library's recovery tests; bias should be well under 1 SE.
     assert abs(med_bias) < med_se, (med_bias, med_se)
 
 
 def test_dr_survives_noisy_q_when_residual_unbiased_simulation() -> None:
-    """Noisy q̂ with E[ε]=0 → DR still recovers V* (variance ↑, bias ≈ 0)."""
+    """Noisy q_hat with E[ε]=0 → DR still recovers V* (variance ↑, bias ≈ 0)."""
     biases, ses = [], []
     for seed in range(20_000, 20_000 + SIM_REPS):
         prob = _build_problem(seed)
@@ -122,9 +122,9 @@ def test_dr_survives_noisy_q_when_residual_unbiased_simulation() -> None:
 
 
 def test_dr_survives_wrong_propensity_when_q_correct_simulation() -> None:
-    """Wrong propensity, correct q̂ → DR recovers V* via the DM leg.
+    """Wrong propensity, correct q_hat → DR recovers V* via the DM leg.
 
-    With ``q̂`` set to the marginal mean and ``E[Y − q̂ | X, A] = 0`` by
+    With ``q_hat`` set to the marginal mean and ``E[Y - q_hat | X, A] = 0`` by
     construction, the residual term contributes 0 *regardless* of the
     propensity estimate. This is the double-robustness "q saves us"
     direction, demonstrated directly.
@@ -147,9 +147,9 @@ def test_dr_survives_wrong_propensity_when_q_correct_simulation() -> None:
 
 
 def test_dr_breaks_when_q_residual_has_bias_simulation() -> None:
-    """A q̂ whose residual has *non-zero* conditional mean breaks DR.
+    """A q_hat whose residual has *non-zero* conditional mean breaks DR.
 
-    Concretely we set ``q̂(x, a) = mu_0`` for every action — this leaves
+    Concretely we set ``q_hat(x, a) = mu_0`` for every action — this leaves
     a non-zero residual mean on actions 1 and 2 even though e is correct.
     DR cannot save us because the IPS leg multiplies this bias by 1/π_b.
     The point of this test is to confirm the assumption boundary: DR is
@@ -158,18 +158,16 @@ def test_dr_breaks_when_q_residual_has_bias_simulation() -> None:
     biases = []
     for seed in range(40_000, 40_000 + SIM_REPS):
         prob = _build_problem(seed)
-        # q̂ = mu[0] everywhere. The residual is (Y − mu[0]) which has
-        # conditional mean ``mu_a − mu_0`` ≠ 0 for a ≠ 0.
+        # q_hat = mu[0] everywhere. The residual is (Y - mu[0]) which has
+        # conditional mean ``mu_a - mu_0`` != 0 for a != 0.
         n = prob["A"].shape[0]
         q_bad = np.full(n, float(prob["mu"][0]))
-        v_hat, _ = _run(
-            prob, q_hat=q_bad, logging_pred=prob["logging"]
-        )
+        v_hat, _ = _run(prob, q_hat=q_bad, logging_pred=prob["logging"])
         biases.append(v_hat - prob["V_star"])
     med_bias = float(np.median(biases))
     # The bias must be materially non-zero — this is the failure-mode
     # signature we care about. We assert > 0.5 (~25% of V_star).
     assert abs(med_bias) > 0.5, (
-        f"expected DR to be biased when q̂ residual has non-zero mean; got"
+        f"expected DR to be biased when q_hat residual has non-zero mean; got"
         f" median bias={med_bias:.3f}"
     )

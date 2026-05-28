@@ -65,7 +65,7 @@ def test_per_action_ece_detects_one_bad_arm_simulation() -> None:
 
     assert np.isfinite(ece_per_action[0])
     # Action 0 is the contaminated arm; its per-action ECE should be the
-    # largest by a clear margin (we assert > 2× the next-highest).
+    # largest by a clear margin (we assert > 2* the next-highest).
     other_max = max(ece_per_action[1:])
     assert ece_per_action[0] > 2 * other_max, (
         f"action-0 ECE={ece_per_action[0]:.3f} not >> others={ece_per_action[1:]}"

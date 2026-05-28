@@ -17,6 +17,7 @@ _MIN_SAMPLES_MEDIUM = 10  # overlap and balance checking
 _MIN_SAMPLES_LARGE = 20  # calibration, discrimination, comprehensive
 _MIN_ACTION_COUNT = 2  # min samples in an action group (basic metrics)
 _MIN_ACTION_COUNT_DISC = 5  # min samples in a group for discrimination
+_PER_ACTION_NDIM = 2  # propensities are (n_samples, n_actions)
 _MIN_UNIQUE_LABELS = 2  # min unique binary labels for AUC
 _ZERO_VARIANCE_TOL = 1e-10  # tolerance for zero-variance equality check
 
@@ -894,7 +895,7 @@ def per_action_propensity_diagnostics(
             f"Propensities length {len(propensities)} doesn't match actions"
             f" length {len(actions)}"
         )
-    if propensities.ndim != 2:
+    if propensities.ndim != _PER_ACTION_NDIM:
         raise DataValidationError(
             f"Expected propensities of shape (n, n_actions); got {propensities.shape}"
         )
@@ -903,7 +904,7 @@ def per_action_propensity_diagnostics(
     n_actions = propensities.shape[1]
     actions_int = actions.astype(int)
     target_support: set[int] | None = (
-        set(int(x) for x in np.unique(target_actions))
+        {int(x) for x in np.unique(target_actions)}
         if target_actions is not None
         else None
     )
@@ -929,7 +930,9 @@ def per_action_propensity_diagnostics(
             brier_a = float(np.mean((p_col - y_a) ** 2))
             eps = 1e-12
             ll_a = float(
-                -np.mean(y_a * np.log(p_col + eps) + (1 - y_a) * np.log(1 - p_col + eps))
+                -np.mean(
+                    y_a * np.log(p_col + eps) + (1 - y_a) * np.log(1 - p_col + eps)
+                )
             )
 
         rare = logged_frac < rare_action_floor

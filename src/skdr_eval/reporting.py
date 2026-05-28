@@ -88,8 +88,12 @@ WARN_POOR_OVERLAP = "POOR_OVERLAP"
 WARN_LOW_MATCH_RATE = "LOW_MATCH_RATE"
 WARN_HIGH_PARETO_K = "HIGH_PARETO_K"  # #80 — PSIS Pareto-k > threshold
 WARN_MISCAL_PROP = "MISCAL_PROP"  # #84 — ECE above threshold
-WARN_PER_ACTION_MISCAL = "PER_ACTION_MISCAL"  # #131 — max per-action ECE above threshold
-WARN_RARE_ACTION_NO_SUPPORT = "RARE_ACTION_NO_SUPPORT"  # #131 — rare-and-insufficient action
+WARN_PER_ACTION_MISCAL = (
+    "PER_ACTION_MISCAL"  # #131 — max per-action ECE above threshold
+)
+WARN_RARE_ACTION_NO_SUPPORT = (
+    "RARE_ACTION_NO_SUPPORT"  # #131 — rare-and-insufficient action
+)
 
 # Severity labels.
 SUPPORT_OK = "ok"
@@ -258,9 +262,8 @@ def _compute_row_warnings(
     # threshold even when the global ECE looks healthy. Threshold is the
     # same ``miscal_ece``; per-action evidence is strictly *more* sensitive
     # than the global signal so this fires when MISCAL_PROP would not.
-    if (
-        model_max_per_action_ece is not None
-        and np.isfinite(float(model_max_per_action_ece))
+    if model_max_per_action_ece is not None and np.isfinite(
+        float(model_max_per_action_ece)
     ):
         per_ece = float(model_max_per_action_ece)
         if per_ece > thresholds.miscal_ece * 2:
@@ -2098,7 +2101,9 @@ class EstimandBlock(BaseModel):
 
     estimand_tex: str = DEFAULT_ESTIMAND_TEX
     summary: str = DEFAULT_ESTIMAND_SUMMARY
-    assumptions: list[str] = Field(default_factory=lambda: list(DEFAULT_ASSUMPTION_TAGS))
+    assumptions: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_ASSUMPTION_TAGS)
+    )
     docs_url: str | None = "docs/concepts/estimands-and-assumptions.md"
 
 
@@ -2361,7 +2366,7 @@ def _build_card_from_row(
         sensitivity = SensitivityBlock()
     else:
         s = sens_rows.iloc[0]
-        grade = s["stability_grade"] if "stability_grade" in s else None
+        grade = s.get("stability_grade", None)
         sensitivity = SensitivityBlock(
             V_min=_coerce_optional_float(s.get("V_min")),
             V_max=_coerce_optional_float(s.get("V_max")),
@@ -2412,7 +2417,9 @@ def _build_card_from_row(
     baseline_block: BaselineBlock | None = None
     if artifact.baseline_kind is not None or baseline is not None:
         b_kind = artifact.baseline_kind or ("scalar" if baseline is not None else None)
-        b_val = artifact.baseline_value if artifact.baseline_value is not None else baseline
+        b_val = (
+            artifact.baseline_value if artifact.baseline_value is not None else baseline
+        )
         delta_v = _coerce_optional_float(row.get("delta_V_hat"))
         d_lo = _coerce_optional_float(row.get("delta_ci_lower"))
         d_hi = _coerce_optional_float(row.get("delta_ci_upper"))
@@ -2543,10 +2550,11 @@ def build_evaluation_artifact(
     diagnostics = _compute_diagnostics(propensities, actions, list(detailed.keys()))
     model_ece = {name: float(diag.ece) for name, diag in diagnostics.items()}
     model_per_action_ece = {
-        name: float(diag.max_per_action_ece)
-        for name, diag in diagnostics.items()
+        name: float(diag.max_per_action_ece) for name, diag in diagnostics.items()
     }
-    model_n_rare = {name: int(diag.n_rare_actions) for name, diag in diagnostics.items()}
+    model_n_rare = {
+        name: int(diag.n_rare_actions) for name, diag in diagnostics.items()
+    }
     model_n_insuff = {
         name: int(diag.n_insufficient_actions) for name, diag in diagnostics.items()
     }

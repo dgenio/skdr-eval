@@ -8,6 +8,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Statistical trust contract** ([#127], [#128], [#129], [#130], [#131],
+  [#132], [#133], [#134]). One-PR sweep over the eight `area: trust`
+  issues that anchor the maintainer-level statistical evidence map:
+
+  - **Estimand block** ([#128]): `EvaluationArtifact` and `EvaluationCard`
+    now carry `estimand_tex`, `estimand_summary`, and an `assumptions`
+    list whose default value is the seven canonical tags
+    (`unconfoundedness`, `overlap`, `sutva`, `double_robustness`,
+    `stochastic_logging`, `bounded_weight_variance`,
+    `time_structure_respected`). New `EstimandBlock` Pydantic block;
+    full prose in `docs/concepts/estimands-and-assumptions.md`.
+  - **Statistical validation matrix** ([#127]):
+    `docs/statistical-validation-matrix.md` indexes every estimator,
+    diagnostic, and failure-mode tutorial to its assumption tags,
+    simulation proof, and test references.
+  - **Per-action propensity diagnostics** ([#131]):
+    `skdr_eval.per_action_propensity_diagnostics(...)` returning a list
+    of `PerActionDiagnostics` (n, logged_frac, mean propensity taken vs
+    global, per-action ECE/Brier/log-loss, `insufficient`, `rare`).
+    `PropensityDiagnostics` gains `per_action`, `n_rare_actions`,
+    `n_insufficient_actions`, `max_per_action_ece`. Two new warning
+    codes — `PER_ACTION_MISCAL` (caution/high_risk on the maximum
+    per-action ECE) and `RARE_ACTION_NO_SUPPORT` (high_risk when a
+    target-support action has fewer than `_MIN_ACTION_COUNT_DISC=5`
+    logged samples).
+  - **Baseline / delta-vs-baseline first-class outputs** ([#132]):
+    new `baseline=` kwarg on `evaluate_sklearn_models` and
+    `evaluate_pairwise_models` (accepts `float`, `"logged"`, or `None`).
+    The report gains `delta_V_hat` (and `delta_ci_lower` / `delta_ci_upper`
+    when `ci_bootstrap=True`). The card carries a new `BaselineBlock`.
+  - **Three-band stability grade** ([#133]):
+    `summarize_sensitivity(...)` now emits `v_range_frac` and
+    `stability_grade` ∈ {`stable`, `sensitive`, `unstable`} on every
+    row. `SensitivityBlock` exposes both fields.
+  - **Simulation studies** ([#129], [#130]): new `tests/sim_studies/`
+    package — `test_dr_misspecification.py` verifies the double-robustness
+    property (four regimes), `test_overlap_failure.py` sweeps logging-
+    policy sharpness and shows Pareto-k crossing the PSIS 0.7 threshold,
+    `test_bootstrap_validity.py` exercises moving-block bootstrap
+    coverage under iid / AR(1) / small-n / seasonal DGPs (assumption-
+    boundary case). All gated by `SIM_REPS` (default 30; bootstrap floors
+    at 50 for stable empirical coverage).
+  - **Known-failure-mode tutorials** ([#134]): new `examples/known_failures/`
+    directory ships `poor_overlap.py`, `misspecified_q.py`, and
+    `non_stationary.py` — three deliberately-failing offline evaluations
+    so newcomers see what `high_risk` looks like before they ship one.
+    A new `make known-failures` target runs all three; they are
+    intentionally kept outside `examples/use_cases/` so the CI smoke job
+    on that directory remains green.
+
+  Card schema version bumped 1.0.0 → 1.1.0. `ConfigDict(extra="allow")`
+  keeps older payloads forward-compatible; new optional fields default
+  to `None`.
+
 - **Composable estimator strategies** ([#86]). New `skdr_eval.estimators`
   subpackage introduces `WeightTransform` and `OutcomeLoss` protocols that
   decouple the DR pseudo-outcome from the clip-grid + MSE pair, plus three
@@ -410,6 +464,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#85]: https://github.com/dgenio/skdr-eval/issues/85
 [#86]: https://github.com/dgenio/skdr-eval/issues/86
 [#92]: https://github.com/dgenio/skdr-eval/issues/92
+[#127]: https://github.com/dgenio/skdr-eval/issues/127
+[#128]: https://github.com/dgenio/skdr-eval/issues/128
+[#129]: https://github.com/dgenio/skdr-eval/issues/129
+[#130]: https://github.com/dgenio/skdr-eval/issues/130
+[#131]: https://github.com/dgenio/skdr-eval/issues/131
+[#132]: https://github.com/dgenio/skdr-eval/issues/132
+[#133]: https://github.com/dgenio/skdr-eval/issues/133
+[#134]: https://github.com/dgenio/skdr-eval/issues/134
 
 ## [0.6.0] - 2026-05-12
 

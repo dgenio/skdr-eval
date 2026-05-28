@@ -5,7 +5,7 @@ Validates the moving-block bootstrap CI returned by
 the evaluators) under three canonical data-generating processes:
 
 * **iid** — independent observations.
-* **ar1** — AR(1) serial correlation, ρ=0.5.
+* **ar1** — AR(1) serial correlation, rho=0.5.
 * **small-n** — iid with n=120 (short-sample regime).
 
 The harness in :mod:`skdr_eval._simulation` already exposes
@@ -48,7 +48,7 @@ def test_bootstrap_coverage_iid_simulation() -> None:
 def test_bootstrap_coverage_ar1_simulation() -> None:
     """AR(1) serially correlated — MBB block-length should ~cover.
 
-    With ρ=0.5 the MBB consistency proof (Künsch 1989) applies and the
+    With rho=0.5 the MBB consistency proof (Künsch 1989) applies and the
     auto block-length rule should keep coverage close to nominal,
     though we allow a wider envelope than the iid case.
     """
