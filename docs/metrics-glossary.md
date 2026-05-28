@@ -1,9 +1,14 @@
 # Metrics glossary
 
-A plain-language reference for every metric and warning code that appears in
-an `EvaluationArtifact` — in `artifact.report`, `artifact.warnings`,
-`artifact.sensitivity`, `artifact.diagnostics`, and in the HTML report and
-stakeholder card (`artifact.to_html(...)` / `artifact.save_card(...)`).
+A plain-language reference for the metrics and warning codes in an
+`EvaluationArtifact` — across `artifact.report`, `artifact.warnings`,
+`artifact.sensitivity`, `artifact.diagnostics`, and the HTML report and
+stakeholder card (`artifact.to_html(...)` / `artifact.save_card(...)`). It
+covers the headline fields plus the lower-level columns those summaries are
+derived from. A few raw payload structures (e.g. the full per-action
+diagnostics table) are described by shape rather than enumerated field by
+field, and some `delta_*` / per-action columns live only in the
+DataFrame/JSON — those are called out where they appear below.
 
 The goal is simple: you should not need to read the source or an OPE paper to
 understand what a column means at a practical level. Each entry gives the
@@ -37,11 +42,14 @@ Metrics are grouped by what they tell you:
 | `V_hat` | Estimated value of the candidate policy under your metric (e.g. mean reward, or mean service time for the pairwise API). | Whether **higher or lower is better depends on your task** — reward-style metrics are "higher is better", a cost/time metric is "lower is better". Compare against a baseline, not in isolation. Common failure: reading `V_hat` when `support_health` is poor. Action: check support health *before* comparing models. |
 | `SE_if` | Influence-function standard error — an uncertainty proxy for `V_hat`. | Smaller means **more precise**, not more *correct*. A tiny `SE_if` on poorly supported data is false confidence. Action: pair with `support_health` and the CI. |
 | `ci_lower`, `ci_upper` | Confidence-interval bounds, present when `ci_bootstrap=True` (moving-block bootstrap). | If two models' CIs overlap heavily, treat them as **not distinguishable** from these logs. Action: do not rank models on point estimates whose CIs overlap. |
-| `delta_V_hat` | `V_hat` minus the `baseline=` you passed (a float, `"logged"`, or omitted). `delta_ci_lower` / `delta_ci_upper` accompany it when CIs are enabled. | The decision-relevant quantity: "how much better/worse than what we run today?". A delta CI that crosses zero means **no demonstrated improvement**. |
+| `delta_V_hat` | `V_hat` minus the `baseline=` you passed (a float, `"logged"`, or omitted). `delta_ci_lower` / `delta_ci_upper` accompany it when CIs are enabled. | The decision-relevant quantity: "how much better/worse than what we run today?". A delta CI that crosses zero means **no demonstrated improvement**. Available in `artifact.report` (DataFrame/JSON) only — the HTML report and stakeholder card don't render the `delta_*` columns, so read them programmatically. |
 | `clip` | The importance-weight clipping threshold actually used for that row. | Heavy clipping (small `clip`) trades variance for bias. If `clip` is driving the result, see `sensitivity`. |
 | `ESS` | Effective sample size — roughly how many decisions actually carry the estimate after importance weighting. | Low `ESS` (relative to `n`) means **a few rows dominate** the estimate; it is fragile. Common failure: `ESS` of a few dozen on tens of thousands of rows. Action: collect broader logs or reduce policy shift; expect a `LOW_ESS` warning. |
 | `match_rate` | Fraction of rows where the candidate policy's action is supported by the logged action distribution. | Higher is better. A `match_rate` of exactly `1.0` across *different* candidate models is suspicious — it usually means the candidates collapse to the logged action. Action: verify the policies actually differ. |
 | `min_pscore` | Smallest logging-policy propensity encountered. | Values at the floor (e.g. `1e-8`) signal **near-deterministic logging** — the overlap the estimator needs is missing. Action: this drives `EXTREME_CLIP` / `POOR_OVERLAP`. |
+| `pscore_q10`, `pscore_q05`, `pscore_q01` | 10th / 5th / 1st percentiles of the logging-policy propensities on matched rows. | The low tail of the overlap distribution — the same thinness `min_pscore` flags, but as a spread. Percentiles near the propensity floor mean the worst-supported decisions are nearly deterministic in the logs. Action: low values foreshadow `EXTREME_CLIP` / `POOR_OVERLAP`. |
+| `tail_mass` | Fraction of matched rows whose importance weight was clipped to zero (the zero-weight fraction). | Higher means more of the candidate's mass lands where the logs give no support. Above `extreme_clip_tail_mass` (default `0.05`) it triggers `EXTREME_CLIP`; above 2× the threshold it is the high-risk band. Action: treat the value as exploratory and check `sensitivity`. |
+| `MSE_est` | Estimated mean-squared error of the estimator at the chosen clip. | A selection diagnostic, not a headline number: it is what `argmin_MSE_clip` minimizes over the grid. Lower is better. |
 | `pareto_k` | PSIS (Pareto-smoothed importance sampling) tail-shape estimate for the importance weights. | `≤ 0.7` is healthy; above it the weight distribution has a heavy tail and the estimate is unstable. `NaN` can occur when there are too few tail samples to fit — treat as "cannot certify", not "fine". Action: a high `pareto_k` triggers `HIGH_PARETO_K`. |
 | `support_health` | One-word summary: `ok`, `caution`, or `high_risk`. | `ok`: diagnostically usable. `caution`: inspect warnings before using as decision evidence. `high_risk`: treat as a **data/support problem**, not a model-ranking result. |
 
@@ -71,9 +79,12 @@ grid — the OPE equivalent of a robustness check.
 | `V_min`, `V_max` | Smallest / largest `V_hat` over the clip grid. | A wide spread means the answer **depends on the clip choice** — a fragility signal. |
 | `V_range` | `V_max - V_min`. | Large relative to the mean reward ⇒ the estimate is clip-sensitive; do not over-interpret a single `V_hat`. |
 | `chosen_clip` | The clip threshold selected for the headline `V_hat`. | Cross-check against `argmin_MSE_clip`. |
+| `chosen_V` | The `V_hat` at `chosen_clip` — the value this sensitivity row was built around. | Should match the `V_hat` in `report`. It is the denominator for `v_range_frac`. |
 | `argmin_MSE_clip` | The clip that minimized estimated MSE on the grid. | If it differs a lot from `chosen_clip`, the result is sensitive to the selection rule. |
 | `dr_sndr_agree` | Whether DR and SNDR land close to each other. | Disagreement is a **red flag** — the two estimators should roughly agree when assumptions hold. |
+| `v_range_frac` | `V_range / max(\|chosen_V\|, eps)` — the clip-grid spread relative to the chosen value. | The scale-free version of `V_range`. `< 0.10` is the `stable` cut-off; larger means the answer depends on the clip choice. |
 | `stable` | Overall stability flag derived from the above. | `no` ⇒ treat the value as exploratory and improve support/calibration first. |
+| `stability_grade` | Three-band refinement of `stable`: `stable`, `sensitive`, or `unstable`. | `stable`: `v_range_frac < 10%` **and** DR/SNDR agree. `sensitive`: tight range but DR/SNDR disagree, **or** `10% ≤ v_range_frac < 25%`. `unstable`: `≥ 25%`, or non-finite (e.g. `chosen_V = 0`). Read `dr_sndr_agree` alongside it to tell the two `sensitive` cases apart. |
 
 ## Calibration & overlap diagnostics (`artifact.diagnostics`)
 
@@ -87,6 +98,8 @@ These describe the **propensity model** that the DR/SNDR estimators rely on.
 | `overlap_ratio` | How much the candidate's action distribution overlaps the logged one. | **Higher is better.** Low overlap is the root cause of most `high_risk` results. |
 | `balance_ratio` | Covariate balance between logged and target-action populations. | Far from `1.0` ⇒ the populations differ ⇒ extrapolation risk. |
 | `calibration_score`, `discrimination_score` | Summary calibration / discrimination quality of the propensity model. | Higher discrimination + good calibration ⇒ more trustworthy weights. |
+| `reliability_curve` | Calibration curve as a list of `(mean_predicted, observed_frequency, count)` bins. | Each bin compares predicted vs observed propensity; large gaps are the miscalibration `ece` summarizes into one number. Rendered as the calibration plot in the stakeholder card. |
+| `ece_n_bins` | Number of bins used to compute `ece` and the reliability curve (default `15`). | A reporting parameter, not a quality signal — it sets the granularity of the calibration check. |
 
 Per-action propensity diagnostics (`diagnostics.per_action`) break ECE / Brier
 / log-loss down by action and flag actions that are `rare` or `insufficient`;

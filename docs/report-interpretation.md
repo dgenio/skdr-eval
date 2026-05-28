@@ -36,7 +36,10 @@ If you can't answer these, the report can't help you yet.
 Look at `V_hat`, its uncertainty (`SE_if`), and the confidence interval
 (`ci_lower` / `ci_upper`) if you enabled `ci_bootstrap=True`. If you passed a
 `baseline=`, read `delta_V_hat` — the decision-relevant "better or worse than
-today" number.
+today" number. Note: `delta_V_hat` (with `delta_ci_lower` / `delta_ci_upper`)
+is a column in `artifact.report` — the DataFrame/JSON. The HTML report and
+stakeholder card don't render the `delta_*` columns, so read them from the
+artifact programmatically.
 
 **Do not compare models yet.** A point estimate is meaningless until you know
 the logs support it.
