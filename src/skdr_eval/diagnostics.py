@@ -17,6 +17,7 @@ _MIN_SAMPLES_MEDIUM = 10  # overlap and balance checking
 _MIN_SAMPLES_LARGE = 20  # calibration, discrimination, comprehensive
 _MIN_ACTION_COUNT = 2  # min samples in an action group (basic metrics)
 _MIN_ACTION_COUNT_DISC = 5  # min samples in a group for discrimination
+_PER_ACTION_NDIM = 2  # propensities are (n_samples, n_actions)
 _MIN_UNIQUE_LABELS = 2  # min unique binary labels for AUC
 _ZERO_VARIANCE_TOL = 1e-10  # tolerance for zero-variance equality check
 
@@ -35,6 +36,56 @@ _MIN_TAIL_LEN_FOR_GPD_FIT = 2  # GPD profile-likelihood is undefined below 2 exc
 
 
 @dataclass
+class PerActionDiagnostics:
+    """Per-action propensity diagnostics (#131).
+
+    Surfaces calibration, support, and miscalibration evidence at the
+    *action* level so rare or strategically-important actions cannot hide
+    behind a healthy global ECE / Brier score.
+
+    Attributes
+    ----------
+    action : int
+        Action index.
+    n : int
+        Number of logged decisions where this action was taken.
+    logged_frac : float
+        ``n / n_total`` — empirical mass of the action under the logging
+        policy. Values below ``rare_action_floor`` flag the action as rare.
+    mean_pscore_taken : float
+        Mean propensity assigned to this action *on rows where it was
+        actually taken*.
+    mean_pscore_global : float
+        Mean propensity assigned to this action across the full sample.
+    ece : float
+        Expected Calibration Error of the binary "action == this one"
+        problem, computed on the per-action propensity. ``nan`` when
+        ``n < _MIN_ACTION_COUNT_DISC``.
+    brier : float
+        Brier score for the same binary problem.
+    log_loss : float
+        Cross-entropy for the same binary problem.
+    insufficient : bool
+        True when ``n < _MIN_ACTION_COUNT_DISC``; downstream
+        diagnostics (ECE, Brier, log-loss) are unreliable.
+    rare : bool
+        True when ``logged_frac < rare_action_floor`` *and* the action
+        is in the target policy support.
+    """
+
+    action: int
+    n: int
+    logged_frac: float
+    mean_pscore_taken: float
+    mean_pscore_global: float
+    ece: float
+    brier: float
+    log_loss: float
+    insufficient: bool
+    rare: bool
+
+
+@dataclass
 class PropensityDiagnostics:
     """Container for propensity score diagnostic results.
 
@@ -44,6 +95,10 @@ class PropensityDiagnostics:
     ``ece_n_bins``) were introduced for issue #84 and are populated by
     :func:`comprehensive_propensity_diagnostics`. They default to ``nan`` /
     empty for backward compatibility when constructed directly.
+
+    Per-action diagnostics (``per_action``) were added in #131 and surface
+    calibration / rare-action / support quality at the *action* level so
+    a global ECE cannot hide an under-supported arm.
     """
 
     overlap_ratio: float
@@ -61,6 +116,17 @@ class PropensityDiagnostics:
     brier_score: float = float("nan")
     reliability_curve: list[tuple[float, float, int]] = field(default_factory=list)
     ece_n_bins: int = _ECE_DEFAULT_N_BINS
+    # --- Trust additions (#131): per-action calibration + rare-action checks.
+    per_action: list[PerActionDiagnostics] = field(default_factory=list)
+    rare_action_floor: float = 0.01
+    n_rare_actions: int = 0
+    n_insufficient_actions: int = 0
+    # Number of actions that are *both* rare AND insufficient. This is the
+    # gate for the ``RARE_ACTION_NO_SUPPORT`` warning (#131): rare-but-supported
+    # actions and insufficient-but-not-rare-under-target actions independently
+    # are not high-risk on their own — only their conjunction is.
+    n_rare_and_insufficient_actions: int = 0
+    max_per_action_ece: float = float("nan")
 
 
 def check_propensity_overlap(propensities: np.ndarray, actions: np.ndarray) -> float:
@@ -789,8 +855,147 @@ def _gpd_fit_zhang_stephens(exceedances: np.ndarray) -> float:
     return -k_hat_zs
 
 
+def per_action_propensity_diagnostics(
+    propensities: np.ndarray,
+    actions: np.ndarray,
+    *,
+    target_actions: np.ndarray | None = None,
+    rare_action_floor: float = 0.01,
+    n_bins: int = _ECE_DEFAULT_N_BINS,
+) -> list[PerActionDiagnostics]:
+    """Per-action propensity diagnostics (#131).
+
+    Global ECE / Brier can hide an under-supported arm: a model can look
+    well-calibrated on the marginal "max-prob argmax" view while being
+    biased on a rare-but-strategically-important action. This routine
+    re-frames the multi-class problem as ``n_actions`` independent binary
+    problems and computes per-action calibration, support fractions, and
+    rare-action flags.
+
+    Parameters
+    ----------
+    propensities : np.ndarray
+        Predicted propensities of shape ``(n_samples, n_actions)``.
+    actions : np.ndarray
+        Observed action indices of shape ``(n_samples,)``.
+    target_actions : np.ndarray, optional
+        Optional ``(n_samples,)`` array of actions the *target* policy
+        would take. Used only to refine the ``rare`` flag: a logged action
+        below the rarity floor is reported as ``rare=True`` only if the
+        target policy puts non-zero mass on it. Without this argument
+        every below-floor action is flagged.
+    rare_action_floor : float, default 0.01
+        Logged frequency below which the action is reported as ``rare``.
+    n_bins : int, default 15
+        ECE bin count.
+
+    Returns
+    -------
+    list[PerActionDiagnostics]
+        One entry per action in ``range(n_actions)``. Insufficient-sample
+        actions report ``nan`` for ECE/Brier/log-loss and ``insufficient=True``.
+    """
+    if len(propensities) != len(actions):
+        raise DataValidationError(
+            f"Propensities length {len(propensities)} doesn't match actions"
+            f" length {len(actions)}"
+        )
+    if propensities.ndim != _PER_ACTION_NDIM:
+        raise DataValidationError(
+            f"Expected propensities of shape (n, n_actions); got {propensities.shape}"
+        )
+
+    n_total = len(actions)
+    n_actions = propensities.shape[1]
+    actions_int = actions.astype(int)
+    target_support: set[int] | None = (
+        {int(x) for x in np.unique(target_actions)}
+        if target_actions is not None
+        else None
+    )
+
+    rows: list[PerActionDiagnostics] = []
+    for a in range(n_actions):
+        mask = actions_int == a
+        n_a = int(mask.sum())
+        logged_frac = float(n_a / n_total) if n_total else 0.0
+        p_col = propensities[:, a].astype(float)
+        mean_pscore_global = float(p_col.mean()) if n_total else float("nan")
+        mean_pscore_taken = float(p_col[mask].mean()) if n_a else float("nan")
+        insufficient = n_a < _MIN_ACTION_COUNT_DISC
+
+        # Binary calibration for "is this action chosen?"
+        y_a = mask.astype(float)
+        if insufficient or n_total < _MIN_SAMPLES_RELIABILITY:
+            ece_a = float("nan")
+            brier_a = float("nan")
+            ll_a = float("nan")
+        else:
+            ece_a = _binary_ece(p_col, y_a, n_bins=n_bins)
+            brier_a = float(np.mean((p_col - y_a) ** 2))
+            eps = 1e-12
+            ll_a = float(
+                -np.mean(
+                    y_a * np.log(p_col + eps) + (1 - y_a) * np.log(1 - p_col + eps)
+                )
+            )
+
+        rare = logged_frac < rare_action_floor
+        if rare and target_support is not None and a not in target_support:
+            # Below floor but the target policy never recommends it →
+            # not strategically rare; just an unused arm.
+            rare = False
+
+        rows.append(
+            PerActionDiagnostics(
+                action=a,
+                n=n_a,
+                logged_frac=logged_frac,
+                mean_pscore_taken=mean_pscore_taken,
+                mean_pscore_global=mean_pscore_global,
+                ece=ece_a,
+                brier=brier_a,
+                log_loss=ll_a,
+                insufficient=insufficient,
+                rare=rare,
+            )
+        )
+    return rows
+
+
+def _binary_ece(probs: np.ndarray, labels: np.ndarray, *, n_bins: int) -> float:
+    """Binary-classifier ECE for a single propensity column.
+
+    Helper for :func:`per_action_propensity_diagnostics`. Returns ``nan``
+    on degenerate inputs (constant predictions or empty bins everywhere).
+    """
+    if len(probs) != len(labels):
+        return float("nan")
+    n = len(probs)
+    bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+    ece = 0.0
+    used_mass = 0.0
+    for i in range(n_bins):
+        if i == n_bins - 1:
+            mask = (probs >= bin_edges[i]) & (probs <= bin_edges[i + 1])
+        else:
+            mask = (probs >= bin_edges[i]) & (probs < bin_edges[i + 1])
+        count = int(mask.sum())
+        if count == 0:
+            continue
+        used_mass += count / n
+        ece += (count / n) * abs(float(labels[mask].mean()) - float(probs[mask].mean()))
+    if used_mass == 0.0:
+        return float("nan")
+    return float(ece)
+
+
 def comprehensive_propensity_diagnostics(
-    propensities: np.ndarray, actions: np.ndarray, n_bins: int = 10
+    propensities: np.ndarray,
+    actions: np.ndarray,
+    n_bins: int = 10,
+    *,
+    target_actions: np.ndarray | None = None,
 ) -> PropensityDiagnostics:
     """Run comprehensive propensity score diagnostics.
 
@@ -800,6 +1005,15 @@ def comprehensive_propensity_diagnostics(
         Propensity scores (n_samples, n_actions).
     actions : np.ndarray
         Action indices (n_samples,).
+    n_bins : int, default=10
+        Reliability-curve bin count.
+    target_actions : np.ndarray, optional
+        If provided, the per-action ``rare`` flag is gated on whether the
+        target policy can pick the action (per #131's "target-support"
+        qualifier). When omitted, every logged action is treated as in
+        target support — the warning then conservatively flags any rare +
+        insufficient action regardless of whether the target policy can
+        pick it.
 
     Returns
     -------
@@ -839,6 +1053,14 @@ def comprehensive_propensity_diagnostics(
         propensities, actions, n_bins=_ECE_DEFAULT_N_BINS
     )
 
+    # #131 — Per-action calibration / rare-action / support map. ``target_actions``
+    # threads through so the rare-action flag respects target-policy support.
+    per_action = per_action_propensity_diagnostics(
+        propensities, actions, target_actions=target_actions
+    )
+    finite_eces = [r.ece for r in per_action if math.isfinite(r.ece)]
+    max_per_action_ece = max(finite_eces) if finite_eces else float("nan")
+
     return PropensityDiagnostics(
         overlap_ratio=overlap_ratio,
         balance_ratio=balance_ratio,
@@ -853,6 +1075,13 @@ def comprehensive_propensity_diagnostics(
         brier_score=brier_score,
         reliability_curve=reliability_curve,
         ece_n_bins=_ECE_DEFAULT_N_BINS,
+        per_action=per_action,
+        n_rare_actions=sum(1 for r in per_action if r.rare),
+        n_insufficient_actions=sum(1 for r in per_action if r.insufficient),
+        n_rare_and_insufficient_actions=sum(
+            1 for r in per_action if r.rare and r.insufficient
+        ),
+        max_per_action_ece=max_per_action_ece,
     )
 
 

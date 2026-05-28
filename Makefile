@@ -1,6 +1,6 @@
 # Makefile for skdr-eval development
 
-.PHONY: help install install-dev clean lint format typecheck test test-cov build docs check validate smoke coverage-sim notebooks use-cases all
+.PHONY: help install install-dev clean lint format typecheck test test-cov build docs check validate smoke coverage-sim notebooks use-cases known-failures all
 
 # Default target
 help:
@@ -21,6 +21,7 @@ help:
 	@echo "  smoke        Run examples/preflight.py and examples/quickstart.py"
 	@echo "  notebooks    Execute examples/notebooks/ via nbmake (needs [dev] extra)"
 	@echo "  use-cases    Run all examples/use_cases/*.py scripts"
+	@echo "  known-failures Run examples/known_failures/*.py demos (#134)"
 	@echo "  all          Run clean + check + build"
 
 # Installation targets
@@ -105,6 +106,16 @@ use-cases:
 	python examples/use_cases/02_ad_targeting.py
 	python examples/use_cases/03_healthcare_cate.py
 	python examples/use_cases/04_call_routing.py
+
+# Known-failure-mode tutorials (#134). These scripts intentionally
+# produce ``support_health=high_risk`` so a newcomer can see what a bad
+# offline evaluation looks like. They are NOT part of the use-case
+# gallery (which is the happy-path showcase) and NOT run by the CI
+# smoke job — run on-demand.
+known-failures:
+	python examples/known_failures/poor_overlap.py
+	python examples/known_failures/misspecified_q.py
+	python examples/known_failures/non_stationary.py
 
 # Composite targets
 check: lint typecheck test smoke

@@ -30,7 +30,11 @@ from .core import (
     fit_propensity_timecal,
     induce_policy_from_sklearn,
 )
-from .diagnostics import PropensityDiagnostics
+from .diagnostics import (
+    PerActionDiagnostics,
+    PropensityDiagnostics,
+    per_action_propensity_diagnostics,
+)
 from .doctor import Check, DoctorReport, doctor
 from .estimators import (
     ClipTransform,
@@ -76,11 +80,16 @@ from .models import (
 from .pairwise import PairwiseDesign
 from .reporting import (
     CARD_SCHEMA_VERSION,
+    DEFAULT_ASSUMPTION_TAGS,
+    DEFAULT_ESTIMAND_SUMMARY,
+    DEFAULT_ESTIMAND_TEX,
     SCHEMA_VERSION,
     ArtifactSchema,
+    BaselineBlock,
     CoverageSimBlock,
     DiagnosticGate,
     DiagnosticsBlock,
+    EstimandBlock,
     EvaluationArtifact,
     EvaluationCard,
     GateResult,
@@ -150,9 +159,13 @@ except ImportError:
 
 __all__ = [
     "CARD_SCHEMA_VERSION",
+    "DEFAULT_ASSUMPTION_TAGS",
+    "DEFAULT_ESTIMAND_SUMMARY",
+    "DEFAULT_ESTIMAND_TEX",
     "HAS_VISUALIZATION",
     "SCHEMA_VERSION",
     "ArtifactSchema",
+    "BaselineBlock",
     "BootstrapError",
     "Check",
     "ClipTransform",
@@ -169,6 +182,7 @@ __all__ = [
     "DiagnosticsBlock",
     "DoctorReport",
     "EmbeddingSufficiencyReport",
+    "EstimandBlock",
     "EstimationError",
     "EstimatorStrategy",
     "EvaluationArtifact",
@@ -193,6 +207,7 @@ __all__ = [
     "OutcomeModelError",
     "PairwiseDesign",
     "PairwiseEvaluationError",
+    "PerActionDiagnostics",
     "PolicyInductionError",
     "PropensityDiagnostics",
     "PropensityScoreError",
@@ -248,6 +263,7 @@ __all__ = [
     "merge_configs",
     "mips_value",
     "multiple_comparison_correction",
+    "per_action_propensity_diagnostics",
     "permutation_test",
     "power_analysis",
     "pseudo_inverse_ips",

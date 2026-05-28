@@ -31,6 +31,7 @@ import importlib.resources as _resources
 import io
 import json
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -60,6 +61,26 @@ logger = logging.getLogger("skdr_eval")
 # transparent; PropensityDiagnostics payload fields default to ``None``).
 SCHEMA_VERSION = "1.1.0"
 
+# Canonical assumption tags surfaced on EvaluationCard.estimand (#128). The
+# prose for each tag lives in docs/concepts/estimands-and-assumptions.md;
+# downstream tooling should treat unknown tags as forward-compatible
+# additions and ignore them.
+DEFAULT_ASSUMPTION_TAGS: tuple[str, ...] = (
+    "unconfoundedness",
+    "overlap",
+    "sutva",
+    "double_robustness",
+    "stochastic_logging",
+    "bounded_weight_variance",
+    "time_structure_respected",
+)
+DEFAULT_ESTIMAND_TEX = r"V(\pi) = E_X [ E_{A \sim \pi(\cdot|X)} [ Y(X, A) ] ]"
+DEFAULT_ESTIMAND_SUMMARY = (
+    "Policy value of the target policy over the held-out evaluation slice"
+    " of the logs, under the assumptions listed in"
+    " docs/concepts/estimands-and-assumptions.md."
+)
+
 # Machine-readable warning codes. Do not localize.
 WARN_LOW_ESS = "LOW_ESS"
 WARN_EXTREME_CLIP = "EXTREME_CLIP"
@@ -67,6 +88,12 @@ WARN_POOR_OVERLAP = "POOR_OVERLAP"
 WARN_LOW_MATCH_RATE = "LOW_MATCH_RATE"
 WARN_HIGH_PARETO_K = "HIGH_PARETO_K"  # #80 — PSIS Pareto-k > threshold
 WARN_MISCAL_PROP = "MISCAL_PROP"  # #84 — ECE above threshold
+WARN_PER_ACTION_MISCAL = (
+    "PER_ACTION_MISCAL"  # #131 — max per-action ECE above threshold
+)
+WARN_RARE_ACTION_NO_SUPPORT = (
+    "RARE_ACTION_NO_SUPPORT"  # #131 — rare-and-insufficient action
+)
 
 # Severity labels.
 SUPPORT_OK = "ok"
@@ -154,6 +181,10 @@ def _compute_row_warnings(
     n_samples: int,
     *,
     model_ece: float | None = None,
+    model_max_per_action_ece: float | None = None,
+    model_n_rare_actions: int | None = None,
+    model_n_insufficient_actions: int | None = None,
+    model_n_rare_and_insufficient_actions: int | None = None,
 ) -> tuple[list[str], str]:
     """Compute warning codes and severity for a single report row.
 
@@ -228,6 +259,36 @@ def _compute_row_warnings(
         elif ece > thresholds.miscal_ece:
             caution.append(WARN_MISCAL_PROP)
 
+    # PER_ACTION_MISCAL (#131): a single action's ECE blows past the global
+    # threshold even when the global ECE looks healthy. Threshold is the
+    # same ``miscal_ece``; per-action evidence is strictly *more* sensitive
+    # than the global signal so this fires when MISCAL_PROP would not.
+    if model_max_per_action_ece is not None and np.isfinite(
+        float(model_max_per_action_ece)
+    ):
+        per_ece = float(model_max_per_action_ece)
+        if per_ece > thresholds.miscal_ece * 2:
+            high.append(WARN_PER_ACTION_MISCAL)
+        elif per_ece > thresholds.miscal_ece:
+            caution.append(WARN_PER_ACTION_MISCAL)
+
+    # RARE_ACTION_NO_SUPPORT (#131): at least one target-support action is
+    # *both* rare (logged frequency below ``rare_action_floor``) AND
+    # insufficient (fewer than ``_MIN_ACTION_COUNT_DISC`` samples). Rare and
+    # insufficient must be the *same* action for this to be a high_risk
+    # signal — disjoint rare and insufficient actions don't compose.
+    # ``model_n_rare_and_insufficient_actions`` carries that intersection.
+    # Falls back to the legacy disjoint check only when the new count is
+    # unavailable (older callers / pre-#131 diagnostics).
+    rare_and_insuff = model_n_rare_and_insufficient_actions
+    if rare_and_insuff is None:
+        rare = model_n_rare_actions or 0
+        insuff = model_n_insufficient_actions or 0
+        if rare > 0 and insuff > 0:
+            high.append(WARN_RARE_ACTION_NO_SUPPORT)
+    elif rare_and_insuff > 0:
+        high.append(WARN_RARE_ACTION_NO_SUPPORT)
+
     # Stable order: LOW_ESS, EXTREME_CLIP, LOW_MATCH_RATE, POOR_OVERLAP,
     # HIGH_PARETO_K, MISCAL_PROP.  New codes append rather than interleave so
     # historical artifact diffs remain readable.
@@ -238,6 +299,8 @@ def _compute_row_warnings(
         WARN_POOR_OVERLAP,
         WARN_HIGH_PARETO_K,
         WARN_MISCAL_PROP,
+        WARN_PER_ACTION_MISCAL,
+        WARN_RARE_ACTION_NO_SUPPORT,
     ]
     codes = [c for c in code_order if c in caution or c in high]
 
@@ -256,6 +319,10 @@ def attach_warnings(
     thresholds: SupportHealthThresholds | None = None,
     *,
     model_ece: dict[str, float] | None = None,
+    model_per_action_ece: dict[str, float] | None = None,
+    model_n_rare_actions: dict[str, int] | None = None,
+    model_n_insufficient_actions: dict[str, int] | None = None,
+    model_n_rare_and_insufficient_actions: dict[str, int] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Attach ``support_health`` and ``diagnostic_warnings`` columns.
 
@@ -303,13 +370,25 @@ def attach_warnings(
         )
 
     ece_lookup = model_ece or {}
+    per_action_ece_lookup = model_per_action_ece or {}
+    rare_lookup = model_n_rare_actions or {}
+    insuff_lookup = model_n_insufficient_actions or {}
+    rare_and_insuff_lookup = model_n_rare_and_insufficient_actions or {}
     severities: list[str] = []
     code_strings: list[str] = []
     warning_records: list[dict[str, Any]] = []
     for _, row in report.iterrows():
-        ece_val = ece_lookup.get(str(row["model"]))
+        model_key = str(row["model"])
+        ece_val = ece_lookup.get(model_key)
         codes, severity = _compute_row_warnings(
-            row.to_dict(), thresholds, n_samples, model_ece=ece_val
+            row.to_dict(),
+            thresholds,
+            n_samples,
+            model_ece=ece_val,
+            model_max_per_action_ece=per_action_ece_lookup.get(model_key),
+            model_n_rare_actions=rare_lookup.get(model_key),
+            model_n_insufficient_actions=insuff_lookup.get(model_key),
+            model_n_rare_and_insufficient_actions=rare_and_insuff_lookup.get(model_key),
         )
         severities.append(severity)
         code_strings.append(",".join(codes))
@@ -335,6 +414,44 @@ def attach_warnings(
 
 
 _STABILITY_RANGE_FRAC = 0.10  # range/|chosen_V| must stay below this to be "stable"
+
+# #133 — stability-grade boundaries on V_range / |chosen_V|. The "sensitive"
+# band is wider than the original ``_STABILITY_RANGE_FRAC`` cliff so the
+# grade carries genuine triage signal: stable < 10% < sensitive < 25% < unstable.
+_STABILITY_GRADE_SENSITIVE_FRAC = 0.10
+_STABILITY_GRADE_UNSTABLE_FRAC = 0.25
+
+STABILITY_GRADES = ("stable", "sensitive", "unstable")
+
+
+def _stability_grade(v_range_frac: float, dr_sndr_agree: bool) -> str:
+    """Map a clip-grid range fraction + DR/SNDR agreement to a grade.
+
+    Used by :func:`summarize_sensitivity` (#133). The grade is intended for
+    triage, not as a substitute for a confidence-interval overlap test.
+
+    The three bands collapse two distinct signals — clip-grid spread
+    (``v_range_frac``) and DR↔SNDR consensus (``dr_sndr_agree``) — into a
+    single label. ``"sensitive"`` therefore covers two semantically different
+    cases:
+
+    1. ``v_range_frac < 10%`` but DR and SNDR disagree (tight range, hidden
+       estimator-strategy disagreement), AND
+    2. ``10% ≤ v_range_frac < 25%`` regardless of DR↔SNDR agreement (wider
+       range, possibly self-consistent).
+
+    Consumers that need to distinguish the two should read ``dr_sndr_agree``
+    directly from the sensitivity row alongside ``stability_grade``.
+    ``"unstable"`` is also assigned on non-finite ``v_range_frac`` (e.g. when
+    ``chosen_V`` is zero) so the grade stays defined on every row.
+    """
+    if not math.isfinite(v_range_frac):
+        return "unstable"
+    if v_range_frac < _STABILITY_GRADE_SENSITIVE_FRAC and dr_sndr_agree:
+        return "stable"
+    if v_range_frac < _STABILITY_GRADE_UNSTABLE_FRAC:
+        return "sensitive"
+    return "unstable"
 
 
 def summarize_sensitivity(
@@ -415,7 +532,11 @@ def summarize_sensitivity(
                 dr_sndr_agree = bool(abs(dr_at - sndr_at) <= tol)
 
             scale = max(abs(chosen_v), 1e-12)
-            stable = bool((v_range / scale) < _STABILITY_RANGE_FRAC and dr_sndr_agree)
+            v_range_frac = v_range / scale
+            stable = bool(v_range_frac < _STABILITY_RANGE_FRAC and dr_sndr_agree)
+            # #133 — three-band stability grade and a normalized range
+            # fraction. This is a triage signal, not a CI overlap test.
+            grade = _stability_grade(v_range_frac, dr_sndr_agree)
 
             rows.append(
                 {
@@ -429,6 +550,8 @@ def summarize_sensitivity(
                     "argmin_MSE_clip": argmin_clip,
                     "dr_sndr_agree": dr_sndr_agree,
                     "stable": stable,
+                    "v_range_frac": float(v_range_frac),
+                    "stability_grade": grade,
                 }
             )
     return pd.DataFrame(rows)
@@ -487,6 +610,10 @@ class _SensitivityRowSchema(BaseModel):
     argmin_MSE_clip: float | None
     dr_sndr_agree: bool
     stable: bool
+    # #133 — Three-band decision-stability grade. Optional defaults keep 1.0.0
+    # payloads loadable; new artifacts populate both fields.
+    v_range_frac: float | None = None
+    stability_grade: str | None = None
 
 
 class _DiagnosticsPayloadSchema(BaseModel):
@@ -524,6 +651,15 @@ class ArtifactSchema(BaseModel):
     warnings: list[_WarningRowSchema]
     sensitivity: list[_SensitivityRowSchema]
     diagnostics: dict[str, _DiagnosticsPayloadSchema]
+    # #128 — Statistical contract on the wire. Defaults keep 1.0.0 payloads
+    # loadable; new artifacts always populate the three fields.
+    estimand_tex: str | None = None
+    estimand_summary: str | None = None
+    assumptions: list[str] = Field(default_factory=list)
+    # #132 — Baseline configuration so delta_V_hat / delta_ci_* columns on
+    # the report row remain interpretable after a round trip.
+    baseline_kind: str | None = None
+    baseline_value: float | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -640,6 +776,8 @@ def _compute_diagnostics(
     propensities: np.ndarray | None,
     actions: np.ndarray | None,
     model_names: list[str],
+    *,
+    target_actions: np.ndarray | None = None,
 ) -> dict[str, PropensityDiagnostics]:
     """Compute per-model propensity diagnostics, sharing one fit across models.
 
@@ -648,11 +786,16 @@ def _compute_diagnostics(
     so callers mutating ``artifact.diagnostics[m].statistics`` for one model
     do not silently affect every other model in the run. Returns an empty
     dict if propensities are missing or diagnostics fail.
+
+    ``target_actions`` (#131) is forwarded so the per-action ``rare`` flag
+    respects target-policy support.
     """
     if propensities is None or actions is None or len(model_names) == 0:
         return {}
     try:
-        shared = comprehensive_propensity_diagnostics(propensities, actions)
+        shared = comprehensive_propensity_diagnostics(
+            propensities, actions, target_actions=target_actions
+        )
     except (DataValidationError, ConfigurationError, ValueError) as exc:
         logger.warning("Propensity diagnostics failed (%s); omitting.", exc)
         return {}
@@ -728,6 +871,18 @@ class EvaluationArtifact:
     sensitivity: pd.DataFrame
     diagnostics: dict[str, PropensityDiagnostics] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # #128 — Statistical contract carried with the artifact and serialized
+    # on every card. Defaults are the standard contextual-bandit estimand
+    # and the seven canonical assumption tags.
+    estimand_tex: str = DEFAULT_ESTIMAND_TEX
+    estimand_summary: str = DEFAULT_ESTIMAND_SUMMARY
+    assumptions: list[str] = field(
+        default_factory=lambda: list(DEFAULT_ASSUMPTION_TAGS)
+    )
+    # #132 — Baseline configuration (kind, value) so the artifact carries
+    # how delta_V_hat columns on the report were computed.
+    baseline_kind: str | None = None
+    baseline_value: float | None = None
 
     # ------------------------------------------------------------------ #
     # Pydantic-backed payload                                            #
@@ -764,6 +919,11 @@ class EvaluationArtifact:
             warnings=warning_rows,
             sensitivity=sensitivity_rows,
             diagnostics=diag_payload,
+            estimand_tex=self.estimand_tex,
+            estimand_summary=self.estimand_summary,
+            assumptions=list(self.assumptions),
+            baseline_kind=self.baseline_kind,
+            baseline_value=self.baseline_value,
         )
 
     # ------------------------------------------------------------------ #
@@ -1890,7 +2050,7 @@ def gate_diagnostics(
 # Bump CARD_SCHEMA_VERSION when the card layout changes incompatibly. The card
 # is the machine-readable sibling of the HTML stakeholder card and is intended
 # to be CI-gateable.
-CARD_SCHEMA_VERSION = "1.0.0"
+CARD_SCHEMA_VERSION = "1.1.0"
 
 _CARD_MODEL_CONFIG = ConfigDict(extra="allow", protected_namespaces=())
 
@@ -1950,6 +2110,9 @@ class SensitivityBlock(BaseModel):
     argmin_MSE_clip: float | None = None
     dr_sndr_agree: bool | None = None
     stable: bool | None = None
+    # #133 — three-band decision-stability grade.
+    v_range_frac: float | None = None
+    stability_grade: str | None = None
 
 
 class ProvenanceBlock(BaseModel):
@@ -1977,6 +2140,38 @@ class CoverageSimBlock(BaseModel):
     passes_nominal: bool | None = None
 
 
+class EstimandBlock(BaseModel):
+    """Target estimand and assumption tags carried with every card (#128).
+
+    The block makes the *statistical contract* of the report explicit on
+    the artifact and the YAML/JSON card so it travels with the headline.
+    Defaults match :data:`DEFAULT_ESTIMAND_TEX`,
+    :data:`DEFAULT_ESTIMAND_SUMMARY`, and :data:`DEFAULT_ASSUMPTION_TAGS`.
+    See ``docs/concepts/estimands-and-assumptions.md`` for the prose.
+    """
+
+    model_config = _CARD_MODEL_CONFIG
+
+    estimand_tex: str = DEFAULT_ESTIMAND_TEX
+    summary: str = DEFAULT_ESTIMAND_SUMMARY
+    assumptions: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_ASSUMPTION_TAGS)
+    )
+    docs_url: str | None = "docs/concepts/estimands-and-assumptions.md"
+
+
+class BaselineBlock(BaseModel):
+    """Baseline policy value and delta-vs-baseline summary (#132)."""
+
+    model_config = _CARD_MODEL_CONFIG
+
+    kind: str | None = None  # "scalar" | "logged" | "column" | None
+    value: float | None = None
+    delta_V_hat: float | None = None
+    delta_ci_lower: float | None = None
+    delta_ci_upper: float | None = None
+
+
 class EvaluationCard(BaseModel):
     """Machine-readable sibling of the HTML evaluation card (#88).
 
@@ -2002,6 +2197,8 @@ class EvaluationCard(BaseModel):
     sensitivity: SensitivityBlock = Field(default_factory=SensitivityBlock)
     provenance: ProvenanceBlock = Field(default_factory=ProvenanceBlock)
     coverage_sim: CoverageSimBlock | None = None
+    estimand: EstimandBlock = Field(default_factory=EstimandBlock)
+    baseline: BaselineBlock | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a plain JSON-serializable dict."""
@@ -2222,6 +2419,7 @@ def _build_card_from_row(
         sensitivity = SensitivityBlock()
     else:
         s = sens_rows.iloc[0]
+        grade = s.get("stability_grade", None)
         sensitivity = SensitivityBlock(
             V_min=_coerce_optional_float(s.get("V_min")),
             V_max=_coerce_optional_float(s.get("V_max")),
@@ -2235,6 +2433,8 @@ def _build_card_from_row(
             stable=bool(s["stable"])
             if "stable" in s and s["stable"] is not None
             else None,
+            v_range_frac=_coerce_optional_float(s.get("v_range_frac")),
+            stability_grade=str(grade) if grade is not None else None,
         )
 
     provenance = ProvenanceBlock(
@@ -2261,6 +2461,35 @@ def _build_card_from_row(
         ),
     )
 
+    estimand_block = EstimandBlock(
+        estimand_tex=artifact.estimand_tex,
+        summary=artifact.estimand_summary,
+        assumptions=list(artifact.assumptions),
+    )
+
+    baseline_block: BaselineBlock | None = None
+    if artifact.baseline_kind is not None or baseline is not None:
+        b_kind = artifact.baseline_kind or ("scalar" if baseline is not None else None)
+        b_val = (
+            artifact.baseline_value if artifact.baseline_value is not None else baseline
+        )
+        delta_v = _coerce_optional_float(row.get("delta_V_hat"))
+        d_lo = _coerce_optional_float(row.get("delta_ci_lower"))
+        d_hi = _coerce_optional_float(row.get("delta_ci_upper"))
+        if delta_v is None and v_hat is not None and b_val is not None:
+            delta_v = v_hat - float(b_val)
+        if d_lo is None and ci_lower is not None and b_val is not None:
+            d_lo = ci_lower - float(b_val)
+        if d_hi is None and ci_upper is not None and b_val is not None:
+            d_hi = ci_upper - float(b_val)
+        baseline_block = BaselineBlock(
+            kind=b_kind,
+            value=_coerce_optional_float(b_val),
+            delta_V_hat=delta_v,
+            delta_ci_lower=d_lo,
+            delta_ci_upper=d_hi,
+        )
+
     return EvaluationCard(
         model_name=model_name,
         headline=headline,
@@ -2268,6 +2497,8 @@ def _build_card_from_row(
         diagnostics=diagnostics,
         sensitivity=sensitivity,
         provenance=provenance,
+        estimand=estimand_block,
+        baseline=baseline_block,
     )
 
 
@@ -2335,6 +2566,8 @@ def build_evaluation_artifact(
     random_state: int | None = None,
     alpha: float | None = None,
     extra_metadata: dict[str, Any] | None = None,
+    baseline_kind: str | None = None,
+    baseline_value: float | None = None,
 ) -> EvaluationArtifact:
     """Build an :class:`EvaluationArtifact` from raw ``evaluate_*_models`` outputs.
 
@@ -2364,12 +2597,33 @@ def build_evaluation_artifact(
     """
     from . import __version__ as _pkg_version  # noqa: PLC0415
 
-    # Compute diagnostics first so MISCAL_PROP (#84) can read the ECE map.
+    # Compute diagnostics first so MISCAL_PROP (#84) and PER_ACTION_MISCAL /
+    # RARE_ACTION_NO_SUPPORT (#131) can read the per-model maps.
     sensitivity_df = summarize_sensitivity(detailed)
     diagnostics = _compute_diagnostics(propensities, actions, list(detailed.keys()))
     model_ece = {name: float(diag.ece) for name, diag in diagnostics.items()}
+    model_per_action_ece = {
+        name: float(diag.max_per_action_ece) for name, diag in diagnostics.items()
+    }
+    model_n_rare = {
+        name: int(diag.n_rare_actions) for name, diag in diagnostics.items()
+    }
+    model_n_insuff = {
+        name: int(diag.n_insufficient_actions) for name, diag in diagnostics.items()
+    }
+    model_n_rare_and_insuff = {
+        name: int(diag.n_rare_and_insufficient_actions)
+        for name, diag in diagnostics.items()
+    }
     enriched_report, warnings_df = attach_warnings(
-        report, n_samples, thresholds, model_ece=model_ece
+        report,
+        n_samples,
+        thresholds,
+        model_ece=model_ece,
+        model_per_action_ece=model_per_action_ece,
+        model_n_rare_actions=model_n_rare,
+        model_n_insufficient_actions=model_n_insuff,
+        model_n_rare_and_insufficient_actions=model_n_rare_and_insuff,
     )
 
     metadata: dict[str, Any] = {
@@ -2386,6 +2640,20 @@ def build_evaluation_artifact(
     if extra_metadata:
         metadata.update(extra_metadata)
 
+    # #132 — baseline + delta-vs-baseline first-class columns.
+    if baseline_value is not None and "V_hat" in enriched_report.columns:
+        b = float(baseline_value)
+        enriched_report = enriched_report.copy()
+        enriched_report["delta_V_hat"] = enriched_report["V_hat"].astype(float) - b
+        if "ci_lower" in enriched_report.columns:
+            enriched_report["delta_ci_lower"] = (
+                enriched_report["ci_lower"].astype(float) - b
+            )
+        if "ci_upper" in enriched_report.columns:
+            enriched_report["delta_ci_upper"] = (
+                enriched_report["ci_upper"].astype(float) - b
+            )
+
     return EvaluationArtifact(
         report=enriched_report,
         detailed=detailed,
@@ -2393,6 +2661,8 @@ def build_evaluation_artifact(
         sensitivity=sensitivity_df,
         diagnostics=diagnostics,
         metadata=metadata,
+        baseline_kind=baseline_kind,
+        baseline_value=float(baseline_value) if baseline_value is not None else None,
     )
 
 

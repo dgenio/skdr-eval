@@ -120,6 +120,9 @@ def test_sensitivity_df_shape():
         "argmin_MSE_clip",
         "dr_sndr_agree",
         "stable",
+        # #133 — three-band stability grade + normalized range.
+        "v_range_frac",
+        "stability_grade",
     }
     assert set(art.sensitivity.columns) == expected
     # V_min <= chosen_V <= V_max for every row.
@@ -579,7 +582,14 @@ def test_card_with_ci_displays_band():
 
 
 def test_schema_json_schema_is_stable():
-    """Lock the top-level JSON schema fields so wire-format changes are explicit."""
+    """Lock the top-level JSON schema fields so wire-format changes are explicit.
+
+    The pre-1.1.0 baseline was eight fields; #128 adds the estimand contract
+    (``estimand_tex`` / ``estimand_summary`` / ``assumptions``) and #132 adds
+    the baseline configuration (``baseline_kind`` / ``baseline_value``) onto
+    the wire so the artifact JSON can be round-tripped without losing the
+    statistical contract that the card already carries.
+    """
     schema = ArtifactSchema.model_json_schema()
     top = set(schema["properties"])
     assert {
@@ -591,6 +601,13 @@ def test_schema_json_schema_is_stable():
         "warnings",
         "sensitivity",
         "diagnostics",
+        # #128 — estimand contract on the wire.
+        "estimand_tex",
+        "estimand_summary",
+        "assumptions",
+        # #132 — baseline configuration on the wire.
+        "baseline_kind",
+        "baseline_value",
     } == top
 
 
