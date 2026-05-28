@@ -71,7 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Configurable reward column** ([#105]). `evaluate_sklearn_models`,
   `build_design`, and `validate_logs` accept `y_col` (default
   `"service_time"`) so general-purpose OPE logs can name the reward column
-  anything (`reward`, `click`, `revenue`, ...).
+  anything (`reward`, `click`, `revenue`, ...). Default preserves prior
+  behavior exactly; revert by removing the `y_col` kwarg.
 - **`EvaluationArtifact.to_json()` / `.to_html()`** ([#108]) now follow the
   pandas convention: called with no argument they return the serialized
   string; called with a `path` they write the file and return its `Path`.
