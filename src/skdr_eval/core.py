@@ -1140,6 +1140,37 @@ def dr_value_with_clip(
 
 # Names of extra estimators that the strategy seam (#86, #85) recognises.
 # These are evaluated *in addition* to the historical ``("DR", "SNDR")`` pair.
+def _resolve_baseline(
+    baseline: float | str | None, eval_Y: np.ndarray
+) -> tuple[str | None, float | None]:
+    """Resolve the ``baseline=`` evaluator kwarg to ``(kind, value)`` (#132).
+
+    Accepts:
+
+    - ``None`` (default): no baseline; no delta columns are emitted.
+    - ``float``: a fixed scalar baseline (e.g. an SLA target or a
+      previously-published number); ``kind = "scalar"``.
+    - ``"logged"``: the empirical mean of the *evaluation slice* of the
+      logged reward; ``kind = "logged"``. This is the right baseline for
+      "does my candidate policy beat the logged policy on this slice?".
+
+    Unknown strings raise :class:`DataValidationError` rather than
+    silently treating them as a no-op so typos surface immediately.
+    """
+    if baseline is None:
+        return None, None
+    if isinstance(baseline, str):
+        if baseline != "logged":
+            from .exceptions import DataValidationError  # noqa: PLC0415
+
+            raise DataValidationError(
+                f"Unknown baseline string {baseline!r}; expected"
+                " 'logged' or a numeric value."
+            )
+        return "logged", float(np.asarray(eval_Y, dtype=float).mean())
+    return "scalar", float(baseline)
+
+
 EXTRA_ESTIMATORS = ("MRDR", "SWITCH-DR", "DRos", "MIPS")
 
 # Action-signal gap (output of ``embedding_sufficiency_diagnostic``) above which
@@ -1544,6 +1575,7 @@ def evaluate_sklearn_models(
     dros_lam: float = 1.0,
     mips_bandwidth: float = 1.0,
     tracker: "Tracker | None" = None,
+    baseline: float | str | None = None,
 ) -> "EvaluationArtifact":
     """Evaluate sklearn models using DR and SNDR estimators.
 
@@ -1928,6 +1960,8 @@ def evaluate_sklearn_models(
 
     from .reporting import build_evaluation_artifact  # noqa: PLC0415
 
+    baseline_kind, baseline_value = _resolve_baseline(baseline, eval_design.Y)
+
     artifact = build_evaluation_artifact(
         report=report,
         detailed=detailed_results,
@@ -1946,6 +1980,8 @@ def evaluate_sklearn_models(
             "ci_bootstrap": bool(ci_bootstrap),
             "estimators": list(estimators),
         },
+        baseline_kind=baseline_kind,
+        baseline_value=baseline_value,
     )
     _autolog_tracker(tracker, artifact, evaluator="evaluate_sklearn_models")
     return artifact
@@ -2335,6 +2371,7 @@ def evaluate_pairwise_models(
     dros_lam: float = 1.0,
     mips_bandwidth: float = 1.0,
     tracker: "Tracker | None" = None,
+    baseline: float | str | None = None,
 ) -> "EvaluationArtifact":
     """Evaluate pairwise models using autoscale strategy.
 
@@ -2890,6 +2927,8 @@ def evaluate_pairwise_models(
 
     from .reporting import build_evaluation_artifact  # noqa: PLC0415
 
+    baseline_kind, baseline_value = _resolve_baseline(baseline, np.asarray(Y))
+
     artifact = build_evaluation_artifact(
         report=report,
         detailed=detailed_results,
@@ -2913,6 +2952,8 @@ def evaluate_pairwise_models(
             "ci_bootstrap": bool(ci_bootstrap),
             "estimators": list(estimators),
         },
+        baseline_kind=baseline_kind,
+        baseline_value=baseline_value,
     )
     _autolog_tracker(tracker, artifact, evaluator="evaluate_pairwise_models")
     return artifact

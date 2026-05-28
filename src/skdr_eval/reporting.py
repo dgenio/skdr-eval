@@ -31,6 +31,7 @@ import importlib.resources as _resources
 import io
 import json
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -398,6 +399,29 @@ def attach_warnings(
 
 _STABILITY_RANGE_FRAC = 0.10  # range/|chosen_V| must stay below this to be "stable"
 
+# #133 — stability-grade boundaries on V_range / |chosen_V|. The "sensitive"
+# band is wider than the original ``_STABILITY_RANGE_FRAC`` cliff so the
+# grade carries genuine triage signal: stable < 10% < sensitive < 25% < unstable.
+_STABILITY_GRADE_SENSITIVE_FRAC = 0.10
+_STABILITY_GRADE_UNSTABLE_FRAC = 0.25
+
+STABILITY_GRADES = ("stable", "sensitive", "unstable")
+
+
+def _stability_grade(v_range_frac: float, dr_sndr_agree: bool) -> str:
+    """Map a clip-grid range fraction + DR/SNDR agreement to a grade.
+
+    Used by :func:`summarize_sensitivity` (#133). The grade is intended for
+    triage, not as a substitute for a confidence-interval overlap test.
+    """
+    if not math.isfinite(v_range_frac):
+        return "unstable"
+    if v_range_frac < _STABILITY_GRADE_SENSITIVE_FRAC and dr_sndr_agree:
+        return "stable"
+    if v_range_frac < _STABILITY_GRADE_UNSTABLE_FRAC:
+        return "sensitive"
+    return "unstable"
+
 
 def summarize_sensitivity(
     detailed_results: dict[str, dict[str, DRResult]],
@@ -477,7 +501,11 @@ def summarize_sensitivity(
                 dr_sndr_agree = bool(abs(dr_at - sndr_at) <= tol)
 
             scale = max(abs(chosen_v), 1e-12)
-            stable = bool((v_range / scale) < _STABILITY_RANGE_FRAC and dr_sndr_agree)
+            v_range_frac = v_range / scale
+            stable = bool(v_range_frac < _STABILITY_RANGE_FRAC and dr_sndr_agree)
+            # #133 — three-band stability grade and a normalized range
+            # fraction. This is a triage signal, not a CI overlap test.
+            grade = _stability_grade(v_range_frac, dr_sndr_agree)
 
             rows.append(
                 {
@@ -491,6 +519,8 @@ def summarize_sensitivity(
                     "argmin_MSE_clip": argmin_clip,
                     "dr_sndr_agree": dr_sndr_agree,
                     "stable": stable,
+                    "v_range_frac": float(v_range_frac),
+                    "stability_grade": grade,
                 }
             )
     return pd.DataFrame(rows)
@@ -2024,6 +2054,9 @@ class SensitivityBlock(BaseModel):
     argmin_MSE_clip: float | None = None
     dr_sndr_agree: bool | None = None
     stable: bool | None = None
+    # #133 — three-band decision-stability grade.
+    v_range_frac: float | None = None
+    stability_grade: str | None = None
 
 
 class ProvenanceBlock(BaseModel):
@@ -2328,6 +2361,7 @@ def _build_card_from_row(
         sensitivity = SensitivityBlock()
     else:
         s = sens_rows.iloc[0]
+        grade = s["stability_grade"] if "stability_grade" in s else None
         sensitivity = SensitivityBlock(
             V_min=_coerce_optional_float(s.get("V_min")),
             V_max=_coerce_optional_float(s.get("V_max")),
@@ -2341,6 +2375,8 @@ def _build_card_from_row(
             stable=bool(s["stable"])
             if "stable" in s and s["stable"] is not None
             else None,
+            v_range_frac=_coerce_optional_float(s.get("v_range_frac")),
+            stability_grade=str(grade) if grade is not None else None,
         )
 
     provenance = ProvenanceBlock(
@@ -2470,6 +2506,8 @@ def build_evaluation_artifact(
     random_state: int | None = None,
     alpha: float | None = None,
     extra_metadata: dict[str, Any] | None = None,
+    baseline_kind: str | None = None,
+    baseline_value: float | None = None,
 ) -> EvaluationArtifact:
     """Build an :class:`EvaluationArtifact` from raw ``evaluate_*_models`` outputs.
 
@@ -2536,6 +2574,20 @@ def build_evaluation_artifact(
     if extra_metadata:
         metadata.update(extra_metadata)
 
+    # #132 — baseline + delta-vs-baseline first-class columns.
+    if baseline_value is not None and "V_hat" in enriched_report.columns:
+        b = float(baseline_value)
+        enriched_report = enriched_report.copy()
+        enriched_report["delta_V_hat"] = enriched_report["V_hat"].astype(float) - b
+        if "ci_lower" in enriched_report.columns:
+            enriched_report["delta_ci_lower"] = (
+                enriched_report["ci_lower"].astype(float) - b
+            )
+        if "ci_upper" in enriched_report.columns:
+            enriched_report["delta_ci_upper"] = (
+                enriched_report["ci_upper"].astype(float) - b
+            )
+
     return EvaluationArtifact(
         report=enriched_report,
         detailed=detailed,
@@ -2543,6 +2595,8 @@ def build_evaluation_artifact(
         sensitivity=sensitivity_df,
         diagnostics=diagnostics,
         metadata=metadata,
+        baseline_kind=baseline_kind,
+        baseline_value=float(baseline_value) if baseline_value is not None else None,
     )
 
 

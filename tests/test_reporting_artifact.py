@@ -120,6 +120,9 @@ def test_sensitivity_df_shape():
         "argmin_MSE_clip",
         "dr_sndr_agree",
         "stable",
+        # #133 — three-band stability grade + normalized range.
+        "v_range_frac",
+        "stability_grade",
     }
     assert set(art.sensitivity.columns) == expected
     # V_min <= chosen_V <= V_max for every row.
