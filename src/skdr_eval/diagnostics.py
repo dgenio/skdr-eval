@@ -121,6 +121,11 @@ class PropensityDiagnostics:
     rare_action_floor: float = 0.01
     n_rare_actions: int = 0
     n_insufficient_actions: int = 0
+    # Number of actions that are *both* rare AND insufficient. This is the
+    # gate for the ``RARE_ACTION_NO_SUPPORT`` warning (#131): rare-but-supported
+    # actions and insufficient-but-not-rare-under-target actions independently
+    # are not high-risk on their own — only their conjunction is.
+    n_rare_and_insufficient_actions: int = 0
     max_per_action_ece: float = float("nan")
 
 
@@ -986,7 +991,11 @@ def _binary_ece(probs: np.ndarray, labels: np.ndarray, *, n_bins: int) -> float:
 
 
 def comprehensive_propensity_diagnostics(
-    propensities: np.ndarray, actions: np.ndarray, n_bins: int = 10
+    propensities: np.ndarray,
+    actions: np.ndarray,
+    n_bins: int = 10,
+    *,
+    target_actions: np.ndarray | None = None,
 ) -> PropensityDiagnostics:
     """Run comprehensive propensity score diagnostics.
 
@@ -996,6 +1005,15 @@ def comprehensive_propensity_diagnostics(
         Propensity scores (n_samples, n_actions).
     actions : np.ndarray
         Action indices (n_samples,).
+    n_bins : int, default=10
+        Reliability-curve bin count.
+    target_actions : np.ndarray, optional
+        If provided, the per-action ``rare`` flag is gated on whether the
+        target policy can pick the action (per #131's "target-support"
+        qualifier). When omitted, every logged action is treated as in
+        target support — the warning then conservatively flags any rare +
+        insufficient action regardless of whether the target policy can
+        pick it.
 
     Returns
     -------
@@ -1035,8 +1053,11 @@ def comprehensive_propensity_diagnostics(
         propensities, actions, n_bins=_ECE_DEFAULT_N_BINS
     )
 
-    # #131 — Per-action calibration / rare-action / support map.
-    per_action = per_action_propensity_diagnostics(propensities, actions)
+    # #131 — Per-action calibration / rare-action / support map. ``target_actions``
+    # threads through so the rare-action flag respects target-policy support.
+    per_action = per_action_propensity_diagnostics(
+        propensities, actions, target_actions=target_actions
+    )
     finite_eces = [r.ece for r in per_action if math.isfinite(r.ece)]
     max_per_action_ece = max(finite_eces) if finite_eces else float("nan")
 
@@ -1057,6 +1078,9 @@ def comprehensive_propensity_diagnostics(
         per_action=per_action,
         n_rare_actions=sum(1 for r in per_action if r.rare),
         n_insufficient_actions=sum(1 for r in per_action if r.insufficient),
+        n_rare_and_insufficient_actions=sum(
+            1 for r in per_action if r.rare and r.insufficient
+        ),
         max_per_action_ece=max_per_action_ece,
     )
 

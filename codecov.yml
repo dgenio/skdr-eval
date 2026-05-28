@@ -13,8 +13,10 @@ coverage:
         if_ci_failed: error
     patch:
       default:
+        # Hard 80% gate: no threshold slack so the operative floor matches the
+        # advertised target. Project target stays on ``auto`` so the patch
+        # gate is the only place this number lives.
         target: 80%
-        threshold: 5%
         if_ci_failed: error
 
 ignore:

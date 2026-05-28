@@ -184,6 +184,7 @@ def _compute_row_warnings(
     model_max_per_action_ece: float | None = None,
     model_n_rare_actions: int | None = None,
     model_n_insufficient_actions: int | None = None,
+    model_n_rare_and_insufficient_actions: int | None = None,
 ) -> tuple[list[str], str]:
     """Compute warning codes and severity for a single report row.
 
@@ -271,12 +272,21 @@ def _compute_row_warnings(
         elif per_ece > thresholds.miscal_ece:
             caution.append(WARN_PER_ACTION_MISCAL)
 
-    # RARE_ACTION_NO_SUPPORT (#131): at least one target-support action with
-    # < _MIN_ACTION_COUNT_DISC samples in the logs. This is a *high_risk*
-    # signal because the IPS leg has no data to learn from.
-    rare = model_n_rare_actions or 0
-    insuff = model_n_insufficient_actions or 0
-    if rare > 0 and insuff > 0:
+    # RARE_ACTION_NO_SUPPORT (#131): at least one target-support action is
+    # *both* rare (logged frequency below ``rare_action_floor``) AND
+    # insufficient (fewer than ``_MIN_ACTION_COUNT_DISC`` samples). Rare and
+    # insufficient must be the *same* action for this to be a high_risk
+    # signal — disjoint rare and insufficient actions don't compose.
+    # ``model_n_rare_and_insufficient_actions`` carries that intersection.
+    # Falls back to the legacy disjoint check only when the new count is
+    # unavailable (older callers / pre-#131 diagnostics).
+    rare_and_insuff = model_n_rare_and_insufficient_actions
+    if rare_and_insuff is None:
+        rare = model_n_rare_actions or 0
+        insuff = model_n_insufficient_actions or 0
+        if rare > 0 and insuff > 0:
+            high.append(WARN_RARE_ACTION_NO_SUPPORT)
+    elif rare_and_insuff > 0:
         high.append(WARN_RARE_ACTION_NO_SUPPORT)
 
     # Stable order: LOW_ESS, EXTREME_CLIP, LOW_MATCH_RATE, POOR_OVERLAP,
@@ -312,6 +322,7 @@ def attach_warnings(
     model_per_action_ece: dict[str, float] | None = None,
     model_n_rare_actions: dict[str, int] | None = None,
     model_n_insufficient_actions: dict[str, int] | None = None,
+    model_n_rare_and_insufficient_actions: dict[str, int] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Attach ``support_health`` and ``diagnostic_warnings`` columns.
 
@@ -362,6 +373,7 @@ def attach_warnings(
     per_action_ece_lookup = model_per_action_ece or {}
     rare_lookup = model_n_rare_actions or {}
     insuff_lookup = model_n_insufficient_actions or {}
+    rare_and_insuff_lookup = model_n_rare_and_insufficient_actions or {}
     severities: list[str] = []
     code_strings: list[str] = []
     warning_records: list[dict[str, Any]] = []
@@ -376,6 +388,7 @@ def attach_warnings(
             model_max_per_action_ece=per_action_ece_lookup.get(model_key),
             model_n_rare_actions=rare_lookup.get(model_key),
             model_n_insufficient_actions=insuff_lookup.get(model_key),
+            model_n_rare_and_insufficient_actions=rare_and_insuff_lookup.get(model_key),
         )
         severities.append(severity)
         code_strings.append(",".join(codes))
@@ -416,6 +429,21 @@ def _stability_grade(v_range_frac: float, dr_sndr_agree: bool) -> str:
 
     Used by :func:`summarize_sensitivity` (#133). The grade is intended for
     triage, not as a substitute for a confidence-interval overlap test.
+
+    The three bands collapse two distinct signals — clip-grid spread
+    (``v_range_frac``) and DR↔SNDR consensus (``dr_sndr_agree``) — into a
+    single label. ``"sensitive"`` therefore covers two semantically different
+    cases:
+
+    1. ``v_range_frac < 10%`` but DR and SNDR disagree (tight range, hidden
+       estimator-strategy disagreement), AND
+    2. ``10% ≤ v_range_frac < 25%`` regardless of DR↔SNDR agreement (wider
+       range, possibly self-consistent).
+
+    Consumers that need to distinguish the two should read ``dr_sndr_agree``
+    directly from the sensitivity row alongside ``stability_grade``.
+    ``"unstable"`` is also assigned on non-finite ``v_range_frac`` (e.g. when
+    ``chosen_V`` is zero) so the grade stays defined on every row.
     """
     if not math.isfinite(v_range_frac):
         return "unstable"
@@ -582,6 +610,10 @@ class _SensitivityRowSchema(BaseModel):
     argmin_MSE_clip: float | None
     dr_sndr_agree: bool
     stable: bool
+    # #133 — Three-band decision-stability grade. Optional defaults keep 1.0.0
+    # payloads loadable; new artifacts populate both fields.
+    v_range_frac: float | None = None
+    stability_grade: str | None = None
 
 
 class _DiagnosticsPayloadSchema(BaseModel):
@@ -619,6 +651,15 @@ class ArtifactSchema(BaseModel):
     warnings: list[_WarningRowSchema]
     sensitivity: list[_SensitivityRowSchema]
     diagnostics: dict[str, _DiagnosticsPayloadSchema]
+    # #128 — Statistical contract on the wire. Defaults keep 1.0.0 payloads
+    # loadable; new artifacts always populate the three fields.
+    estimand_tex: str | None = None
+    estimand_summary: str | None = None
+    assumptions: list[str] = Field(default_factory=list)
+    # #132 — Baseline configuration so delta_V_hat / delta_ci_* columns on
+    # the report row remain interpretable after a round trip.
+    baseline_kind: str | None = None
+    baseline_value: float | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -735,6 +776,8 @@ def _compute_diagnostics(
     propensities: np.ndarray | None,
     actions: np.ndarray | None,
     model_names: list[str],
+    *,
+    target_actions: np.ndarray | None = None,
 ) -> dict[str, PropensityDiagnostics]:
     """Compute per-model propensity diagnostics, sharing one fit across models.
 
@@ -743,11 +786,16 @@ def _compute_diagnostics(
     so callers mutating ``artifact.diagnostics[m].statistics`` for one model
     do not silently affect every other model in the run. Returns an empty
     dict if propensities are missing or diagnostics fail.
+
+    ``target_actions`` (#131) is forwarded so the per-action ``rare`` flag
+    respects target-policy support.
     """
     if propensities is None or actions is None or len(model_names) == 0:
         return {}
     try:
-        shared = comprehensive_propensity_diagnostics(propensities, actions)
+        shared = comprehensive_propensity_diagnostics(
+            propensities, actions, target_actions=target_actions
+        )
     except (DataValidationError, ConfigurationError, ValueError) as exc:
         logger.warning("Propensity diagnostics failed (%s); omitting.", exc)
         return {}
@@ -871,6 +919,11 @@ class EvaluationArtifact:
             warnings=warning_rows,
             sensitivity=sensitivity_rows,
             diagnostics=diag_payload,
+            estimand_tex=self.estimand_tex,
+            estimand_summary=self.estimand_summary,
+            assumptions=list(self.assumptions),
+            baseline_kind=self.baseline_kind,
+            baseline_value=self.baseline_value,
         )
 
     # ------------------------------------------------------------------ #
@@ -2558,6 +2611,10 @@ def build_evaluation_artifact(
     model_n_insuff = {
         name: int(diag.n_insufficient_actions) for name, diag in diagnostics.items()
     }
+    model_n_rare_and_insuff = {
+        name: int(diag.n_rare_and_insufficient_actions)
+        for name, diag in diagnostics.items()
+    }
     enriched_report, warnings_df = attach_warnings(
         report,
         n_samples,
@@ -2566,6 +2623,7 @@ def build_evaluation_artifact(
         model_per_action_ece=model_per_action_ece,
         model_n_rare_actions=model_n_rare,
         model_n_insufficient_actions=model_n_insuff,
+        model_n_rare_and_insufficient_actions=model_n_rare_and_insuff,
     )
 
     metadata: dict[str, Any] = {

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -69,6 +71,39 @@ def test_baseline_unknown_string_raises() -> None:
             policy_train="pre_split",
             baseline="not-a-baseline",
         )
+
+
+def test_baseline_bool_raises() -> None:
+    """``bool`` baselines are rejected (would otherwise coerce to 0.0/1.0)."""
+    with pytest.raises(DataValidationError, match="bool"):
+        evaluate_sklearn_models(
+            logs=_logs(),
+            models={"HGB": HistGradientBoostingRegressor(max_iter=20)},
+            policy_train="pre_split",
+            baseline=True,  # type: ignore[arg-type]
+        )
+
+
+def test_artifact_json_carries_estimand_and_baseline_contract() -> None:
+    """``art.to_json()`` round-trips the #128 estimand block and #132 baseline.
+
+    Regression guard for the audit finding that ``ArtifactSchema`` omitted
+    ``estimand_tex`` / ``estimand_summary`` / ``assumptions`` / ``baseline_kind``
+    / ``baseline_value`` from the wire format. The dataclass carried them, the
+    card serialized them, but the artifact JSON dropped them on the floor.
+    """
+    art = evaluate_sklearn_models(
+        logs=_logs(),
+        models={"HGB": HistGradientBoostingRegressor(max_iter=20)},
+        policy_train="pre_split",
+        baseline=18.5,
+    )
+    payload = json.loads(art.to_json())
+    assert payload["estimand_tex"] == art.estimand_tex
+    assert payload["estimand_summary"] == art.estimand_summary
+    assert payload["assumptions"] == list(art.assumptions)
+    assert payload["baseline_kind"] == "scalar"
+    assert payload["baseline_value"] == pytest.approx(18.5)
 
 
 def test_baseline_with_ci_produces_delta_ci_columns() -> None:

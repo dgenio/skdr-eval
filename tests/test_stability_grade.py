@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-import pandas as pd
+import json
 
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingRegressor
+
+from skdr_eval import evaluate_sklearn_models, make_synth_logs
 from skdr_eval.core import DRResult
 from skdr_eval.reporting import (
     STABILITY_GRADES,
@@ -99,3 +103,29 @@ def test_summarize_sensitivity_sensitive_grade() -> None:
     }
     df = summarize_sensitivity(detailed)
     assert (df["stability_grade"] == "sensitive").all()
+
+
+def test_artifact_json_carries_v_range_frac_and_stability_grade() -> None:
+    """Regression guard: ``art.to_json()`` must surface the #133 sensitivity fields.
+
+    Audit caught this — ``_SensitivityRowSchema`` previously omitted both
+    ``v_range_frac`` and ``stability_grade``, so Pydantic v2 silently dropped
+    them on serialization even though they were present in
+    ``art.sensitivity.columns``. Drive a real evaluation end-to-end and
+    assert both fields survive the round trip.
+    """
+    logs, _, _ = make_synth_logs(n=600, n_ops=3, seed=7)
+    art = evaluate_sklearn_models(
+        logs=logs,
+        models={"HGB": HistGradientBoostingRegressor(max_iter=20)},
+        policy_train="pre_split",
+    )
+    assert "v_range_frac" in art.sensitivity.columns
+    assert "stability_grade" in art.sensitivity.columns
+
+    payload = json.loads(art.to_json())
+    assert payload["sensitivity"], "expected at least one sensitivity row"
+    for row in payload["sensitivity"]:
+        assert "v_range_frac" in row, row.keys()
+        assert "stability_grade" in row, row.keys()
+        assert row["stability_grade"] in STABILITY_GRADES

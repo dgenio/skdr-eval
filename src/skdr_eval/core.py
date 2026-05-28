@@ -1157,6 +1157,15 @@ def _resolve_baseline(
     """
     if baseline is None:
         return None, None
+    # ``bool`` is a subclass of ``int`` in Python, so it would silently coerce
+    # to 0.0 / 1.0 via the scalar branch below. That is almost never what a
+    # caller passing ``baseline=some_flag`` meant — reject it loudly.
+    if isinstance(baseline, bool):
+        from .exceptions import DataValidationError  # noqa: PLC0415
+
+        raise DataValidationError(
+            f"baseline must be float, 'logged', or None; got bool {baseline!r}."
+        )
     if isinstance(baseline, str):
         if baseline != "logged":
             from .exceptions import DataValidationError  # noqa: PLC0415

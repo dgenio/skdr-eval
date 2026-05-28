@@ -17,11 +17,18 @@ Both signals are exactly what the support-health warnings
 from __future__ import annotations
 
 import os
+from itertools import pairwise
 
 import numpy as np
 
 from skdr_eval.diagnostics import psis_pareto_k
 from skdr_eval.estimators import build_strategy, dr_value_with_strategy
+
+# Max allowed dip in median Pareto-k between successive (sharper) temperature
+# steps before we declare a monotone-break. Calibrated against ``SIM_REPS=30``
+# MC noise — large enough to absorb sampling variability, small enough to
+# catch any genuine reversal.
+_PARETO_K_MC_TOLERANCE = 0.05
 
 SIM_REPS = int(os.environ.get("SIM_REPS", "30"))
 
@@ -91,13 +98,24 @@ def _summarize(temperature: float) -> dict[str, float]:
 
 
 def test_pareto_k_grows_with_logging_sharpness_simulation() -> None:
-    """Pareto-k must grow monotonically as the logging policy sharpens."""
-    pks = []
+    """Pareto-k must grow monotonically as the logging policy sharpens.
+
+    Asserts soft monotonicity across the *entire* temperature ladder
+    ``(1.0, 0.5, 0.25, 0.1)`` with a small tolerance band: each successive
+    step may dip by at most ``_PARETO_K_MC_TOLERANCE`` before we count it as
+    a non-monotone break. Strict step-by-step monotonicity is too tight for
+    Monte Carlo at ``SIM_REPS=30``; the tolerance leaves the test
+    informative while keeping it stable.
+    """
+    pks: list[float] = []
     for t in (1.0, 0.5, 0.25, 0.1):
         s = _summarize(t)
         pks.append(s["median_pareto_k"])
-    # Soft-monotonicity gate: at least the extreme drop must be visible.
+    # The extreme drop must be visible, AND every successive step must be
+    # within ``_PARETO_K_MC_TOLERANCE`` of monotone — no large reversals.
     assert pks[-1] > pks[0], pks
+    for prev, nxt in pairwise(pks):
+        assert nxt >= prev - _PARETO_K_MC_TOLERANCE, pks
 
 
 def test_pareto_k_crosses_psis_high_risk_threshold_simulation() -> None:

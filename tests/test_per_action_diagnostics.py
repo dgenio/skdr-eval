@@ -15,6 +15,7 @@ parameter. This module shows:
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from skdr_eval.diagnostics import (
@@ -24,6 +25,7 @@ from skdr_eval.diagnostics import (
     per_action_propensity_diagnostics,
 )
 from skdr_eval.exceptions import DataValidationError
+from skdr_eval.reporting import attach_warnings
 
 
 def _dirichlet_dgp(n: int, n_actions: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
@@ -147,3 +149,85 @@ def test_binary_ece_returns_nan_when_all_bins_empty() -> None:
     probs = np.array([], dtype=float)
     labels = np.array([], dtype=int)
     assert np.isnan(_binary_ece(probs, labels, n_bins=10))
+
+
+def test_n_rare_and_insufficient_actions_field_computed() -> None:
+    """``comprehensive_propensity_diagnostics`` exposes the intersection count.
+
+    When the same action is BOTH rare (below ``rare_action_floor``) AND
+    insufficient (fewer than ``_MIN_ACTION_COUNT_DISC=5`` samples), the new
+    ``n_rare_and_insufficient_actions`` field counts it. With one such action
+    the field equals 1.
+    """
+    rng = np.random.default_rng(202)
+    n = 800
+    actions = np.full(n, 0, dtype=int)
+    # action 1: 2 samples in n=800 → 0.25% (rare under 1% floor) AND
+    # 2 < 5 (insufficient). Single action carries both flags simultaneously.
+    actions[:2] = 1
+    rng.shuffle(actions)
+    p = np.full((n, 2), 0.5)
+    diag = comprehensive_propensity_diagnostics(p, actions, target_actions=None)
+    assert diag.n_rare_and_insufficient_actions == 1, (
+        f"per_action={[(r.action, r.n, r.rare, r.insufficient) for r in diag.per_action]}"
+    )
+
+
+def test_rare_action_no_support_disjoint_does_not_fire() -> None:
+    """Disjoint rare/insufficient actions must NOT trigger ``RARE_ACTION_NO_SUPPORT``.
+
+    Regression guard for the audit finding: previously the warning ANDed
+    two independent counts (``n_rare > 0`` AND ``n_insufficient > 0``), which
+    fires even when the rare and insufficient *actions* are disjoint. The
+    rate-vs-count seam makes "rare-but-sufficient" and "insufficient-but-not-rare"
+    on the same sample mathematically impossible (rare needs count/n < 1%,
+    insufficient needs count < 5 — these constraints can't both hold for
+    different actions at any single ``n``). So drive the warning emitter
+    directly with synthetic per-model dicts that encode the disjoint case.
+    """
+    report = pd.DataFrame(
+        [
+            {
+                "model": "M",
+                "estimator": "DR",
+                "ESS": 1000.0,
+                "tail_mass": 0.0,
+                "match_rate": 1.0,
+                "min_pscore": 0.5,
+            }
+        ]
+    )
+    # Disjoint: one rare action and one insufficient action, but they are
+    # different actions, so the intersection is 0.
+    enriched, _ = attach_warnings(
+        report,
+        n_samples=1000,
+        model_n_rare_actions={"M": 1},
+        model_n_insufficient_actions={"M": 1},
+        model_n_rare_and_insufficient_actions={"M": 0},
+    )
+    assert "RARE_ACTION_NO_SUPPORT" not in enriched["diagnostic_warnings"].iloc[0]
+
+
+def test_rare_action_no_support_intersection_fires() -> None:
+    """When the intersection count is non-zero, ``RARE_ACTION_NO_SUPPORT`` fires."""
+    report = pd.DataFrame(
+        [
+            {
+                "model": "M",
+                "estimator": "DR",
+                "ESS": 1000.0,
+                "tail_mass": 0.0,
+                "match_rate": 1.0,
+                "min_pscore": 0.5,
+            }
+        ]
+    )
+    enriched, _ = attach_warnings(
+        report,
+        n_samples=1000,
+        model_n_rare_actions={"M": 1},
+        model_n_insufficient_actions={"M": 1},
+        model_n_rare_and_insufficient_actions={"M": 1},
+    )
+    assert "RARE_ACTION_NO_SUPPORT" in enriched["diagnostic_warnings"].iloc[0]
