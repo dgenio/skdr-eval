@@ -1138,8 +1138,6 @@ def dr_value_with_clip(
     return {"DR": dr_result, "SNDR": sndr_result}
 
 
-# Names of extra estimators that the strategy seam (#86, #85) recognises.
-# These are evaluated *in addition* to the historical ``("DR", "SNDR")`` pair.
 def _resolve_baseline(
     baseline: float | str | None, eval_Y: np.ndarray
 ) -> tuple[str | None, float | None]:
@@ -1171,6 +1169,8 @@ def _resolve_baseline(
     return "scalar", float(baseline)
 
 
+# Names of extra estimators that the strategy seam (#86, #85) recognises.
+# These are evaluated *in addition* to the historical ``("DR", "SNDR")`` pair.
 EXTRA_ESTIMATORS = ("MRDR", "SWITCH-DR", "DRos", "MIPS")
 
 # Action-signal gap (output of ``embedding_sufficiency_diagnostic``) above which
