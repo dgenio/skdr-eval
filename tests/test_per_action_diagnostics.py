@@ -15,11 +15,15 @@ parameter. This module shows:
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from skdr_eval.diagnostics import (
+    _binary_ece,
+    comprehensive_propensity_diagnostics,
     compute_propensity_ece,
     per_action_propensity_diagnostics,
 )
+from skdr_eval.exceptions import DataValidationError
 
 
 def _dirichlet_dgp(n: int, n_actions: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
@@ -105,3 +109,41 @@ def test_per_action_respects_target_support() -> None:
     )
     assert rows[3].rare is False, "rare-but-unused arm should not be flagged"
     assert rows[3].insufficient is True, "but still insufficient (n_3 ≈ 1)"
+
+
+def test_per_action_propensity_length_mismatch_raises() -> None:
+    """Propensities/actions length mismatch surfaces as DataValidationError."""
+    p = np.full((10, 3), 1.0 / 3.0)
+    a = np.zeros(9, dtype=int)  # one short on purpose
+    with pytest.raises(DataValidationError, match="length"):
+        per_action_propensity_diagnostics(p, a)
+
+
+def test_per_action_propensity_wrong_ndim_raises() -> None:
+    """1-D propensities (instead of (n, n_actions)) surface as DataValidationError."""
+    p = np.full(10, 0.5)  # 1-D — wrong shape
+    a = np.zeros(10, dtype=int)
+    with pytest.raises(DataValidationError, match="shape"):
+        per_action_propensity_diagnostics(p, a)
+
+
+def test_comprehensive_propensity_length_mismatch_raises() -> None:
+    """Length mismatch in the comprehensive diagnostic raises immediately."""
+    p = np.full((10, 3), 1.0 / 3.0)
+    a = np.zeros(9, dtype=int)
+    with pytest.raises(DataValidationError, match="length"):
+        comprehensive_propensity_diagnostics(p, a)
+
+
+def test_binary_ece_returns_nan_on_length_mismatch() -> None:
+    """`_binary_ece` returns nan when probs/labels lengths disagree (defensive)."""
+    probs = np.linspace(0.0, 1.0, 10)
+    labels = np.zeros(9, dtype=int)
+    assert np.isnan(_binary_ece(probs, labels, n_bins=10))
+
+
+def test_binary_ece_returns_nan_when_all_bins_empty() -> None:
+    """`_binary_ece` returns nan when no bin gets any mass (empty input)."""
+    probs = np.array([], dtype=float)
+    labels = np.array([], dtype=int)
+    assert np.isnan(_binary_ece(probs, labels, n_bins=10))

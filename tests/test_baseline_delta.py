@@ -71,6 +71,40 @@ def test_baseline_unknown_string_raises() -> None:
         )
 
 
+def test_baseline_with_ci_produces_delta_ci_columns() -> None:
+    """``baseline=`` + ``ci_bootstrap=True`` populates the delta CI columns.
+
+    Covers the conditional branches in ``build_evaluation_artifact`` that
+    derive ``delta_ci_lower`` / ``delta_ci_upper`` from ``ci_lower`` /
+    ``ci_upper`` minus the baseline value, and the matching
+    ``BaselineBlock`` lift in ``_build_card_from_row``.
+    """
+    art = evaluate_sklearn_models(
+        logs=_logs(),
+        models={"HGB": HistGradientBoostingRegressor(max_iter=20)},
+        policy_train="pre_split",
+        baseline=25.0,
+        ci_bootstrap=True,
+    )
+    assert "delta_V_hat" in art.report.columns
+    assert "ci_lower" in art.report.columns
+    assert "ci_upper" in art.report.columns
+    assert "delta_ci_lower" in art.report.columns
+    assert "delta_ci_upper" in art.report.columns
+    # Delta-CI columns are CI columns minus the baseline, element-wise.
+    for _, row in art.report.iterrows():
+        assert row["delta_ci_lower"] == pytest.approx(row["ci_lower"] - 25.0)
+        assert row["delta_ci_upper"] == pytest.approx(row["ci_upper"] - 25.0)
+    # The card baseline block also surfaces the CI delta.
+    card = art.card_schema("HGB", estimator="DR")
+    assert card.baseline is not None
+    assert card.baseline.kind == "scalar"
+    assert card.baseline.value == pytest.approx(25.0)
+    assert card.baseline.delta_V_hat is not None
+    assert card.baseline.delta_ci_lower is not None
+    assert card.baseline.delta_ci_upper is not None
+
+
 def test_baseline_card_block_populated() -> None:
     art = evaluate_sklearn_models(
         logs=_logs(),
