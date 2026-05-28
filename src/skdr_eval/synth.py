@@ -201,9 +201,9 @@ def make_pairwise_synth(
     --------
     >>> logs_df, op_daily_df = make_pairwise_synth(n_days=3, n_clients_day=100, n_ops=10)
     >>> print(logs_df.shape)
-    (300, 12)  # 3 days * 100 clients, ~12 columns
+    (300, 14)  # 3 days * 100 clients, 14 columns
     >>> print(op_daily_df.shape)
-    (30, 5)    # 3 days * 10 ops, ~5 columns
+    (30, 6)    # 3 days * 10 ops, 6 columns
     """
     rng = np.random.RandomState(seed)
 

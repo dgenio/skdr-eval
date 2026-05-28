@@ -34,7 +34,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pandas as pd
@@ -774,11 +774,22 @@ class EvaluationArtifact:
         """Serialize the artifact to a JSON string via the Pydantic schema."""
         return str(self.to_schema().model_dump_json(indent=indent))
 
-    def to_json(self, path: str | Path, *, indent: int | None = 2) -> Path:
-        """Write the artifact JSON to ``path``. Creates parent dirs as needed."""
+    def to_json(
+        self, path: str | Path | None = None, *, indent: int | None = 2
+    ) -> str | Path:
+        """Serialize the artifact to JSON.
+
+        Follows the pandas-style convention: with ``path=None`` (the default)
+        the JSON **string** is returned; with a ``path`` the JSON is written
+        there (parent dirs created) and the written :class:`~pathlib.Path` is
+        returned.
+        """
+        text = self.to_json_str(indent=indent)
+        if path is None:
+            return text
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(self.to_json_str(indent=indent), encoding="utf-8")
+        p.write_text(text, encoding="utf-8")
         logger.info("Wrote evaluation artifact JSON to %s", p)
         return p
 
@@ -822,11 +833,20 @@ class EvaluationArtifact:
             )
         )
 
-    def to_html(self, path: str | Path) -> Path:
-        """Write the artifact HTML to ``path``. Creates parent dirs as needed."""
+    def to_html(self, path: str | Path | None = None) -> str | Path:
+        """Render the artifact as HTML.
+
+        Follows the pandas-style convention: with ``path=None`` (the default)
+        the HTML **string** is returned; with a ``path`` the HTML is written
+        there (parent dirs created) and the written :class:`~pathlib.Path` is
+        returned.
+        """
+        html = self.to_html_str()
+        if path is None:
+            return html
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(self.to_html_str(), encoding="utf-8")
+        p.write_text(html, encoding="utf-8")
         logger.info("Wrote evaluation artifact HTML to %s", p)
         return p
 
@@ -1264,9 +1284,11 @@ class EvaluationArtifact:
             else:
                 target = p.with_suffix(f".{fmt}")
             if fmt == "json":
-                written["json"] = self.to_json(target)
+                # ``target`` is always a concrete path here, so to_json returns
+                # the written Path (never the str branch).
+                written["json"] = cast("Path", self.to_json(target))
             elif fmt == "html":
-                written["html"] = self.to_html(target)
+                written["html"] = cast("Path", self.to_html(target))
         return written
 
 

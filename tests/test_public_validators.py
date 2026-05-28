@@ -3,9 +3,11 @@
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.linear_model import LinearRegression
 
 import skdr_eval
 from skdr_eval.exceptions import DataValidationError, InsufficientDataError
+from skdr_eval.validation import validate_models_dict
 
 
 def test_validate_logs_accepts_synth_output():
@@ -38,6 +40,65 @@ def test_validate_logs_action_not_in_elig_columns():
     logs.loc[logs.index[0], "action"] = "op_ghost"
     with pytest.raises(DataValidationError, match="not present as '\\*_elig'"):
         skdr_eval.validate_logs(logs)
+
+
+def test_validate_logs_int_action_vs_str_elig_hints_dtype():
+    """#115: int actions with str elig column names surface a dtype-cast hint."""
+    logs, _ops, _ = skdr_eval.make_synth_logs(n=100, n_ops=3, seed=42)
+    logs = logs.copy()
+    elig_cols = [c for c in logs.columns if c.endswith("_elig")]
+    ops = [c.removesuffix("_elig") for c in elig_cols]
+    mapping = {op: i for i, op in enumerate(ops)}
+    logs["action"] = logs["action"].map(mapping)
+    logs = logs.rename(
+        columns={c: f"{mapping[c.removesuffix('_elig')]}_elig" for c in elig_cols}
+    )
+
+    with pytest.raises(DataValidationError, match="dtype is") as excinfo:
+        skdr_eval.validate_logs(logs)
+    assert "astype(str)" in str(excinfo.value)
+
+
+def test_validate_logs_unrelated_action_message_has_no_dtype_hint():
+    """#115: genuinely-unrelated string actions keep the original message (no hint)."""
+    logs, _ops, _ = skdr_eval.make_synth_logs(n=50, n_ops=2, seed=4)
+    logs = logs.copy()
+    logs.loc[logs.index[0], "action"] = "op_ghost"
+    with pytest.raises(DataValidationError) as excinfo:
+        skdr_eval.validate_logs(logs)
+    assert "dtype is" not in str(excinfo.value)
+
+
+def test_validate_models_dict_accepts_valid_mapping():
+    """#109: a well-formed {name: estimator} dict passes silently."""
+    validate_models_dict({"lr": LinearRegression()})
+
+
+def test_validate_models_dict_non_dict_non_estimator_has_no_hint():
+    """#109: a non-dict value without a fit method errors without a did-you-mean hint."""
+    with pytest.raises(DataValidationError) as excinfo:
+        validate_models_dict([1, 2, 3])
+    message = str(excinfo.value)
+    assert "must be a dict" in message
+    assert "did you mean" not in message
+
+
+def test_validate_models_dict_non_string_keys():
+    """#109: non-string keys raise a clear error."""
+    with pytest.raises(DataValidationError, match="keys must be strings"):
+        validate_models_dict({0: LinearRegression()})
+
+
+def test_validate_logs_custom_y_col():
+    """#105: validate_logs accepts a non-default reward column via y_col."""
+    logs, _ops, _ = skdr_eval.make_synth_logs(n=200, n_ops=3, seed=0)
+    renamed = logs.rename(columns={"service_time": "reward"})
+
+    # Default y_col now fails because 'service_time' is gone...
+    with pytest.raises(DataValidationError, match="missing required columns"):
+        skdr_eval.validate_logs(renamed)
+    # ...but passing the actual column name validates cleanly.
+    skdr_eval.validate_logs(renamed, y_col="reward")
 
 
 def test_validate_logs_no_feature_columns():

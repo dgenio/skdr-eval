@@ -46,6 +46,7 @@ from .pairwise import PairwiseDesign, induce_policy
 from .validation import (
     validate_dataframe,
     validate_finite_values,
+    validate_models_dict,
     validate_numpy_array,
     validate_positive_integer,
     validate_probabilities,
@@ -304,18 +305,25 @@ class DRResult:
 
 
 def build_design(
-    logs: pd.DataFrame, cli_pref: str = "cli_", st_pref: str = "st_"
+    logs: pd.DataFrame,
+    cli_pref: str = "cli_",
+    st_pref: str = "st_",
+    y_col: str = "service_time",
 ) -> Design:
     """Build design matrices from logs.
 
     Parameters
     ----------
     logs : pd.DataFrame
-        Log data with columns: arrival_ts, cli_*, st_*, op_*_elig, action, service_time.
+        Log data with columns: arrival_ts, cli_*, st_*, op_*_elig, action, and
+        the reward column ``y_col`` (``service_time`` by default).
     cli_pref : str, default="cli_"
         Prefix for client features.
     st_pref : str, default="st_"
         Prefix for service-time features.
+    y_col : str, default="service_time"
+        Name of the reward/outcome column read into ``Design.Y``. Defaults to
+        ``"service_time"`` for backward compatibility.
 
     Returns
     -------
@@ -331,7 +339,7 @@ def build_design(
     """
     try:
         # Validate input DataFrame
-        required_columns = ["arrival_ts", "action", "service_time"]
+        required_columns = ["arrival_ts", "action", y_col]
         validate_dataframe(logs, "logs", required_columns, min_rows=10)
 
         # Validate prefixes
@@ -396,7 +404,7 @@ def build_design(
         validate_finite_values(X_phi, "X_phi")
 
         # Outcomes and timestamps
-        Y: np.ndarray = logs["service_time"].values.astype(np.float64)
+        Y: np.ndarray = logs[y_col].values.astype(np.float64)
         ts: np.ndarray = logs["arrival_ts"].values.astype(np.float64)
 
         validate_numpy_array(Y, "Y", min_size=1)
@@ -1524,6 +1532,7 @@ def evaluate_sklearn_models(
     policy_train_frac: float = 0.85,
     support_thresholds: "SupportHealthThresholds | None" = None,
     *,
+    y_col: str = "service_time",
     gap: int = 1,
     test_size: int | None = None,
     max_train_size: int | None = None,
@@ -1579,6 +1588,11 @@ def evaluate_sklearn_models(
     support_thresholds : SupportHealthThresholds, optional
         Thresholds for support-health warnings attached to the returned
         artifact. See :class:`skdr_eval.reporting.SupportHealthThresholds`.
+    y_col : str, default="service_time"
+        Name of the reward/outcome column in ``logs``. Defaults to
+        ``"service_time"`` for backward compatibility; set it for
+        general-purpose OPE logs whose reward is named e.g. ``"reward"``,
+        ``"click"``, or ``"revenue"``.
     keep_contributions : bool, default=False
         If True, attach per-decision DR/SNDR contributions to each
         :class:`DRResult` under ``contributions`` and make them queryable
@@ -1616,16 +1630,12 @@ def evaluate_sklearn_models(
 
     Raises
     ------
-    ValueError
-        If ``models`` is empty or contains ``None`` values.
     DataValidationError
-        If ``keep_contributions=True`` is set with more than
+        If ``models`` is not a non-empty dict of ``{name: estimator}``, or if
+        ``keep_contributions=True`` is set with more than
         ``max_kept_contributions`` evaluated decisions.
     """
-    if not models:
-        raise ValueError("models dict must not be empty")
-    if any(v is None for v in models.values()):
-        raise ValueError("models dict values must not be None")
+    validate_models_dict(models)
 
     # Resolve policy_train sentinel: None means "pre_split" + emit warning.
     if policy_train is None:
@@ -1646,7 +1656,7 @@ def evaluate_sklearn_models(
         )
 
     # Build design
-    design = build_design(logs)
+    design = build_design(logs, y_col=y_col)
 
     # Split data for policy training if needed
     if policy_train == "pre_split":
@@ -1694,29 +1704,44 @@ def evaluate_sklearn_models(
             f"disable keep_contributions.",
         )
 
-    # Fit propensity model
-    propensities, _ = fit_propensity_timecal(
-        eval_design.X_phi,
-        eval_design.A,
-        eval_design.ts,
-        n_splits=n_splits,
-        random_state=random_state,
-        gap=gap,
-        test_size=test_size,
-        max_train_size=max_train_size,
-    )
+    # Fit propensity + outcome models on the evaluation slice. When
+    # policy_train="pre_split", the slice is only (1 - policy_train_frac) of
+    # the input, so a too-small-data failure reports the post-split count and
+    # confuses users who passed more rows (#114). Enrich the error with the
+    # pre_split context while leaving the policy_train="all" message untouched.
+    try:
+        propensities, _ = fit_propensity_timecal(
+            eval_design.X_phi,
+            eval_design.A,
+            eval_design.ts,
+            n_splits=n_splits,
+            random_state=random_state,
+            gap=gap,
+            test_size=test_size,
+            max_train_size=max_train_size,
+        )
 
-    # Fit outcome model
-    q_hat, _ = fit_outcome_crossfit(
-        eval_design.X_obs,
-        eval_design.Y,
-        n_splits=n_splits,
-        estimator=outcome_estimator,
-        random_state=random_state,
-        gap=gap,
-        test_size=test_size,
-        max_train_size=max_train_size,
-    )
+        # Fit outcome model
+        q_hat, _ = fit_outcome_crossfit(
+            eval_design.X_obs,
+            eval_design.Y,
+            n_splits=n_splits,
+            estimator=outcome_estimator,
+            random_state=random_state,
+            gap=gap,
+            test_size=test_size,
+            max_train_size=max_train_size,
+        )
+    except InsufficientDataError as exc:
+        if policy_train == "pre_split":
+            raise InsufficientDataError(
+                f"{exc} -- after policy_train='pre_split' reserved "
+                f"{policy_train_frac:.0%} of your {len(logs)} input rows for "
+                f"policy training, only {len(eval_design.Y)} evaluation rows "
+                "remain. Lower policy_train_frac, pass policy_train='all', or "
+                "provide more data."
+            ) from exc
+        raise
 
     # Evaluate each model
     report_rows = []
@@ -2436,13 +2461,15 @@ def evaluate_pairwise_models(
     Raises
     ------
     DataValidationError
-        If ``keep_contributions=True`` is set with more than
+        If ``models`` is not a non-empty dict of ``{name: estimator}``, or if
+        ``keep_contributions=True`` is set with more than
         ``max_kept_contributions`` evaluated decisions.
     """
 
     logger.info("Starting pairwise evaluation")
 
     # Validate parameters
+    validate_models_dict(models)
     if task_type not in ["regression", "binary"]:
         raise ValueError(
             f"Unknown task_type: {task_type}. Must be 'regression' or 'binary'"

@@ -146,7 +146,7 @@ We follow [Semantic Versioning](https://semver.org/):
 ## 🛠️ Development Setup
 
 ### Prerequisites
-- Python 3.9+
+- Python 3.11+
 - Git
 - GitHub account
 

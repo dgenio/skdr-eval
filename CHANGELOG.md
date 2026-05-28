@@ -68,6 +68,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mips_bandwidth=1.0`. Default `estimators=("DR","SNDR")` preserves the
   historical report shape exactly. The new `estimators=` row order in the
   report follows the order in the kwarg.
+- **Configurable reward column** ([#105]). `evaluate_sklearn_models`,
+  `build_design`, and `validate_logs` accept `y_col` (default
+  `"service_time"`) so general-purpose OPE logs can name the reward column
+  anything (`reward`, `click`, `revenue`, ...). Default preserves prior
+  behavior exactly; revert by removing the `y_col` kwarg.
+- **`EvaluationArtifact.to_json()` / `.to_html()`** ([#108]) now follow the
+  pandas convention: called with no argument they return the serialized
+  string; called with a `path` they write the file and return its `Path`.
+- **`models` contract validation** ([#109]). Both evaluators now raise a
+  clear `DataValidationError` (was an opaque `AttributeError` / `ValueError`)
+  when `models` is not a non-empty `{name: estimator}` dict, including a
+  "did you mean `models={...}`?" hint for a bare estimator.
+
+### Fixed
+- **README quickstart no longer warns** ([#104]). The canonical snippets pass
+  `policy_train="pre_split"` explicitly, so a copy-pasted quickstart runs
+  without a `DeprecationWarning`.
+- **Undefined `[choice]` extra** ([#107]). Removed the `pip install
+  skdr-eval[choice]` instruction; conditional-logit works out of the box
+  (SciPy is a core dependency). A test now guards README↔pyproject extra
+  drift.
+- **Stale repository owner / citation version** ([#110], [#111]). README
+  Trusted-Publishing block points at `dgenio/skdr-eval`; the BibTeX `version`
+  matches the released version.
+- **Python version drift in docs** ([#112]). `CONTRIBUTING.md` /
+  `DEVELOPMENT.md` now say Python 3.11+ to match `requires-python`.
+- **`make_pairwise_synth` docstring shapes** ([#113]) corrected to the actual
+  `(300, 14)` / `(30, 6)` output, with a regression test.
+- **Pre-split small-input error** ([#114]). With `policy_train="pre_split"`,
+  the `InsufficientDataError` now reports the original input row count and
+  `policy_train_frac` instead of the opaque post-split count.
+- **`validate_logs` int/str action mismatch** ([#115]). When actions are
+  ints but `*_elig` column names parse as str, the error now names the dtype
+  gap and suggests an `astype(str)` cast.
 
 ## [0.9.0] - 2026-05-22
 
@@ -239,6 +273,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#98]: https://github.com/dgenio/skdr-eval/issues/98
 [#101]: https://github.com/dgenio/skdr-eval/pull/101
 [#102]: https://github.com/dgenio/skdr-eval/pull/102
+[#104]: https://github.com/dgenio/skdr-eval/issues/104
+[#105]: https://github.com/dgenio/skdr-eval/issues/105
+[#107]: https://github.com/dgenio/skdr-eval/issues/107
+[#108]: https://github.com/dgenio/skdr-eval/issues/108
+[#109]: https://github.com/dgenio/skdr-eval/issues/109
+[#110]: https://github.com/dgenio/skdr-eval/issues/110
+[#111]: https://github.com/dgenio/skdr-eval/issues/111
+[#112]: https://github.com/dgenio/skdr-eval/issues/112
+[#113]: https://github.com/dgenio/skdr-eval/issues/113
+[#114]: https://github.com/dgenio/skdr-eval/issues/114
+[#115]: https://github.com/dgenio/skdr-eval/issues/115
 
 ## [0.8.0] - 2026-05-20
 
