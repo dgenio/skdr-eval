@@ -1,0 +1,107 @@
+"""Recovery proofs for per-action propensity diagnostics (#131).
+
+Per ``docs/agent-context/review-checklist.md``: any new statistical
+primitive must include a simulation that recovers a known ground-truth
+parameter. This module shows:
+
+* When the propensity model is *perfectly* calibrated for action ``a``,
+  the per-action ECE for ``a`` converges to 0.
+* When the propensity model is *miscalibrated* on a single rare action,
+  ``per_action[<rare>].ece`` is materially higher than the global ECE.
+* The ``rare`` and ``insufficient`` flags fire on a deliberately
+  rare-action DGP.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+from skdr_eval.diagnostics import (
+    compute_propensity_ece,
+    per_action_propensity_diagnostics,
+)
+
+
+def _dirichlet_dgp(n: int, n_actions: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
+    rng = np.random.default_rng(seed)
+    p = rng.dirichlet(np.full(n_actions, 5.0), size=n)
+    a = np.array([rng.choice(n_actions, p=p[i]) for i in range(n)], dtype=int)
+    return p, a
+
+
+def test_per_action_ece_zero_under_perfect_calibration_simulation() -> None:
+    """Per-action ECE converges to 0 under a Categorical(π) DGP."""
+    p, a = _dirichlet_dgp(n=4000, n_actions=4, seed=11)
+    rows = per_action_propensity_diagnostics(p, a, rare_action_floor=0.0)
+    eces = [r.ece for r in rows if np.isfinite(r.ece)]
+    assert len(eces) == 4, eces
+    # Loose bound: with n=4000, n_bins=15, per-action ECE ≤ ~0.1 under
+    # perfect calibration. Global ECE is the same statistic on the top-1
+    # column, used here as a sanity reference.
+    global_ece = compute_propensity_ece(p, a)
+    assert max(eces) < 0.10, (eces, global_ece)
+
+
+def test_per_action_ece_detects_one_bad_arm_simulation() -> None:
+    """A targeted distortion of one action's column shows in per-action ECE.
+
+    We take a perfectly-calibrated propensity matrix, then deliberately
+    push action 0's column toward 1.0 (over-confident) while leaving
+    actions 1-3 alone. The global ECE moves modestly; the per-action
+    ECE for action 0 moves a lot. This is precisely the failure mode
+    #131 is designed to surface.
+    """
+    p, a = _dirichlet_dgp(n=3000, n_actions=4, seed=22)
+
+    # Distort only the action-0 column toward 1.0.
+    p_bad = p.copy()
+    p_bad[:, 0] = np.clip(0.6 + 0.4 * p[:, 0], 0.0, 1.0)
+    # Renormalize so each row still sums to 1.
+    p_bad /= p_bad.sum(axis=1, keepdims=True)
+
+    rows = per_action_propensity_diagnostics(p_bad, a, rare_action_floor=0.0)
+    ece_per_action = [r.ece for r in rows]
+    ece_global = compute_propensity_ece(p_bad, a)
+
+    assert np.isfinite(ece_per_action[0])
+    # Action 0 is the contaminated arm; its per-action ECE should be the
+    # largest by a clear margin (we assert > 2× the next-highest).
+    other_max = max(ece_per_action[1:])
+    assert ece_per_action[0] > 2 * other_max, (
+        f"action-0 ECE={ece_per_action[0]:.3f} not >> others={ece_per_action[1:]}"
+    )
+    # Global ECE is less sensitive — it should be lower than the
+    # contaminated arm's per-action ECE.
+    assert ece_per_action[0] > ece_global
+
+
+def test_per_action_rare_and_insufficient_flags() -> None:
+    """A deliberately rare arm should report rare=True + insufficient=True."""
+    rng = np.random.default_rng(33)
+    n = 1500
+    # 4 actions; action 3 has frequency ~0.2% (rare by construction).
+    p = np.tile(np.array([0.40, 0.30, 0.299, 0.001]), (n, 1))
+    a = np.array([rng.choice(4, p=p[0]) for _ in range(n)], dtype=int)
+    rows = per_action_propensity_diagnostics(p, a, rare_action_floor=0.01)
+    # action 3 should be flagged both ways.
+    rare_flags = [r.rare for r in rows]
+    insuff_flags = [r.insufficient for r in rows]
+    assert rare_flags[3] is True, rare_flags
+    assert insuff_flags[3] is True, insuff_flags
+    # The other actions should not be flagged as rare.
+    assert not any(rare_flags[:3]), rare_flags
+
+
+def test_per_action_respects_target_support() -> None:
+    """Rare logged actions outside target support are not flagged as rare."""
+    rng = np.random.default_rng(44)
+    n = 1500
+    p = np.tile(np.array([0.40, 0.30, 0.299, 0.001]), (n, 1))
+    a = np.array([rng.choice(4, p=p[0]) for _ in range(n)], dtype=int)
+    # Target policy never picks action 3 → rarity is irrelevant.
+    target_actions = np.zeros(n, dtype=int)  # picks action 0 always
+    rows = per_action_propensity_diagnostics(
+        p, a, target_actions=target_actions, rare_action_floor=0.01
+    )
+    assert rows[3].rare is False, "rare-but-unused arm should not be flagged"
+    assert rows[3].insufficient is True, "but still insufficient (n_3 ≈ 1)"

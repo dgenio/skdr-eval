@@ -87,6 +87,8 @@ WARN_POOR_OVERLAP = "POOR_OVERLAP"
 WARN_LOW_MATCH_RATE = "LOW_MATCH_RATE"
 WARN_HIGH_PARETO_K = "HIGH_PARETO_K"  # #80 — PSIS Pareto-k > threshold
 WARN_MISCAL_PROP = "MISCAL_PROP"  # #84 — ECE above threshold
+WARN_PER_ACTION_MISCAL = "PER_ACTION_MISCAL"  # #131 — max per-action ECE above threshold
+WARN_RARE_ACTION_NO_SUPPORT = "RARE_ACTION_NO_SUPPORT"  # #131 — rare-and-insufficient action
 
 # Severity labels.
 SUPPORT_OK = "ok"
@@ -174,6 +176,9 @@ def _compute_row_warnings(
     n_samples: int,
     *,
     model_ece: float | None = None,
+    model_max_per_action_ece: float | None = None,
+    model_n_rare_actions: int | None = None,
+    model_n_insufficient_actions: int | None = None,
 ) -> tuple[list[str], str]:
     """Compute warning codes and severity for a single report row.
 
@@ -248,6 +253,28 @@ def _compute_row_warnings(
         elif ece > thresholds.miscal_ece:
             caution.append(WARN_MISCAL_PROP)
 
+    # PER_ACTION_MISCAL (#131): a single action's ECE blows past the global
+    # threshold even when the global ECE looks healthy. Threshold is the
+    # same ``miscal_ece``; per-action evidence is strictly *more* sensitive
+    # than the global signal so this fires when MISCAL_PROP would not.
+    if (
+        model_max_per_action_ece is not None
+        and np.isfinite(float(model_max_per_action_ece))
+    ):
+        per_ece = float(model_max_per_action_ece)
+        if per_ece > thresholds.miscal_ece * 2:
+            high.append(WARN_PER_ACTION_MISCAL)
+        elif per_ece > thresholds.miscal_ece:
+            caution.append(WARN_PER_ACTION_MISCAL)
+
+    # RARE_ACTION_NO_SUPPORT (#131): at least one target-support action with
+    # < _MIN_ACTION_COUNT_DISC samples in the logs. This is a *high_risk*
+    # signal because the IPS leg has no data to learn from.
+    rare = model_n_rare_actions or 0
+    insuff = model_n_insufficient_actions or 0
+    if rare > 0 and insuff > 0:
+        high.append(WARN_RARE_ACTION_NO_SUPPORT)
+
     # Stable order: LOW_ESS, EXTREME_CLIP, LOW_MATCH_RATE, POOR_OVERLAP,
     # HIGH_PARETO_K, MISCAL_PROP.  New codes append rather than interleave so
     # historical artifact diffs remain readable.
@@ -258,6 +285,8 @@ def _compute_row_warnings(
         WARN_POOR_OVERLAP,
         WARN_HIGH_PARETO_K,
         WARN_MISCAL_PROP,
+        WARN_PER_ACTION_MISCAL,
+        WARN_RARE_ACTION_NO_SUPPORT,
     ]
     codes = [c for c in code_order if c in caution or c in high]
 
@@ -276,6 +305,9 @@ def attach_warnings(
     thresholds: SupportHealthThresholds | None = None,
     *,
     model_ece: dict[str, float] | None = None,
+    model_per_action_ece: dict[str, float] | None = None,
+    model_n_rare_actions: dict[str, int] | None = None,
+    model_n_insufficient_actions: dict[str, int] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Attach ``support_health`` and ``diagnostic_warnings`` columns.
 
@@ -323,13 +355,23 @@ def attach_warnings(
         )
 
     ece_lookup = model_ece or {}
+    per_action_ece_lookup = model_per_action_ece or {}
+    rare_lookup = model_n_rare_actions or {}
+    insuff_lookup = model_n_insufficient_actions or {}
     severities: list[str] = []
     code_strings: list[str] = []
     warning_records: list[dict[str, Any]] = []
     for _, row in report.iterrows():
-        ece_val = ece_lookup.get(str(row["model"]))
+        model_key = str(row["model"])
+        ece_val = ece_lookup.get(model_key)
         codes, severity = _compute_row_warnings(
-            row.to_dict(), thresholds, n_samples, model_ece=ece_val
+            row.to_dict(),
+            thresholds,
+            n_samples,
+            model_ece=ece_val,
+            model_max_per_action_ece=per_action_ece_lookup.get(model_key),
+            model_n_rare_actions=rare_lookup.get(model_key),
+            model_n_insufficient_actions=insuff_lookup.get(model_key),
         )
         severities.append(severity)
         code_strings.append(",".join(codes))
@@ -2457,12 +2499,27 @@ def build_evaluation_artifact(
     """
     from . import __version__ as _pkg_version  # noqa: PLC0415
 
-    # Compute diagnostics first so MISCAL_PROP (#84) can read the ECE map.
+    # Compute diagnostics first so MISCAL_PROP (#84) and PER_ACTION_MISCAL /
+    # RARE_ACTION_NO_SUPPORT (#131) can read the per-model maps.
     sensitivity_df = summarize_sensitivity(detailed)
     diagnostics = _compute_diagnostics(propensities, actions, list(detailed.keys()))
     model_ece = {name: float(diag.ece) for name, diag in diagnostics.items()}
+    model_per_action_ece = {
+        name: float(diag.max_per_action_ece)
+        for name, diag in diagnostics.items()
+    }
+    model_n_rare = {name: int(diag.n_rare_actions) for name, diag in diagnostics.items()}
+    model_n_insuff = {
+        name: int(diag.n_insufficient_actions) for name, diag in diagnostics.items()
+    }
     enriched_report, warnings_df = attach_warnings(
-        report, n_samples, thresholds, model_ece=model_ece
+        report,
+        n_samples,
+        thresholds,
+        model_ece=model_ece,
+        model_per_action_ece=model_per_action_ece,
+        model_n_rare_actions=model_n_rare,
+        model_n_insufficient_actions=model_n_insuff,
     )
 
     metadata: dict[str, Any] = {

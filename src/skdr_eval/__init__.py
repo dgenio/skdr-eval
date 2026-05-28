@@ -30,7 +30,11 @@ from .core import (
     fit_propensity_timecal,
     induce_policy_from_sklearn,
 )
-from .diagnostics import PropensityDiagnostics
+from .diagnostics import (
+    PerActionDiagnostics,
+    PropensityDiagnostics,
+    per_action_propensity_diagnostics,
+)
 from .doctor import Check, DoctorReport, doctor
 from .estimators import (
     ClipTransform,
@@ -203,6 +207,7 @@ __all__ = [
     "OutcomeModelError",
     "PairwiseDesign",
     "PairwiseEvaluationError",
+    "PerActionDiagnostics",
     "PolicyInductionError",
     "PropensityDiagnostics",
     "PropensityScoreError",
@@ -258,6 +263,7 @@ __all__ = [
     "merge_configs",
     "mips_value",
     "multiple_comparison_correction",
+    "per_action_propensity_diagnostics",
     "permutation_test",
     "power_analysis",
     "pseudo_inverse_ips",
