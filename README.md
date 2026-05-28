@@ -6,7 +6,42 @@
 [![Coverage](https://codecov.io/gh/dgenio/skdr-eval/branch/main/graph/badge.svg)](https://codecov.io/gh/dgenio/skdr-eval)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**General-purpose offline policy evaluation (OPE) for sklearn-compatible models, with time-aware Doubly Robust (DR) and Stabilized Doubly Robust (SNDR) estimators, calibrated propensities, PSIS support-health, and a stakeholder evaluation card you can hand to a PM.**
+**You trained a better recommender, routing model, treatment rule, or targeting
+policy. Offline metrics look good — but deploying it directly is risky.**
+`skdr-eval` estimates how that candidate policy *would have* performed on your
+logged decisions, and tells you whether the logs have enough support to trust
+the estimate before you spend an A/B test on it.
+
+```text
+logged decisions (context, action, outcome, time)  +  candidate sklearn-like policy
+                              │
+                              ▼
+            offline policy evaluation  (DR / SNDR)
+                              │
+                              ▼
+   trust diagnostics  (support-health · overlap · ESS · Pareto-k · calibration · sensitivity)
+                              │
+                              ▼
+        decision artifact  (HTML report · machine-readable card)
+```
+
+```bash
+pip install skdr-eval
+```
+
+> **Use this when:** you have logged `(context, action, reward)` decisions, a
+> candidate policy you can wrap behind `fit`/`predict`, and you want a
+> trustworthy pre-A/B-test read on it.
+>
+> **Do not use this when:** your problem is sequential / reinforcement learning
+> (reach for [SCOPE-RL or d3rlpy](docs/comparisons.md)), or your logs have no
+> overlap with what the candidate would do — no OPE method can rescue that, and
+> `skdr-eval` will say so via `support_health = high_risk` rather than return a
+> confident number.
+
+Doubly Robust (DR) and Stabilized DR (SNDR) are the estimators under the hood;
+you do not need to know the math to read the result. Full positioning vs. other
+OPE/RL libraries: [`docs/comparisons.md`](docs/comparisons.md).
 
 Try it in your browser — no install needed:
 
@@ -22,7 +57,13 @@ Try it in your browser — no install needed:
 
 `skdr-eval` is a Python library for **offline policy evaluation** — estimating how well a candidate decision policy would have performed *from logged data alone*, without deploying it. It implements Doubly Robust (DR) and Stabilized Doubly Robust (SNDR) estimators on top of `scikit-learn`-protocol models, with first-class support for time-correlated logs, calibrated propensities, moving-block bootstrap confidence intervals, and a single bundled `EvaluationArtifact` that exposes per-decision diagnostics, clip-grid sensitivity, PSIS Pareto-k support-health, propensity calibration (ECE / Brier), and a renderable HTML stakeholder card.
 
-It started life as an internal tool for call-routing / service-time minimization (and still ships a pairwise / autoscaling layer for that use case), but the underlying machinery is general-purpose contextual-bandit OPE.
+It started life as an internal tool for call-routing / service-time minimization (and still ships a pairwise / autoscaling layer for that use case), but the underlying machinery applies to contextual-bandit OPE generally — wherever you have logged one-shot decisions and a sklearn-compatible candidate policy.
+
+Under standard OPE assumptions (unconfoundedness, overlap, a stable
+data-generating process, and useful nuisance models), `skdr-eval` produces an
+*estimate plus trust diagnostics* — not a guarantee. The diagnostics are signals
+that help you decide whether an estimate is worth acting on; they do not prove
+it is correct, and offline evaluation does not replace online validation.
 
 ## When should I use this?
 
@@ -43,11 +84,50 @@ Typical use cases:
 
 If you need *slate* / top-K ranking estimators (Cascade-DR, Reward-Interaction IPS) or *MIPS* for very large action spaces, those are tracked on the roadmap (#75, #85) but not yet shipped.
 
+**When *not* to use it:**
+
+- Your problem is **sequential / reinforcement learning** (state transitions,
+  long horizons) — use [SCOPE-RL or d3rlpy](docs/comparisons.md) instead.
+- You need a wide bank of research estimators or to reproduce published bandit
+  benchmarks — [Open Bandit Pipeline](docs/comparisons.md) is the reference.
+- Your logs have **no overlap** with what the candidate policy would do; no OPE
+  method can fix that, and `skdr-eval` will flag it as `high_risk` rather than
+  hand you a confident number.
+
+See [`docs/comparisons.md`](docs/comparisons.md) for an honest, side-by-side
+comparison against OBP, SCOPE-RL, d3rlpy, and banditml.
+
+## First 10 minutes: understand what skdr-eval does
+
+If the purpose is not obvious yet, follow this path — it mirrors how the
+library actually gets used, and it does not require reading any theory first:
+
+1. **Run the quickstart notebook**
+   ([`01_quickstart.ipynb`](examples/notebooks/01_quickstart.ipynb), or click
+   the Colab badge above). Watch historical logs + candidate models turn into
+   an `EvaluationArtifact`. Notice `artifact.report`, `support_health`, the
+   warnings, and the exported card.
+2. **Open the generated report / card** and ask *"is this estimate trustworthy
+   enough to discuss?"*. The
+   [report interpretation guide](docs/report-interpretation.md) walks you from
+   the HTML output to an actual decision.
+3. **Reach for the [metrics glossary](docs/metrics-glossary.md) only when a
+   field is unclear** — `V_hat`, `ESS`, `pareto_k`, `support_health`, the
+   warning codes. Don't force yourself through theory before the
+   job-to-be-done makes sense.
+4. **Then choose your path:** standard contextual-bandit evaluation, the
+   pairwise / call-routing / autoscaling API, or a domain use case under
+   [`examples/use_cases/`](examples/use_cases/). To *see* the difference
+   between healthy and unhealthy support, run the
+   [known-failure demos](examples/known_failures/README.md).
+
 ## Where to start
 
 - **Just want to see it work?** Click any "Open in Colab" badge above.
+- **First time here?** Follow [First 10 minutes](#first-10-minutes-understand-what-skdr-eval-does) above.
 - **Have logs already?** Skim [Quick Start](#quick-start) below; the standard / pairwise variants are both two screens long.
-- **Comparing against another OPE library?** See [`docs/methods.md`](docs/methods.md) for the positioning vs. Open Bandit Pipeline / SCOPE-RL / banditml.
+- **Got a report and not sure what it means?** Read the [report interpretation guide](docs/report-interpretation.md) and the [metrics glossary](docs/metrics-glossary.md).
+- **Comparing against another OPE library?** See [`docs/comparisons.md`](docs/comparisons.md) for OBP / SCOPE-RL / d3rlpy / banditml, and [`docs/methods.md`](docs/methods.md) for the methodological positioning.
 - **Looking for end-to-end examples by domain?** Browse [`examples/use_cases/`](examples/use_cases/) for runnable scripts (e-commerce ranking, ad targeting, healthcare CATE, call routing).
 
 > The `skdr-eval` CLI (`pip install 'skdr-eval[cli]'`) makes the same
@@ -57,6 +137,7 @@ If you need *slate* / top-K ranking estimators (Cascade-DR, Reward-Interaction I
 
 ## Table of Contents
 
+- [First 10 minutes](#first-10-minutes-understand-what-skdr-eval-does)
 - [Features](#features)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
@@ -76,7 +157,7 @@ If you need *slate* / top-K ranking estimators (Cascade-DR, Reward-Interaction I
 - ⏰ **Time-Aware Evaluation**: Uses time-series splits and calibrated propensity scores
 - 🔧 **Sklearn Integration**: Easy integration with scikit-learn models
 - 📊 **Comprehensive Diagnostics**: ESS, match rates, propensity score analysis
-- 🚀 **Production Ready**: Type-hinted, tested, and documented
+- 🧰 **Engineered for reuse**: Fully type-hinted, tested, and documented (offline evaluation does not replace online validation)
 - 📈 **Bootstrap Confidence Intervals**: Moving-block bootstrap for time-series data
 - 🤝 **Pairwise Evaluation**: Client-operator pairwise evaluation with autoscaling strategies
 - 🎛️ **Autoscaling**: Direct, stream, and stream_topk strategies with policy induction

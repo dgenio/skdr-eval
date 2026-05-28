@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "skdr-eval"
 dynamic = ["version"]
-description = "General-purpose offline policy evaluation for sklearn-compatible models with time-aware Doubly Robust (DR) and Stabilized DR (SNDR) estimators, calibrated propensities, and stakeholder evaluation cards"
+description = "Practitioner-focused offline policy evaluation for sklearn-compatible contextual-bandit policies, with time-aware Doubly Robust (DR) and Stabilized DR (SNDR) estimators, calibrated propensities, trust diagnostics, and stakeholder evaluation cards"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
