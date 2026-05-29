@@ -11,6 +11,7 @@ masking.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -18,6 +19,67 @@ import numpy as np
 
 if TYPE_CHECKING:
     from .protocols import TransformContext, WeightTransform
+
+# A user-supplied kernel maps the ``(n_actions, embed_dim)`` embedding to a
+# ``(n_actions, n_actions)`` similarity matrix; it is row-normalised by
+# :class:`MIPSTransform` before use, so it need not be normalised itself.
+EmbeddingKernel = Callable[[np.ndarray], np.ndarray]
+
+# An action embedding is ``(n_actions, embed_dim)``; the median heuristic needs
+# at least two actions to have any pairwise distance.
+_EMBED_NDIM = 2
+_MIN_ACTIONS_FOR_MEDIAN = 2
+# Above this many actions, materialising the full ``(n_actions, n_actions)``
+# pairwise-distance matrix becomes prohibitively expensive (O(n_actions^2)
+# memory/time), so the median heuristic switches to an unbiased subsample of
+# random action pairs. ~2k actions ≈ 2M pairs is the largest exact pass we run.
+_MEDIAN_EXACT_MAX_ACTIONS = 2048
+# Number of random action pairs sampled to approximate the median above the cap.
+_MEDIAN_SUBSAMPLE_PAIRS = 200_000
+
+
+def median_bandwidth(
+    embedding: np.ndarray,
+    *,
+    max_exact_actions: int = _MEDIAN_EXACT_MAX_ACTIONS,
+    sample_pairs: int = _MEDIAN_SUBSAMPLE_PAIRS,
+    random_state: int = 0,
+) -> float:
+    """Median-heuristic RBF bandwidth for an action embedding.
+
+    Returns the median of the pairwise Euclidean distances between distinct
+    action embeddings — the standard "median heuristic" for kernel bandwidth
+    selection. Degenerate inputs (a single action, or all-coincident
+    embeddings) fall back to ``1.0`` so the kernel stays well-defined.
+
+    For action spaces with more than ``max_exact_actions`` actions — a common
+    case for MIPS — the exact pairwise-distance matrix is ``O(n_actions^2)`` in
+    memory and time and can OOM. Above the cap the median is estimated from
+    ``sample_pairs`` random action pairs (seeded by ``random_state`` for
+    reproducibility), which keeps runtime and memory bounded with negligible
+    impact on the heuristic.
+    """
+    emb = np.asarray(embedding, dtype=np.float64)
+    if emb.ndim != _EMBED_NDIM or emb.shape[0] < _MIN_ACTIONS_FOR_MEDIAN:
+        return 1.0
+    n_actions = emb.shape[0]
+    if n_actions <= max_exact_actions:
+        sq = np.sum(emb * emb, axis=1, keepdims=True)
+        d2 = np.maximum(sq + sq.T - 2.0 * emb @ emb.T, 0.0)
+        iu = np.triu_indices(n_actions, k=1)
+        dists = np.sqrt(d2[iu])
+    else:
+        rng = np.random.default_rng(random_state)
+        i = rng.integers(0, n_actions, size=sample_pairs)
+        j = rng.integers(0, n_actions, size=sample_pairs)
+        distinct = i != j
+        diff = emb[i[distinct]] - emb[j[distinct]]
+        dists = np.sqrt(np.einsum("ij,ij->i", diff, diff))
+    positive = dists[dists > 0]
+    if positive.size == 0:
+        return 1.0
+    return float(np.median(positive))
+
 
 __all__ = [
     "ClipTransform",
@@ -148,11 +210,20 @@ class MIPSTransform:
         Per-action embedding. The embedding must encode the actions' relevant
         sufficient statistics (skill vectors, capacity, role one-hots).
     bandwidth : float, default 1.0
-        Gaussian-kernel bandwidth. ``inf`` collapses to a uniform kernel
-        (every action equally relevant — pure marginalisation). Small values
-        collapse back to per-action IPS.
+        Gaussian-kernel bandwidth (used by the ``"rbf"`` kernel). ``inf``
+        collapses to a uniform kernel (every action equally relevant — pure
+        marginalisation). Small values collapse back to per-action IPS. Ignored
+        by the ``"linear"`` and callable kernels. Resolve the median heuristic
+        upstream (see :func:`median_bandwidth`) and pass the resulting float.
     clip : float, default ``float("inf")``
         Optional top-side clip on the marginalised weight.
+    kernel : {"rbf", "linear"} or callable, default ``"rbf"``
+        Embedding similarity kernel. ``"rbf"`` is the Gaussian kernel above;
+        ``"linear"`` uses the non-negative part of the dot-product similarity
+        ``max(<E_i, E_j>, 0)``; a callable receives the ``(n_actions,
+        embed_dim)`` embedding and must return a non-negative ``(n_actions,
+        n_actions)`` similarity matrix. All kernels are row-normalised to form
+        the embedding-marginal probability.
 
     Notes
     -----
@@ -166,6 +237,7 @@ class MIPSTransform:
     action_embedding: np.ndarray
     bandwidth: float = 1.0
     clip: float = float("inf")
+    kernel: str | EmbeddingKernel = "rbf"
     name: str = "mips"
 
     _EXPECTED_NDIM = 2  # (n_actions, embed_dim)
@@ -175,21 +247,50 @@ class MIPSTransform:
             raise ValueError(
                 f"action_embedding must be 2D, got ndim={self.action_embedding.ndim}"
             )
-        if self.bandwidth <= 0:
+        if isinstance(self.kernel, str) and self.kernel not in {"rbf", "linear"}:
+            raise ValueError(
+                f"kernel must be 'rbf', 'linear', or a callable, got {self.kernel!r}"
+            )
+        # Bandwidth only constrains the RBF kernel; linear / callable ignore it.
+        if self.kernel == "rbf" and self.bandwidth <= 0:
             raise ValueError(
                 f"bandwidth must be > 0, got {self.bandwidth!r} "
                 "(use float('inf') for a uniform kernel)"
             )
 
+    @staticmethod
+    def _row_normalise(k: np.ndarray) -> np.ndarray:
+        """Row-normalise a non-negative similarity matrix to row-stochastic."""
+        row_sum = k.sum(axis=1, keepdims=True)
+        row_sum = np.where(row_sum > 0, row_sum, 1.0)
+        return cast("np.ndarray", k / row_sum)
+
     def _embedding_kernel(self) -> np.ndarray:
         """Pairwise row-normalised kernel matrix ``K[i, j] = k(E_i, E_j)``."""
         emb = self.action_embedding.astype(np.float64)
+        n_actions = emb.shape[0]
+
+        if callable(self.kernel):
+            k = np.asarray(self.kernel(emb), dtype=np.float64)
+            if k.shape != (n_actions, n_actions):
+                raise ValueError(
+                    f"callable kernel returned shape {k.shape}; expected "
+                    f"({n_actions}, {n_actions})"
+                )
+            if np.any(k < 0):
+                raise ValueError("callable kernel returned negative similarities")
+            return self._row_normalise(k)
+
+        if self.kernel == "linear":
+            # Non-negative dot-product similarity, row-normalised.
+            k = np.maximum(emb @ emb.T, 0.0)
+            return self._row_normalise(k)
+
+        # "rbf"
         if not np.isfinite(self.bandwidth):
             # Uniform kernel — every action equally relevant; collapses to
             # marginalising over the entire action set.
-            n_actions = emb.shape[0]
-            kernel = np.full((n_actions, n_actions), 1.0 / n_actions)
-            return kernel
+            return np.full((n_actions, n_actions), 1.0 / n_actions)
         # Squared Euclidean distance, exp-decayed.
         sq = np.sum(emb * emb, axis=1, keepdims=True)
         d2 = sq + sq.T - 2.0 * emb @ emb.T
@@ -198,10 +299,7 @@ class MIPSTransform:
         # for the practical bandwidths users will pass; clip for safety.
         denom = max(2.0 * self.bandwidth**2, np.finfo(np.float64).tiny)
         k = np.exp(-d2 / denom)
-        # Row-normalise so each row sums to 1 — embedding-marginal probability.
-        row_sum = k.sum(axis=1, keepdims=True)
-        row_sum = np.where(row_sum > 0, row_sum, 1.0)
-        return cast("np.ndarray", k / row_sum)
+        return self._row_normalise(k)
 
     def __call__(self, context: TransformContext) -> np.ndarray:
         n, n_actions = context.policy_probs.shape

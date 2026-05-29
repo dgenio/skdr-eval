@@ -17,9 +17,11 @@ import numpy as np
 from .core import dr_value_with_strategy
 from .outcome_losses import MSEOutcomeLoss
 from .protocols import EstimatorStrategy
-from .weight_transforms import MIPSTransform
+from .weight_transforms import MIPSTransform, median_bandwidth
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ..core import DRResult
 
 __all__ = [
@@ -65,18 +67,33 @@ def mips_value(
     A: np.ndarray,
     elig: np.ndarray,
     action_embedding: np.ndarray,
-    bandwidth: float = 1.0,
+    bandwidth: float | str = 1.0,
     clip: float = float("inf"),
+    kernel: str | Callable[[np.ndarray], np.ndarray] = "rbf",
 ) -> DRResult:
     """Convenience wrapper around :func:`dr_value_with_strategy` for MIPS.
 
     Parameters mirror ``dr_value_with_clip``; ``action_embedding`` is the
     extra MIPS-specific input.
+
+    ``kernel`` selects the embedding similarity kernel (``"rbf"`` | ``"linear"``
+    | callable). ``bandwidth`` is the RBF bandwidth; pass ``"median"`` to
+    resolve it via the median heuristic on ``action_embedding``.
     """
+    emb = np.asarray(action_embedding, dtype=np.float64)
+    if isinstance(bandwidth, str):
+        if bandwidth != "median":
+            raise ValueError(f"bandwidth string must be 'median', got {bandwidth!r}")
+        resolved_bandwidth = median_bandwidth(emb)
+    else:
+        resolved_bandwidth = float(bandwidth)
     strategy = EstimatorStrategy(
         name="MIPS",
         weight_transform=MIPSTransform(
-            action_embedding=action_embedding, bandwidth=bandwidth, clip=clip
+            action_embedding=emb,
+            bandwidth=resolved_bandwidth,
+            clip=clip,
+            kernel=kernel,
         ),
         outcome_loss=MSEOutcomeLoss(),
         self_normalised=False,

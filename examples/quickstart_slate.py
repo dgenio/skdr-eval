@@ -1,7 +1,10 @@
-"""Quickstart: slate / top-K off-policy estimators (#75).
+"""Quickstart: slate / top-K off-policy estimators (#75, #135).
 
 Demonstrates the four ranking-OPE estimators on a synthetic cascade-click
-dataset:
+dataset and the top-level :func:`evaluate_slate_models` entry point (#135),
+which bundles them into an ``EvaluationArtifact`` with support-health warnings,
+a sensitivity summary, and a renderable card — the same surface you get from
+:func:`evaluate_sklearn_models`.
 
 * :func:`slate_standard_ips`
 * :func:`reward_interaction_ips`
@@ -57,6 +60,20 @@ def main() -> None:
     print(f"Ground truth (logging) V*: {truth.V_logging:.4f}")
     for r in (res_ips, res_rips, res_pi, res_dr):
         print(f"  {r.name:18s}: V_hat={r.V_hat:.4f} ± {r.SE:.4f} (ESS={r.ESS:.1f})")
+
+    # Top-level entry point (#135): one call, full EvaluationArtifact surface.
+    artifact = skdr_eval.evaluate_slate_models(
+        logs,
+        models={"uniform_rerank": uniform_target_per_rank},
+        estimators=("RIPS", "PI-IPS", "SlateCascadeDR"),
+        baseline="logging",
+    )
+    print("\nevaluate_slate_models report:")
+    print(
+        artifact.report[
+            ["model", "estimator", "V_hat", "SE_if", "ESS", "support_health"]
+        ].to_string(index=False)
+    )
 
 
 if __name__ == "__main__":

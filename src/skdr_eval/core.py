@@ -1205,6 +1205,75 @@ def _canonical_estimator_name(name: str) -> str:
     )
 
 
+def _resolve_action_embedding(
+    action_embedding: "np.ndarray | str | None",
+    logs: pd.DataFrame,
+    actions: np.ndarray,
+    n_actions: int,
+    *,
+    allow_column_name: bool = True,
+) -> np.ndarray | None:
+    """Resolve ``action_embedding`` to an ``(n_actions, embed_dim)`` array (#136).
+
+    Accepts three forms:
+
+    * ``None`` — returned unchanged (MIPS then falls back to SNDR).
+    * ``np.ndarray`` — validated to be 2D and returned as float64.
+    * ``str`` — a column name in ``logs`` holding a per-row embedding vector.
+      Action-level embeddings are reconstructed by averaging each action's
+      logged row embeddings, which is exact when the embedding is a fixed
+      per-action feature and robust (mean) when it carries per-row noise.
+    """
+    if action_embedding is None:
+        return None
+    if isinstance(action_embedding, str):
+        if not allow_column_name:
+            raise DataValidationError(
+                "action_embedding column names are not supported for the "
+                "pairwise evaluator: the action index 'A' is a day-relative "
+                "operator index, so averaging logged-row embeddings by it would "
+                "mix different operators across days and silently produce "
+                "incorrect per-action embeddings. Pass an explicit "
+                "(n_actions, embed_dim) array in the same action-indexing "
+                "scheme as 'A'/'policy_probs' instead."
+            )
+        if action_embedding not in logs.columns:
+            raise DataValidationError(
+                f"action_embedding column {action_embedding!r} not found in logs; "
+                f"available columns: {list(logs.columns)}"
+            )
+        rows = [np.asarray(v, dtype=np.float64).ravel() for v in logs[action_embedding]]
+        if len(rows) != len(actions):
+            raise DataValidationError(
+                f"action_embedding column {action_embedding!r} has {len(rows)} rows "
+                f"but the evaluated design has {len(actions)} logged rows; pass an "
+                "(n_actions, embed_dim) array instead when the row alignment is "
+                "ambiguous (e.g. the pairwise path)."
+            )
+        widths = {r.shape[0] for r in rows}
+        if len(widths) != 1:
+            raise DataValidationError(
+                f"action_embedding column {action_embedding!r} has ragged vectors "
+                f"with widths {sorted(widths)}; every row must share one embed_dim."
+            )
+        per_row = np.asarray(rows, dtype=np.float64)
+        embed_dim = per_row.shape[1]
+        emb = np.zeros((n_actions, embed_dim), dtype=np.float64)
+        a_int = np.asarray(actions).astype(int)
+        for a in range(n_actions):
+            sel = per_row[a_int == a]
+            if sel.shape[0] > 0:
+                emb[a] = sel.mean(axis=0)
+        return emb
+    arr = np.asarray(action_embedding, dtype=np.float64)
+    if arr.ndim != _PER_ACTION_NDIM:
+        raise DataValidationError(
+            f"action_embedding array must be 2D (n_actions, embed_dim), got "
+            f"ndim={arr.ndim}"
+        )
+    return arr
+
+
 def _apply_extra_estimators(
     *,
     estimators: tuple[str, ...],
@@ -1219,7 +1288,8 @@ def _apply_extra_estimators(
     action_embedding: np.ndarray | None,
     switch_tau: float,
     dros_lam: float,
-    mips_bandwidth: float,
+    mips_bandwidth: float | str,
+    mips_kernel: "str | Callable[[np.ndarray], np.ndarray]",
     outcome_estimator: "str | Callable[[], Any]",
     n_splits: int,
     random_state: int,
@@ -1236,10 +1306,13 @@ def _apply_extra_estimators(
     so the operating point stays consistent with the base run.
     """
     from .estimators import (  # noqa: PLC0415
+        MSEOutcomeLoss,
         build_strategy,
         dr_value_with_strategy,
         embedding_sufficiency_diagnostic,
     )
+    from .estimators.protocols import EstimatorStrategy  # noqa: PLC0415
+    from .estimators.weight_transforms import ClipTransform  # noqa: PLC0415
 
     extras: dict[str, DRResult] = {}
     # MRDR uses a sample-weighted outcome refit; defer the refit until we
@@ -1258,11 +1331,37 @@ def _apply_extra_estimators(
         if canonical in {"DR", "SNDR"}:
             continue
         if canonical == "MIPS" and action_embedding is None:
-            raise ValueError(
+            # #136 / #85: graceful fallback to SNDR with a clear warning rather
+            # than a hard failure. The MIPS row in the report carries the SNDR
+            # value so the report stays rectangular and the user is told why.
+            warnings.warn(
                 "MIPS estimator was requested but action_embedding= was not "
-                "supplied to evaluate_sklearn_models / evaluate_pairwise_models. "
-                "Pass an (n_actions, embed_dim) array via action_embedding=."
+                "supplied; falling back to SNDR for the 'MIPS' row. Pass an "
+                "(n_actions, embed_dim) array (or a logs column name) via "
+                "action_embedding= to compute true MIPS.",
+                UserWarning,
+                stacklevel=2,
             )
+            fallback = EstimatorStrategy(
+                name="MIPS",
+                weight_transform=ClipTransform(
+                    clip=float(selected_clip)
+                    if np.isfinite(selected_clip)
+                    else float("inf")
+                ),
+                outcome_loss=MSEOutcomeLoss(),
+                self_normalised=True,
+            )
+            extras["MIPS"] = dr_value_with_strategy(
+                propensities=propensities,
+                policy_probs=policy_probs,
+                Y=Y,
+                q_hat=q_hat,
+                A=A,
+                elig=elig,
+                strategy=fallback,
+            )
+            continue
 
         strategy = build_strategy(
             canonical,
@@ -1271,6 +1370,7 @@ def _apply_extra_estimators(
             lam=dros_lam,
             action_embedding=action_embedding,
             bandwidth=mips_bandwidth,
+            kernel=mips_kernel,
         )
 
         if canonical == "MRDR":
@@ -1579,10 +1679,11 @@ def evaluate_sklearn_models(
     keep_contributions: bool = False,
     max_kept_contributions: int = DEFAULT_MAX_KEPT_CONTRIBUTIONS,
     estimators: tuple[str, ...] = ("DR", "SNDR"),
-    action_embedding: np.ndarray | None = None,
+    action_embedding: "np.ndarray | str | None" = None,
     switch_tau: float = 5.0,
     dros_lam: float = 1.0,
-    mips_bandwidth: float = 1.0,
+    mips_bandwidth: float | str = 1.0,
+    mips_kernel: "str | Callable[[np.ndarray], np.ndarray]" = "rbf",
     tracker: "Tracker | None" = None,
     baseline: float | str | None = None,
 ) -> "EvaluationArtifact":
@@ -1698,6 +1799,12 @@ def evaluate_sklearn_models(
 
     # Build design
     design = build_design(logs, y_col=y_col)
+
+    # Resolve a column-name embedding to an action-level array up front (#136),
+    # using the full design so every action's embedding is covered.
+    resolved_action_embedding = _resolve_action_embedding(
+        action_embedding, logs, design.A, int(design.elig.shape[1])
+    )
 
     # Split data for policy training if needed
     if policy_train == "pre_split":
@@ -1827,10 +1934,11 @@ def evaluate_sklearn_models(
             elig=eval_design.elig,
             X_obs=eval_design.X_obs,
             selected_clip=dr_selected_clip,
-            action_embedding=action_embedding,
+            action_embedding=resolved_action_embedding,
             switch_tau=switch_tau,
             dros_lam=dros_lam,
             mips_bandwidth=mips_bandwidth,
+            mips_kernel=mips_kernel,
             outcome_estimator=outcome_estimator,
             n_splits=n_splits,
             random_state=random_state,
@@ -2375,10 +2483,11 @@ def evaluate_pairwise_models(
     keep_contributions: bool = False,
     max_kept_contributions: int = DEFAULT_MAX_KEPT_CONTRIBUTIONS,
     estimators: tuple[str, ...] = ("DR", "SNDR"),
-    action_embedding: np.ndarray | None = None,
+    action_embedding: "np.ndarray | str | None" = None,
     switch_tau: float = 5.0,
     dros_lam: float = 1.0,
-    mips_bandwidth: float = 1.0,
+    mips_bandwidth: float | str = 1.0,
+    mips_kernel: "str | Callable[[np.ndarray], np.ndarray]" = "rbf",
     tracker: "Tracker | None" = None,
     baseline: float | str | None = None,
 ) -> "EvaluationArtifact":
@@ -2800,10 +2909,17 @@ def evaluate_pairwise_models(
                 elig=elig,
                 X_obs=X_obs,
                 selected_clip=dr_selected_clip,
-                action_embedding=action_embedding,
+                action_embedding=_resolve_action_embedding(
+                    action_embedding,
+                    logs_df,
+                    A,
+                    int(elig.shape[1]),
+                    allow_column_name=False,
+                ),
                 switch_tau=switch_tau,
                 dros_lam=dros_lam,
                 mips_bandwidth=mips_bandwidth,
+                mips_kernel=mips_kernel,
                 outcome_estimator=outcome_estimator,
                 n_splits=n_splits,
                 random_state=random_state,

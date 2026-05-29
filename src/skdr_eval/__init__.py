@@ -52,6 +52,7 @@ from .estimators import (
     build_strategy,
     dr_value_with_strategy,
     embedding_sufficiency_diagnostic,
+    median_bandwidth,
     mips_value,
 )
 from .exceptions import (
@@ -112,6 +113,7 @@ from .reporting import (
 from .slate import (
     SlateGroundTruth,
     SlateResult,
+    evaluate_slate_models,
     make_slate_synth,
     pseudo_inverse_ips,
     reward_interaction_ips,
@@ -245,6 +247,7 @@ __all__ = [
     "evaluate_pairwise_models",
     "evaluate_propensity_diagnostics",
     "evaluate_sklearn_models",
+    "evaluate_slate_models",
     "export_results",
     "fit_outcome_crossfit",
     "fit_propensity_timecal",
@@ -260,6 +263,7 @@ __all__ = [
     "make_slate_synth",
     "make_synth_logs",
     "mann_whitney_u_test",
+    "median_bandwidth",
     "merge_configs",
     "mips_value",
     "multiple_comparison_correction",
