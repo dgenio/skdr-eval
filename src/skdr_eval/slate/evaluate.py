@@ -47,6 +47,10 @@ SlatePerRankPolicy = Callable[[int, int], float]
 
 _SUPPORTED_ESTIMATORS = ("SlateStandardIPS", "RIPS", "PI-IPS", "SlateCascadeDR")
 
+# Cross-fitting the Cascade-DR outcome model needs at least two impressions so
+# there is something to hold out; below this we fall back to the in-sample table.
+_MIN_IMPRESSIONS_FOR_CROSSFIT = 2
+
 
 def _slate_level_weights(
     logs: pd.DataFrame,
@@ -79,26 +83,65 @@ def _slate_level_weights(
 
 
 def _empirical_q_hat_per_rank(
-    logs: pd.DataFrame, slate_size: int, n_items: int
+    logs: pd.DataFrame,
+    slate_size: int,
+    n_items: int,
+    *,
+    n_folds: int = 5,
+    random_state: int = 0,
 ) -> np.ndarray:
-    """Position-by-item empirical click-rate table broadcast over impressions.
+    """Cross-fitted position-by-item empirical click-rate outcome model.
 
-    Builds ``q̂[i, k, j] = mean click at rank k for item j`` (a simple direct
+    Builds ``q̂[i, k, j] ≈ mean click at rank k for item j`` (a simple direct
     method) so Cascade-DR has an informative outcome model without requiring
     the caller to supply one.
+
+    The table is **cross-fitted**: impressions are partitioned into ``n_folds``
+    folds and each impression's outcome table is estimated from the *other*
+    folds only. This keeps the Cascade-DR residual correction out-of-sample, so
+    the DR estimate carries no in-sample optimism from fitting and evaluating
+    q̂ on the same rows. Cells with no out-of-fold support fall back to ``0``.
+    With fewer than two impressions there is nothing to hold out, so the full
+    in-sample table is returned.
     """
     slates = np.asarray([list(map(int, s)) for s in logs["slate"]], dtype=np.int64)
     clicks = np.asarray([list(map(float, c)) for c in logs["clicks"]], dtype=np.float64)
-    click_sum = np.zeros((slate_size, n_items), dtype=np.float64)
-    click_cnt = np.zeros((slate_size, n_items), dtype=np.float64)
-    for k in range(slate_size):
-        np.add.at(click_sum[k], slates[:, k], clicks[:, k])
-        np.add.at(click_cnt[k], slates[:, k], 1.0)
-    rate = np.divide(
-        click_sum, click_cnt, out=np.zeros_like(click_sum), where=click_cnt > 0
-    )
     n = slates.shape[0]
-    return np.broadcast_to(rate[None, :, :], (n, slate_size, n_items)).copy()
+    q_hat = np.zeros((n, slate_size, n_items), dtype=np.float64)
+    if n == 0:
+        return q_hat
+
+    def _rate(click_sum: np.ndarray, click_cnt: np.ndarray) -> np.ndarray:
+        return np.divide(
+            click_sum, click_cnt, out=np.zeros_like(click_sum), where=click_cnt > 0
+        )
+
+    total_sum = np.zeros((slate_size, n_items), dtype=np.float64)
+    total_cnt = np.zeros((slate_size, n_items), dtype=np.float64)
+    for k in range(slate_size):
+        np.add.at(total_sum[k], slates[:, k], clicks[:, k])
+        np.add.at(total_cnt[k], slates[:, k], 1.0)
+
+    if n < _MIN_IMPRESSIONS_FOR_CROSSFIT:  # nothing to hold out — use full table.
+        rate = _rate(total_sum, total_cnt)
+        return np.broadcast_to(rate[None, :, :], (n, slate_size, n_items)).copy()
+
+    k_folds = min(n_folds, n)
+    rng = np.random.default_rng(random_state)
+    fold_of = rng.integers(0, k_folds, size=n)
+    for f in range(k_folds):
+        in_fold = fold_of == f
+        rows = np.flatnonzero(in_fold)
+        if rows.size == 0:
+            continue
+        # Out-of-fold table = global counts minus this fold's counts.
+        fold_sum = np.zeros((slate_size, n_items), dtype=np.float64)
+        fold_cnt = np.zeros((slate_size, n_items), dtype=np.float64)
+        for k in range(slate_size):
+            np.add.at(fold_sum[k], slates[in_fold, k], clicks[in_fold, k])
+            np.add.at(fold_cnt[k], slates[in_fold, k], 1.0)
+        q_hat[rows] = _rate(total_sum - fold_sum, total_cnt - fold_cnt)
+    return q_hat
 
 
 def _slate_result_to_drresult(
@@ -252,7 +295,7 @@ def evaluate_slate_models(
         n_items = int(max(max(s) for s in slates)) + 1
 
     q_hat_per_rank = (
-        _empirical_q_hat_per_rank(logs, slate_size, n_items)
+        _empirical_q_hat_per_rank(logs, slate_size, n_items, random_state=random_state)
         if "SlateCascadeDR" in estimators
         else None
     )

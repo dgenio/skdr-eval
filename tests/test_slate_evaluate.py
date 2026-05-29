@@ -9,11 +9,13 @@ Cascade-DR's value tracks the synthetic oracle target.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from skdr_eval.exceptions import DataValidationError
 from skdr_eval.reporting import EvaluationArtifact
 from skdr_eval.slate import evaluate_slate_models, make_slate_synth
+from skdr_eval.slate.evaluate import _empirical_q_hat_per_rank
 
 
 def _uniform_policy(n_items: int):
@@ -158,3 +160,22 @@ def test_baseline_sentinel_is_logged_and_rejects_unknown() -> None:
             estimators=("RIPS",),
             baseline="logging",
         )
+
+
+def test_cascade_dr_qhat_is_cross_fitted_out_of_sample() -> None:
+    """The empirical Cascade-DR outcome model is cross-fitted: an impression's
+    q̂ is estimated from the *other* folds only. When every item is observed by
+    exactly one impression, each item's out-of-fold support is empty, so the
+    cross-fitted q̂ for that cell is 0 — whereas an in-sample table would leak
+    the impression's own click (1.0) back into its own prediction."""
+    n = 12
+    logs = pd.DataFrame(
+        {
+            "slate": [[i] for i in range(n)],  # each impression shows a unique item
+            "clicks": [[1.0] for _ in range(n)],
+        }
+    )
+    q_hat = _empirical_q_hat_per_rank(logs, slate_size=1, n_items=n, random_state=0)
+    # Out-of-sample => no leakage of the row's own click into its own q̂.
+    for i in range(n):
+        assert q_hat[i, 0, i] == 0.0
