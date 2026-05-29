@@ -182,18 +182,25 @@ class TestEvaluateSklearnExtraEstimators:
         names = set(art.report["estimator"].unique())
         assert {"DR", "SNDR", "MRDR", "SWITCH-DR", "DRos"} <= names
 
-    def test_mips_requires_embedding(self) -> None:
+    def test_mips_without_embedding_falls_back_to_sndr(self) -> None:
+        # #136 / #85: a missing action_embedding no longer hard-fails; MIPS
+        # gracefully falls back to SNDR for the 'MIPS' row, with a warning.
         logs, _, _ = skdr_eval.make_synth_logs(n=300, n_ops=3, seed=12)
-        with pytest.raises(ValueError, match="MIPS"):
-            skdr_eval.evaluate_sklearn_models(
+        with pytest.warns(UserWarning, match="falling back to SNDR"):
+            artifact = skdr_eval.evaluate_sklearn_models(
                 logs=logs,
                 models={"hgb": HistGradientBoostingRegressor(random_state=12)},
                 fit_models=True,
                 policy_train="pre_split",
                 n_splits=3,
                 random_state=12,
-                estimators=("DR", "MIPS"),
+                estimators=("SNDR", "MIPS"),
             )
+        report = artifact.report
+        mips_v = float(report.loc[report["estimator"] == "MIPS", "V_hat"].iloc[0])
+        sndr_v = float(report.loc[report["estimator"] == "SNDR", "V_hat"].iloc[0])
+        # The fallback MIPS row carries exactly the SNDR value.
+        assert mips_v == pytest.approx(sndr_v)
 
     def test_mips_via_evaluate_with_embedding(self) -> None:
         logs, _, _ = skdr_eval.make_synth_logs(n=400, n_ops=3, seed=13)

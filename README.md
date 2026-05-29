@@ -653,11 +653,16 @@ artifact = skdr_eval.evaluate_sklearn_models(
 print(artifact.report[["estimator", "V_hat", "SE_if", "ESS"]])
 ```
 
-For `MIPS` (Marginalized IPS), supply an `action_embedding` matrix of shape
-`(n_actions, embed_dim)`; the
+For `MIPS` (Marginalized IPS), supply an `action_embedding` — either an
+`(n_actions, embed_dim)` matrix **or a logs column name** holding a per-row
+embedding vector (#136). The kernel and bandwidth are configurable:
+`mips_kernel="rbf"` (default) | `"linear"` | a callable, and
+`mips_bandwidth=0.5` or `"median"` for the median heuristic. The
 `skdr_eval.embedding_sufficiency_diagnostic(...)` helper flags whether the
-embedding captures enough of the action-driven reward signal for MIPS to
-be approximately unbiased.
+embedding captures enough of the action-driven reward signal for MIPS to be
+approximately unbiased. If `"MIPS"` is requested without an
+`action_embedding`, MIPS gracefully falls back to SNDR with a warning rather
+than failing.
 
 See `examples/quickstart_estimators.py` and `examples/quickstart_mips.py`
 for runnable walkthroughs.
@@ -668,7 +673,60 @@ The `skdr_eval.slate` subpackage (issue #75) ships four ranking-OPE
 estimators — `slate_standard_ips`, `reward_interaction_ips`,
 `pseudo_inverse_ips`, and `slate_cascade_dr` — plus a synthetic
 cascade-click generator `make_slate_synth(...)` with closed-form ground
-truth. See `examples/quickstart_slate.py`.
+truth. The top-level `evaluate_slate_models(...)` entry point (#135) bundles
+them into an `EvaluationArtifact` — report, support-health warnings,
+sensitivity, and a renderable card — the same surface as
+`evaluate_sklearn_models`:
+
+```python
+import skdr_eval
+
+logs, attractiveness, truth = skdr_eval.make_slate_synth(
+    n_impressions=500, n_items=10, slate_size=3, seed=0
+)
+
+def my_reranker(rank: int, item: int) -> float:
+    return 1.0 / attractiveness.shape[1]  # your per-rank target policy
+
+artifact = skdr_eval.evaluate_slate_models(
+    logs,
+    models={"my_reranker": my_reranker},
+    estimators=("RIPS", "PI-IPS", "SlateCascadeDR"),
+    baseline="logging",
+)
+print(artifact.report[["estimator", "V_hat", "SE_if", "ESS", "support_health"]])
+```
+
+See `examples/quickstart_slate.py` and
+[`docs/slate-vs-pairwise-vs-standard.md`](docs/slate-vs-pairwise-vs-standard.md)
+for when to reach for slate vs pairwise vs standard evaluation.
+
+### Recipes / LLM-reranker OPE
+
+`skdr_eval.recipes` ships opinionated, end-to-end workflows built on the core
+estimators. The first recipe (#95) evaluates an **LLM reranker** offline with
+**embedding-MIPS** — no runtime LLM dependency, CPU-only:
+
+```python
+from skdr_eval.recipes import (
+    make_llm_reranker_synth, LLMRerankerLogSchema,
+    induce_reranker_policy, evaluate_reranker_mips,
+)
+
+# Deterministic logs with a known ground-truth target value.
+logs, candidate_embeddings, truth = make_llm_reranker_synth(
+    n_queries=2000, candidates_per_query=20, embed_dim=32, seed=42
+)
+LLMRerankerLogSchema.validate_frame(logs)          # validate your own logs
+
+# Candidate (new) reranker = sort candidates by query·candidate dot product.
+policy = induce_reranker_policy(logs, candidate_embeddings)
+result = evaluate_reranker_mips(logs, candidate_embeddings, policy)
+print(result.V_hat, "vs true", truth.V_sort_by_dot)  # recovers within ±2 SE
+```
+
+A full walkthrough is in
+[`examples/notebooks/10_llm_reranker_ope.ipynb`](examples/notebooks/10_llm_reranker_ope.ipynb).
 
 ## Development
 

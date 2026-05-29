@@ -1,12 +1,18 @@
-"""Quickstart: MIPS estimator with embedding-sufficiency diagnostic (#85).
+"""Quickstart: MIPS estimator with embedding-sufficiency diagnostic (#85, #136).
 
 Demonstrates the workflow for using ``MIPS`` in skdr-eval:
 
-1. Build or load a per-action embedding matrix ``(n_actions, embed_dim)``.
-2. Pass it via ``action_embedding=`` to ``evaluate_sklearn_models``.
+1. Build or load a per-action embedding matrix ``(n_actions, embed_dim)`` — or
+   pass a **logs column name** holding a per-row embedding (#136).
+2. Pass it via ``action_embedding=`` to ``evaluate_sklearn_models``, optionally
+   choosing the kernel (``mips_kernel="rbf"|"linear"|callable``) and the
+   bandwidth (``mips_bandwidth=0.5`` or ``"median"`` for the median heuristic).
 3. Inspect :class:`EmbeddingSufficiencyReport` to confirm the embedding
    captures enough of the action-driven reward signal for MIPS to be
    approximately unbiased.
+
+Note: if ``"MIPS"`` is requested without ``action_embedding=``, MIPS now
+gracefully falls back to SNDR with a warning (#136) rather than failing.
 
 Run with: ``python examples/quickstart_mips.py``
 """
@@ -39,7 +45,8 @@ def main() -> None:
         random_state=11,
         estimators=("DR", "SNDR", "MIPS"),
         action_embedding=embedding,
-        mips_bandwidth=0.5,
+        mips_bandwidth="median",  # median-heuristic RBF bandwidth (#136)
+        mips_kernel="rbf",
     )
     print("Estimator report (with MIPS):")
     print(

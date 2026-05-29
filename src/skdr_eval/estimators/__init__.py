@@ -22,7 +22,12 @@ Public API:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 from .core import StrategyResult, dr_value_with_strategy
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 from .mips import (
     EmbeddingSufficiencyReport,
     embedding_sufficiency_diagnostic,
@@ -41,6 +46,7 @@ from .weight_transforms import (
     IdentityTransform,
     MIPSTransform,
     SwitchTauTransform,
+    median_bandwidth,
 )
 
 __all__ = [
@@ -60,6 +66,7 @@ __all__ = [
     "build_strategy",
     "dr_value_with_strategy",
     "embedding_sufficiency_diagnostic",
+    "median_bandwidth",
     "mips_value",
 ]
 
@@ -71,13 +78,20 @@ def build_strategy(
     tau: float = 5.0,
     lam: float = 1.0,
     action_embedding: object | None = None,
-    bandwidth: float = 1.0,
+    bandwidth: float | str = 1.0,
+    kernel: str | Callable[[Any], Any] = "rbf",
     mips_clip: float = float("inf"),
 ) -> EstimatorStrategy:
     """Build a named built-in :class:`EstimatorStrategy`.
 
     Recognised names (case-insensitive after canonicalisation): ``"DR"``,
     ``"SNDR"``, ``"MRDR"``, ``"SWITCH-DR"``, ``"DRos"``, ``"MIPS"``.
+
+    For ``"MIPS"``, ``kernel`` selects the embedding similarity kernel
+    (``"rbf"`` | ``"linear"`` | callable) and ``bandwidth`` is the RBF
+    bandwidth; pass ``bandwidth="median"`` to resolve it via the median
+    heuristic (:func:`skdr_eval.estimators.median_bandwidth`) on the supplied
+    ``action_embedding``.
     """
     canonical = name.strip().upper().replace("_", "-")
     if canonical == "DR":
@@ -123,11 +137,24 @@ def build_strategy(
             )
         import numpy as np  # noqa: PLC0415
 
-        emb = np.asarray(action_embedding)
+        from .weight_transforms import median_bandwidth  # noqa: PLC0415
+
+        emb = np.asarray(action_embedding, dtype=np.float64)
+        if isinstance(bandwidth, str):
+            if bandwidth != "median":
+                raise ValueError(
+                    f"bandwidth string must be 'median', got {bandwidth!r}"
+                )
+            resolved_bandwidth = median_bandwidth(emb)
+        else:
+            resolved_bandwidth = float(bandwidth)
         return EstimatorStrategy(
             name="MIPS",
             weight_transform=MIPSTransform(
-                action_embedding=emb, bandwidth=bandwidth, clip=mips_clip
+                action_embedding=emb,
+                bandwidth=resolved_bandwidth,
+                clip=mips_clip,
+                kernel=kernel,
             ),
             outcome_loss=MSEOutcomeLoss(),
             self_normalised=False,

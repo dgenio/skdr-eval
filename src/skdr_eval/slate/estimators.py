@@ -98,6 +98,42 @@ def _ess_from_weights(w: np.ndarray) -> float:
     return float(w.sum() ** 2 / (w**2).sum())
 
 
+def _stacked_slates(
+    slates: list[list[int]], clicks: list[list[int]]
+) -> tuple[np.ndarray, np.ndarray]:
+    """Stack ragged-but-fixed-width slate / click rows into ``(n, K)`` arrays."""
+    slate_arr = np.asarray(slates, dtype=np.int64)
+    click_arr = np.asarray(clicks, dtype=np.float64)
+    return slate_arr, click_arr
+
+
+def _per_rank_matrix(
+    policy_per_rank: Callable[[int, int], float], slate_size: int, n_items: int
+) -> np.ndarray:
+    """Materialise a ``(slate_size, n_items)`` per-rank probability matrix.
+
+    The Python callable is evaluated exactly ``slate_size * n_items`` times —
+    once per (rank, item) cell — *outside* the per-impression loop, which is
+    the whole point of the vectorised estimators (#137): the catalogue grid is
+    built once and reused across every impression instead of being re-queried
+    ``n_impressions`` times.
+    """
+    mat = np.empty((slate_size, n_items), dtype=np.float64)
+    for k in range(slate_size):
+        for j in range(n_items):
+            mat[k, j] = float(policy_per_rank(k, j))
+    return mat
+
+
+def _vec_se(contribs: np.ndarray) -> float:
+    """Standard error of the per-impression contribution mean."""
+    return (
+        float(contribs.std(ddof=1) / np.sqrt(contribs.size))
+        if contribs.size > 1
+        else 0.0
+    )
+
+
 def slate_standard_ips(logs: pd.DataFrame, target_policy: TargetPolicy) -> SlateResult:
     """Vanilla IPS at the slate level: ``E[π_T(s)/π_L(s) · R]``.
 
@@ -153,41 +189,39 @@ def reward_interaction_ips(
         slate / catalogue size.
     """
     slates, clicks, _rewards, _logging_probs = _impression_iter(logs)
-    n_items = int(max(max(s) for s in slates)) + 1 if slates else 1
+    if not slates:
+        return SlateResult(name="RIPS", V_hat=0.0, SE=0.0, ESS=0.0, n=0)
+    n_items = int(max(max(s) for s in slates)) + 1
+    slate_size = len(slates[0])
+    slate_arr, click_arr = _stacked_slates(slates, clicks)
 
-    def _default_log_policy(_rank: int, _item: int) -> float:
+    # Per-rank target / logging matrices, built once over the catalogue grid.
+    pi_t = _per_rank_matrix(target_policy_per_rank, slate_size, n_items)
+    if logging_policy_per_rank is None:
         # Uniform-over-items prior (matches make_slate_synth's default).
-        return 1.0 / n_items
+        pi_l = np.full((slate_size, n_items), 1.0 / n_items, dtype=np.float64)
+    else:
+        pi_l = _per_rank_matrix(logging_policy_per_rank, slate_size, n_items)
 
-    log_policy = logging_policy_per_rank or _default_log_policy
+    rank_idx = np.arange(slate_size)
+    # Gather the per-(impression, rank) logged item's probabilities.
+    p_t = pi_t[rank_idx[None, :], slate_arr]  # (n, K)
+    p_l = pi_l[rank_idx[None, :], slate_arr]  # (n, K)
 
-    contribs = np.empty(len(slates), dtype=np.float64)
-    weights = np.empty(len(slates), dtype=np.float64)
-    for i, (slate, click_row) in enumerate(zip(slates, clicks, strict=False)):
-        per_rank_contrib = 0.0
-        slate_weight = 1.0
-        for k, item in enumerate(slate):
-            p_t = float(target_policy_per_rank(k, item))
-            p_l = float(log_policy(k, item))
-            if p_l <= 0:
-                slate_weight = 0.0
-                break
-            ratio = p_t / p_l
-            slate_weight *= ratio
-            per_rank_contrib += ratio * float(click_row[k])
-        contribs[i] = per_rank_contrib if slate_weight > 0 else 0.0
-        weights[i] = slate_weight
-    v_hat = float(contribs.mean()) if contribs.size > 0 else 0.0
-    se = (
-        float(contribs.std(ddof=1) / np.sqrt(contribs.size))
-        if contribs.size > 1
-        else 0.0
-    )
+    # A non-positive logging probability anywhere in the slate breaks the
+    # factorised weight (matches the loop's ``break`` → discarded contribution).
+    valid = np.all(p_l > 0, axis=1)
+    safe_p_l = np.where(p_l > 0, p_l, 1.0)
+    ratios = p_t / safe_p_l  # (n, K)
+    slate_weight = np.where(valid, np.prod(ratios, axis=1), 0.0)
+    contribs = np.where(valid, np.sum(ratios * click_arr, axis=1), 0.0)
+
+    v_hat = float(contribs.mean())
     return SlateResult(
         name="RIPS",
         V_hat=v_hat,
-        SE=se,
-        ESS=_ess_from_weights(weights),
+        SE=_vec_se(contribs),
+        ESS=_ess_from_weights(slate_weight),
         n=int(contribs.size),
     )
 
@@ -210,40 +244,24 @@ def pseudo_inverse_ips(
     slate_size = len(slates[0])
     if n_items is None:
         n_items = int(max(max(s) for s in slates)) + 1
+    slate_arr, click_arr = _stacked_slates(slates, clicks)
 
-    # Build the K x |items| target probability matrix (per-rank marginals).
-    pi_t = np.zeros((slate_size, n_items), dtype=np.float64)
-    for k in range(slate_size):
-        for j in range(n_items):
-            pi_t[k, j] = float(target_policy_per_rank(k, j))
+    # Build the K x |items| target probability matrix (per-rank marginals)
+    # once, then take the Moore-Penrose pseudo-inverse (SVD-stable).
+    pi_t = _per_rank_matrix(target_policy_per_rank, slate_size, n_items)
+    pi_t_pinv = np.linalg.pinv(pi_t)  # (n_items, K)
 
-    # Pseudo-inverse — Moore-Penrose. Use SVD for stability.
-    pi_t_pinv = np.linalg.pinv(pi_t)
+    rank_idx = np.arange(slate_size)
+    # Per-(impression, rank) weight: the (logged-item, rank) pseudo-inverse cell.
+    w_kr = pi_t_pinv[slate_arr, rank_idx[None, :]]  # (n, K)
+    contribs = np.sum(w_kr * click_arr, axis=1)
+    weights = np.sum(np.abs(w_kr), axis=1)
 
-    contribs = np.empty(len(slates), dtype=np.float64)
-    weights = np.empty(len(slates), dtype=np.float64)
-    for i, (slate, click_row) in enumerate(zip(slates, clicks, strict=False)):
-        # Per-rank weight derived from the pseudo-inverse — the row of
-        # pi_t_pinv corresponding to the logged item at each rank.
-        per_rank_contrib = 0.0
-        norm_w = 0.0
-        for k, item in enumerate(slate):
-            # The (item, rank) entry of the pseudo-inverse times the click.
-            w_kr = float(pi_t_pinv[item, k])
-            per_rank_contrib += w_kr * float(click_row[k])
-            norm_w += abs(w_kr)
-        contribs[i] = per_rank_contrib
-        weights[i] = norm_w
-    v_hat = float(contribs.mean()) if contribs.size > 0 else 0.0
-    se = (
-        float(contribs.std(ddof=1) / np.sqrt(contribs.size))
-        if contribs.size > 1
-        else 0.0
-    )
+    v_hat = float(contribs.mean())
     return SlateResult(
         name="PI-IPS",
         V_hat=v_hat,
-        SE=se,
+        SE=_vec_se(contribs),
         ESS=_ess_from_weights(weights),
         n=int(contribs.size),
     )
@@ -281,43 +299,34 @@ def slate_cascade_dr(
             f"n_items), got {q_hat_per_rank.shape!r}"
         )
 
-    def _default_log_policy(_rank: int, _item: int) -> float:
-        return 1.0 / n_items
+    slate_arr, click_arr = _stacked_slates(slates, clicks)
+    pi_t = _per_rank_matrix(target_policy_per_rank, slate_size, n_items)
+    if logging_policy_per_rank is None:
+        pi_l = np.full((slate_size, n_items), 1.0 / n_items, dtype=np.float64)
+    else:
+        pi_l = _per_rank_matrix(logging_policy_per_rank, slate_size, n_items)
 
-    log_policy = logging_policy_per_rank or _default_log_policy
+    rank_idx = np.arange(slate_size)
+    # Direct-method term per (impression, rank): Σ_j π_T(k, j) · q̂[i, k, j].
+    q_pi_rank = np.einsum("kj,ikj->ik", pi_t, q_hat_per_rank)  # (n, K)
+    # Observed-item outcome prediction q̂[i, k, item_{i,k}].
+    q_hat_obs = np.take_along_axis(q_hat_per_rank, slate_arr[:, :, None], axis=2)[
+        :, :, 0
+    ]  # (n, K)
 
-    contribs = np.empty(len(slates), dtype=np.float64)
-    weights = np.empty(len(slates), dtype=np.float64)
-    for i, (slate, click_row) in enumerate(zip(slates, clicks, strict=False)):
-        # Per-rank DR contribution: q_pi(rank) + w_k * (click_k - q̂(rank, item_k))
-        per_rank_contrib = 0.0
-        max_weight = 0.0
-        for k, item in enumerate(slate):
-            # q_pi at rank k: Σ_j π_T(k, j) * q_hat[i, k, j]
-            q_pi_rank = 0.0
-            for j in range(n_items):
-                q_pi_rank += float(target_policy_per_rank(k, j)) * float(
-                    q_hat_per_rank[i, k, j]
-                )
-            p_t = float(target_policy_per_rank(k, item))
-            p_l = float(log_policy(k, item))
-            w_k = p_t / p_l if p_l > 0 else 0.0
-            per_rank_contrib += q_pi_rank + w_k * (
-                float(click_row[k]) - float(q_hat_per_rank[i, k, item])
-            )
-            max_weight = max(max_weight, w_k)
-        contribs[i] = per_rank_contrib
-        weights[i] = max_weight
-    v_hat = float(contribs.mean()) if contribs.size > 0 else 0.0
-    se = (
-        float(contribs.std(ddof=1) / np.sqrt(contribs.size))
-        if contribs.size > 1
-        else 0.0
-    )
+    p_t = pi_t[rank_idx[None, :], slate_arr]  # (n, K)
+    p_l = pi_l[rank_idx[None, :], slate_arr]  # (n, K)
+    w = np.where(p_l > 0, p_t / np.where(p_l > 0, p_l, 1.0), 0.0)  # (n, K)
+
+    per_rank_contrib = q_pi_rank + w * (click_arr - q_hat_obs)
+    contribs = np.sum(per_rank_contrib, axis=1)
+    weights = np.max(w, axis=1)
+
+    v_hat = float(contribs.mean())
     return SlateResult(
         name="SlateCascadeDR",
         V_hat=v_hat,
-        SE=se,
+        SE=_vec_se(contribs),
         ESS=_ess_from_weights(weights),
         n=int(contribs.size),
     )

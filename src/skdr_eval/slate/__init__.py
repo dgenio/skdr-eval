@@ -18,11 +18,13 @@ from .estimators import (
     slate_cascade_dr,
     slate_standard_ips,
 )
+from .evaluate import evaluate_slate_models
 from .synth import SlateGroundTruth, make_slate_synth
 
 __all__ = [
     "SlateGroundTruth",
     "SlateResult",
+    "evaluate_slate_models",
     "make_slate_synth",
     "pseudo_inverse_ips",
     "reward_interaction_ips",

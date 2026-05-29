@@ -8,6 +8,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Slate + MIPS OPE completion** ([#135], [#136], [#137], [#95]). One-PR sweep
+  finishing the slate / large-action-space surface deferred from [#75] / [#85]:
+
+  - **`evaluate_slate_models`** ([#135]): a top-level entry point that runs the
+    slate estimators (`SlateStandardIPS`, `RIPS`, `PI-IPS`, `SlateCascadeDR`)
+    over per-rank target policies and returns a full `EvaluationArtifact` —
+    report, support-health warnings, sensitivity, and a renderable card, the
+    same surface as `evaluate_sklearn_models`. Slate support diagnostics use
+    the slate-level importance weight, with `min_pscore` taken as the
+    weight-implied effective propensity `1/w` so `POOR_OVERLAP` reflects
+    genuine slate-overlap failures rather than the slate-joint probability
+    scale. New docs page `docs/slate-vs-pairwise-vs-standard.md`.
+  - **MIPS API completeness** ([#136]): `action_embedding` now also accepts a
+    **logs column name** (resolved to a per-action embedding); the embedding
+    kernel is configurable (`mips_kernel="rbf" | "linear" | callable`) and the
+    bandwidth accepts `"median"` (median heuristic) in addition to a float
+    (`mips_bandwidth`). New `skdr_eval.median_bandwidth` helper.
+  - **LLM-reranker recipe** ([#95]): new `skdr_eval.recipes.llm_reranker`
+    module — `make_llm_reranker_synth` (deterministic dataset with closed-form
+    target value), `LLMRerankerLogSchema` (Pydantic log validator),
+    `induce_reranker_policy`, and `evaluate_reranker_mips`. Includes the
+    `examples/notebooks/10_llm_reranker_ope.ipynb` walkthrough and a simulation
+    proof that MIPS recovers the target value within ±2 SE. No runtime LLM
+    dependency; CPU-only.
+
+### Changed
+- **MIPS no-embedding behaviour is now a graceful SNDR fallback** ([#136],
+  [#85]). Requesting `"MIPS"` without `action_embedding=` previously raised
+  `ValueError`; it now **falls back to SNDR with a `UserWarning`** (the `MIPS`
+  report row carries the SNDR value), matching the contract specified in [#85].
+  To restore the old hard-fail, validate `action_embedding is not None` before
+  calling the evaluator. Recorded in `docs/agent-context/invariants.md`.
+- **Slate estimators vectorized** ([#137]). `reward_interaction_ips`,
+  `pseudo_inverse_ips`, and `slate_cascade_dr` now precompute the per-rank
+  probability matrices once and batch the per-impression arithmetic with NumPy
+  instead of pure-Python nested loops. Outputs are unchanged (parity asserted
+  against the reference implementation in `tests/test_slate_vectorization.py`);
+  large-catalogue runs are dramatically faster.
+
 - **Newcomer documentation & README onboarding sweep** ([#98], [#116], [#117],
   [#118], [#119], [#120], [#122], [#126]). One-PR pass over the
   adoption-facing docs:
@@ -513,6 +552,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#120]: https://github.com/dgenio/skdr-eval/issues/120
 [#122]: https://github.com/dgenio/skdr-eval/issues/122
 [#126]: https://github.com/dgenio/skdr-eval/issues/126
+[#95]: https://github.com/dgenio/skdr-eval/issues/95
+[#135]: https://github.com/dgenio/skdr-eval/issues/135
+[#136]: https://github.com/dgenio/skdr-eval/issues/136
+[#137]: https://github.com/dgenio/skdr-eval/issues/137
 
 ## [0.6.0] - 2026-05-12
 
