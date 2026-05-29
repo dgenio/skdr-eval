@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pandas as pd
@@ -266,7 +266,7 @@ def induce_reranker_policy(
     if score_fn is None:
 
         def score_fn(q: np.ndarray, cand: np.ndarray) -> np.ndarray:
-            return cand @ q
+            return cast("np.ndarray", cand @ q)
 
     query_emb = np.asarray(
         [np.asarray(q, dtype=np.float64).ravel() for q in logs["query_embedding"]],
@@ -312,7 +312,7 @@ def _fit_dot_outcome(
     reward = logs["reward"].to_numpy(dtype=np.float64)
     design = np.column_stack([np.ones_like(f_obs), f_obs])
     beta, *_ = np.linalg.lstsq(design, reward, rcond=None)
-    return beta[0] + beta[1] * dot_full
+    return cast("np.ndarray", beta[0] + beta[1] * dot_full)
 
 
 def evaluate_reranker_mips(
