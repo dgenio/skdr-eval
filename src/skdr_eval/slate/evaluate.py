@@ -24,7 +24,7 @@ point instead of :func:`evaluate_sklearn_models` /
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -112,8 +112,11 @@ def _empirical_q_hat_per_rank(
         return q_hat
 
     def _rate(click_sum: np.ndarray, click_cnt: np.ndarray) -> np.ndarray:
-        return np.divide(
-            click_sum, click_cnt, out=np.zeros_like(click_sum), where=click_cnt > 0
+        return cast(
+            "np.ndarray",
+            np.divide(
+                click_sum, click_cnt, out=np.zeros_like(click_sum), where=click_cnt > 0
+            ),
         )
 
     total_sum = np.zeros((slate_size, n_items), dtype=np.float64)
