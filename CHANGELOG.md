@@ -12,9 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [#118], [#119], [#120], [#122], [#126]). One-PR pass over the
   adoption-facing docs:
 
-  - **Metrics glossary** ([#116]): new `docs/metrics-glossary.md` with a
-    plain-language, "how to read this" entry for every field in the report,
-    warnings, sensitivity, and diagnostics — and all eight warning codes.
+  - **Metrics glossary** ([#116]): new `docs/metrics-glossary.md` with
+    plain-language, "how to read this" entries for the report, warnings,
+    sensitivity, and diagnostics fields — including the lower-level columns
+    (`tail_mass`, `pscore_q*`, `chosen_V`, `v_range_frac`, `stability_grade`,
+    `reliability_curve`) — and all eight warning codes.
   - **Report interpretation guide** ([#117]): new
     `docs/report-interpretation.md` taking a reader from HTML output to a
     decision, with a reading order, a decision table, and a stakeholder
