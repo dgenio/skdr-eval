@@ -136,7 +136,12 @@ def _slate_result_to_drresult(
         min_pscore = 0.0
         pscore_q01 = pscore_q05 = pscore_q10 = 0.0
         pareto_k = float("nan")
-    tail_mass = float((weights == 0).mean()) if weights.size else 0.0
+    # ``tail_mass`` drives the EXTREME_CLIP warning, which measures the fraction
+    # of *clipped* weight mass. The slate path applies no clipping, so the
+    # clipped mass is always zero; reporting the zero-weight (no-overlap)
+    # fraction here would spuriously fire EXTREME_CLIP. Zero-weight mass is
+    # already captured by ``match_rate`` above.
+    tail_mass = 0.0
     ess = (
         float(weights.sum() ** 2 / (weights**2).sum())
         if (weights**2).sum() > 0
@@ -209,9 +214,10 @@ def evaluate_slate_models(
         Forwarded to the warning computation.
     random_state : int, default 0
         Persisted to the artifact metadata for reproducibility.
-    baseline : float or {"logging"} or None
+    baseline : float or {"logged"} or None
         Baseline policy value for the report's ``delta_V_hat`` column.
-        ``"logging"`` uses the mean observed reward.
+        ``"logged"`` uses the mean observed reward (the same sentinel the
+        other evaluators accept; unknown strings raise ``DataValidationError``).
 
     Returns
     -------
@@ -302,14 +308,15 @@ def evaluate_slate_models(
 
     report = pd.DataFrame(report_rows)
 
-    baseline_kind: str | None = None
-    baseline_value: float | None = None
-    if baseline == "logging":
-        baseline_kind = "logging"
-        baseline_value = float(logs["reward"].mean())
-    elif isinstance(baseline, (int, float)):
-        baseline_kind = "fixed"
-        baseline_value = float(baseline)
+    # Reuse the canonical resolver so the slate evaluator shares one baseline
+    # contract with the other evaluators: ``"logged"`` (not ``"logging"``) is
+    # the string sentinel, unknown strings and ``bool`` raise rather than being
+    # silently ignored, and a numeric value is a fixed scalar baseline.
+    from ..core import _resolve_baseline  # noqa: PLC0415
+
+    baseline_kind, baseline_value = _resolve_baseline(
+        baseline, logs["reward"].to_numpy(dtype=np.float64)
+    )
 
     return build_evaluation_artifact(
         report=report,

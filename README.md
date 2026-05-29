@@ -662,7 +662,10 @@ embedding vector (#136). The kernel and bandwidth are configurable:
 embedding captures enough of the action-driven reward signal for MIPS to be
 approximately unbiased. If `"MIPS"` is requested without an
 `action_embedding`, MIPS gracefully falls back to SNDR with a warning rather
-than failing.
+than failing. The logs-column-name form is only supported when the action
+index is a stable global action id; the pairwise evaluator (`A` is a
+day-relative operator index) requires the explicit `(n_actions, embed_dim)`
+array instead.
 
 See `examples/quickstart_estimators.py` and `examples/quickstart_mips.py`
 for runnable walkthroughs.

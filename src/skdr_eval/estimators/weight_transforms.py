@@ -29,23 +29,52 @@ EmbeddingKernel = Callable[[np.ndarray], np.ndarray]
 # at least two actions to have any pairwise distance.
 _EMBED_NDIM = 2
 _MIN_ACTIONS_FOR_MEDIAN = 2
+# Above this many actions, materialising the full ``(n_actions, n_actions)``
+# pairwise-distance matrix becomes prohibitively expensive (O(n_actions^2)
+# memory/time), so the median heuristic switches to an unbiased subsample of
+# random action pairs. ~2k actions ≈ 2M pairs is the largest exact pass we run.
+_MEDIAN_EXACT_MAX_ACTIONS = 2048
+# Number of random action pairs sampled to approximate the median above the cap.
+_MEDIAN_SUBSAMPLE_PAIRS = 200_000
 
 
-def median_bandwidth(embedding: np.ndarray) -> float:
+def median_bandwidth(
+    embedding: np.ndarray,
+    *,
+    max_exact_actions: int = _MEDIAN_EXACT_MAX_ACTIONS,
+    sample_pairs: int = _MEDIAN_SUBSAMPLE_PAIRS,
+    random_state: int = 0,
+) -> float:
     """Median-heuristic RBF bandwidth for an action embedding.
 
     Returns the median of the pairwise Euclidean distances between distinct
     action embeddings — the standard "median heuristic" for kernel bandwidth
     selection. Degenerate inputs (a single action, or all-coincident
     embeddings) fall back to ``1.0`` so the kernel stays well-defined.
+
+    For action spaces with more than ``max_exact_actions`` actions — a common
+    case for MIPS — the exact pairwise-distance matrix is ``O(n_actions^2)`` in
+    memory and time and can OOM. Above the cap the median is estimated from
+    ``sample_pairs`` random action pairs (seeded by ``random_state`` for
+    reproducibility), which keeps runtime and memory bounded with negligible
+    impact on the heuristic.
     """
     emb = np.asarray(embedding, dtype=np.float64)
     if emb.ndim != _EMBED_NDIM or emb.shape[0] < _MIN_ACTIONS_FOR_MEDIAN:
         return 1.0
-    sq = np.sum(emb * emb, axis=1, keepdims=True)
-    d2 = np.maximum(sq + sq.T - 2.0 * emb @ emb.T, 0.0)
-    iu = np.triu_indices(emb.shape[0], k=1)
-    dists = np.sqrt(d2[iu])
+    n_actions = emb.shape[0]
+    if n_actions <= max_exact_actions:
+        sq = np.sum(emb * emb, axis=1, keepdims=True)
+        d2 = np.maximum(sq + sq.T - 2.0 * emb @ emb.T, 0.0)
+        iu = np.triu_indices(n_actions, k=1)
+        dists = np.sqrt(d2[iu])
+    else:
+        rng = np.random.default_rng(random_state)
+        i = rng.integers(0, n_actions, size=sample_pairs)
+        j = rng.integers(0, n_actions, size=sample_pairs)
+        distinct = i != j
+        diff = emb[i[distinct]] - emb[j[distinct]]
+        dists = np.sqrt(np.einsum("ij,ij->i", diff, diff))
     positive = dists[dists > 0]
     if positive.size == 0:
         return 1.0

@@ -11,12 +11,15 @@ from __future__ import annotations
 import warnings
 
 import numpy as np
+import pandas as pd
 import pytest
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 import skdr_eval as se
+from skdr_eval.core import _resolve_action_embedding
 from skdr_eval.estimators import MIPSTransform, build_strategy, median_bandwidth
 from skdr_eval.estimators.protocols import TransformContext
+from skdr_eval.exceptions import DataValidationError
 
 
 def _context(propensities, policy_probs, A, elig):
@@ -161,3 +164,28 @@ def test_missing_column_name_raises() -> None:
             estimators=("SNDR", "MIPS"),
             action_embedding="does_not_exist",
         )
+
+
+def test_median_bandwidth_subsample_approximates_exact() -> None:
+    """Above the exact cap the median heuristic subsamples random action pairs;
+    the estimate should stay close to the exact median while bounding memory."""
+    rng = np.random.default_rng(0)
+    emb = rng.normal(size=(300, 5))
+    exact = median_bandwidth(emb)
+    approx = median_bandwidth(emb, max_exact_actions=50, sample_pairs=40_000)
+    assert approx == pytest.approx(exact, rel=0.1)
+
+
+def test_pairwise_rejects_column_name_embedding() -> None:
+    """The pairwise path forbids the column-name embedding form because its
+    action index is a day-relative operator index, not a stable action id."""
+    logs = pd.DataFrame({"emb": [[1.0, 0.0], [0.0, 1.0]]})
+    actions = np.array([0, 1])
+    # The explicit array form is always accepted.
+    arr = _resolve_action_embedding(
+        np.eye(2), logs, actions, 2, allow_column_name=False
+    )
+    assert arr is not None and arr.shape == (2, 2)
+    # The column-name form is rejected for the pairwise path.
+    with pytest.raises(DataValidationError, match="pairwise"):
+        _resolve_action_embedding("emb", logs, actions, 2, allow_column_name=False)

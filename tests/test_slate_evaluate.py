@@ -46,7 +46,7 @@ def test_returns_artifact_with_full_surface() -> None:
             "sharp": _oracle_like_policy(attractiveness, 8, 2.0),
         },
         estimators=("SlateStandardIPS", "RIPS", "PI-IPS", "SlateCascadeDR"),
-        baseline="logging",
+        baseline="logged",
     )
     assert isinstance(art, EvaluationArtifact)
     # One row per (model, estimator).
@@ -64,7 +64,7 @@ def test_returns_artifact_with_full_surface() -> None:
     assert len(art.to_json_str()) > 0
     assert art.metadata["evaluator"] == "evaluate_slate_models"
     assert art.metadata["click_model"] == "cascade"
-    # baseline="logging" attaches the delta column.
+    # baseline="logged" attaches the delta column.
     assert "delta_V_hat" in art.report.columns
 
 
@@ -139,4 +139,22 @@ def test_rejects_unknown_estimator() -> None:
     with pytest.raises(DataValidationError, match="unknown slate estimators"):
         evaluate_slate_models(
             logs, {"u": _uniform_policy(5)}, estimators=("NotAnEstimator",)
+        )
+
+
+def test_baseline_sentinel_is_logged_and_rejects_unknown() -> None:
+    """The slate evaluator accepts the canonical ``"logged"`` sentinel (like the
+    other evaluators) and raises on unknown strings instead of ignoring them."""
+    logs, _, _ = make_slate_synth(n_impressions=120, n_items=6, slate_size=2, seed=3)
+    art = evaluate_slate_models(
+        logs, {"uniform": _uniform_policy(6)}, estimators=("RIPS",), baseline="logged"
+    )
+    assert "delta_V_hat" in art.report.columns
+    # The old "logging" sentinel is now an unknown string and must raise.
+    with pytest.raises(DataValidationError, match="Unknown baseline"):
+        evaluate_slate_models(
+            logs,
+            {"uniform": _uniform_policy(6)},
+            estimators=("RIPS",),
+            baseline="logging",
         )

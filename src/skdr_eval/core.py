@@ -1210,6 +1210,8 @@ def _resolve_action_embedding(
     logs: pd.DataFrame,
     actions: np.ndarray,
     n_actions: int,
+    *,
+    allow_column_name: bool = True,
 ) -> np.ndarray | None:
     """Resolve ``action_embedding`` to an ``(n_actions, embed_dim)`` array (#136).
 
@@ -1225,6 +1227,16 @@ def _resolve_action_embedding(
     if action_embedding is None:
         return None
     if isinstance(action_embedding, str):
+        if not allow_column_name:
+            raise DataValidationError(
+                "action_embedding column names are not supported for the "
+                "pairwise evaluator: the action index 'A' is a day-relative "
+                "operator index, so averaging logged-row embeddings by it would "
+                "mix different operators across days and silently produce "
+                "incorrect per-action embeddings. Pass an explicit "
+                "(n_actions, embed_dim) array in the same action-indexing "
+                "scheme as 'A'/'policy_probs' instead."
+            )
         if action_embedding not in logs.columns:
             raise DataValidationError(
                 f"action_embedding column {action_embedding!r} not found in logs; "
@@ -1234,7 +1246,7 @@ def _resolve_action_embedding(
         if len(rows) != len(actions):
             raise DataValidationError(
                 f"action_embedding column {action_embedding!r} has {len(rows)} rows "
-                f"but the evaluated design has {len(actions)} actions; pass an "
+                f"but the evaluated design has {len(actions)} logged rows; pass an "
                 "(n_actions, embed_dim) array instead when the row alignment is "
                 "ambiguous (e.g. the pairwise path)."
             )
@@ -2898,7 +2910,11 @@ def evaluate_pairwise_models(
                 X_obs=X_obs,
                 selected_clip=dr_selected_clip,
                 action_embedding=_resolve_action_embedding(
-                    action_embedding, logs_df, A, int(elig.shape[1])
+                    action_embedding,
+                    logs_df,
+                    A,
+                    int(elig.shape[1]),
+                    allow_column_name=False,
                 ),
                 switch_tau=switch_tau,
                 dros_lam=dros_lam,

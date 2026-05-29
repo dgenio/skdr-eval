@@ -10,6 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from skdr_eval.exceptions import DataValidationError
 from skdr_eval.recipes import (
     LLMRerankerGroundTruth,
     LLMRerankerLogSchema,
@@ -98,3 +99,22 @@ def test_mips_recovery_is_stable_across_seeds() -> None:
         if abs(res.V_hat - truth.V_sort_by_dot) <= 2.0 * res.SE_if:
             covered += 1
     assert covered >= reps - 1
+
+
+def test_reranker_rejects_out_of_range_candidate_id() -> None:
+    logs, cand, _ = make_llm_reranker_synth(
+        n_queries=20, candidates_per_query=6, embed_dim=8, seed=3
+    )
+    logs = logs.copy()
+    logs.loc[0, "candidate_id"] = 999  # out of [0, 6)
+    with pytest.raises(DataValidationError, match=r"\[0, 6\)"):
+        evaluate_reranker_mips(logs, cand)
+
+
+def test_reranker_rejects_bad_policy_probs_shape() -> None:
+    logs, cand, _ = make_llm_reranker_synth(
+        n_queries=20, candidates_per_query=6, embed_dim=8, seed=3
+    )
+    bad = np.ones((len(logs), 3))  # wrong n_candidates
+    with pytest.raises(DataValidationError, match="policy_probs"):
+        evaluate_reranker_mips(logs, cand, policy_probs=bad)

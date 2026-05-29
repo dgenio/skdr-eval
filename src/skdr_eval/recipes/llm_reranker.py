@@ -344,7 +344,43 @@ def evaluate_reranker_mips(
 
     n = len(logs)
     n_candidates = candidate_embeddings.shape[0]
+
+    # Validate inputs up front. This is a public recipe entry point and the
+    # arithmetic below uses ``candidate_id`` as a direct index into
+    # ``(n, n_candidates)`` arrays, so an out-of-range or non-integer id would
+    # otherwise surface as an opaque ``IndexError``.
+    from ..exceptions import DataValidationError  # noqa: PLC0415
+
+    raw_ids = logs["candidate_id"].to_numpy()
+    if np.issubdtype(raw_ids.dtype, np.floating):
+        if not np.all(np.mod(raw_ids, 1.0) == 0.0):
+            raise DataValidationError(
+                "candidate_id must be integer-valued action indices; got "
+                f"non-integer values (dtype {raw_ids.dtype})."
+            )
+    elif not np.issubdtype(raw_ids.dtype, np.integer):
+        raise DataValidationError(
+            f"candidate_id must be integer action indices; got dtype {raw_ids.dtype}."
+        )
     actions = logs["candidate_id"].to_numpy(dtype=np.int64)
+    if actions.size and (actions.min() < 0 or actions.max() >= n_candidates):
+        raise DataValidationError(
+            f"candidate_id values must lie in [0, {n_candidates}) to index the "
+            f"candidate pool; got range [{int(actions.min())}, "
+            f"{int(actions.max())}] for {n_candidates} candidate embeddings."
+        )
+    expected_shape = (n, n_candidates)
+    if policy_probs.shape != expected_shape:
+        raise DataValidationError(
+            f"policy_probs must have shape {expected_shape} "
+            f"(n_decisions, n_candidates); got {policy_probs.shape}."
+        )
+    if q_hat is not None and q_hat.shape != expected_shape:
+        raise DataValidationError(
+            f"q_hat must have shape {expected_shape} "
+            f"(n_decisions, n_candidates); got {q_hat.shape}."
+        )
+
     pi_obs = logs["propensity_at_position"].to_numpy(dtype=np.float64)
     # Full logging-propensity matrix. The uniform reranker spreads mass
     # equally, so the unchosen candidates carry the residual mass; this keeps
