@@ -8,6 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Newcomer documentation & README onboarding sweep** ([#98], [#116], [#117],
+  [#118], [#119], [#120], [#122], [#126]). One-PR pass over the
+  adoption-facing docs:
+
+  - **Metrics glossary** ([#116]): new `docs/metrics-glossary.md` with
+    plain-language, "how to read this" entries for the report, warnings,
+    sensitivity, and diagnostics fields — including the lower-level columns
+    (`tail_mass`, `pscore_q*`, `chosen_V`, `v_range_frac`, `stability_grade`,
+    `reliability_curve`) — and all eight warning codes.
+  - **Report interpretation guide** ([#117]): new
+    `docs/report-interpretation.md` taking a reader from HTML output to a
+    decision, with a reading order, a decision table, and a stakeholder
+    explanation template.
+  - **Comparison / positioning page** ([#119]): new `docs/comparisons.md`
+    positioning skdr-eval honestly against OBP, SCOPE-RL, d3rlpy, and
+    banditml, with a "when *not* to use" section; cross-linked with
+    `docs/methods.md`.
+  - **README hero rewrite** ([#120], [#126]): the opening now leads with a
+    practitioner job-to-be-done and a workflow diagram (logs → DR/SNDR →
+    trust diagnostics → decision artifact) before any estimator names, with
+    "use this when / do not use this when" boxes.
+  - **First-10-minutes onboarding path** ([#118]): a README section that
+    points newcomers at the quickstart notebook, the interpretation guide,
+    and the glossary in the order they are actually needed.
+  - **Use-case clarity + repository metadata** ([#98]): README explains the
+    practical use case and limits without OPE jargon; `pyproject.toml` URLs
+    already point at `dgenio/skdr-eval`.
+
 - **Statistical trust contract** ([#127], [#128], [#129], [#130], [#131],
   [#132], [#133], [#134]). One-PR sweep over the eight `area: trust`
   issues that anchor the maintainer-level statistical evidence map:
@@ -116,6 +144,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through the new estimator family, MIPS workflow, and slate-OPE pipeline.
 
 ### Changed
+- **Claims audit: conservative, precise wording** ([#122]). Dropped the
+  "Production Ready" feature claim and the absolute "general-purpose"
+  framing from the README and the `pyproject.toml` description; calibrated
+  the positioning to "practitioner-focused" and made the standing OPE
+  assumptions and the "offline evaluation does not replace online
+  validation" caveat explicit near the top of the README.
 - **`evaluate_sklearn_models` / `evaluate_pairwise_models` signature**.
   New kwargs `estimators=("DR", "SNDR")` (tuple of estimator names),
   `action_embedding=None`, `switch_tau=5.0`, `dros_lam=1.0`,
@@ -472,6 +506,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#132]: https://github.com/dgenio/skdr-eval/issues/132
 [#133]: https://github.com/dgenio/skdr-eval/issues/133
 [#134]: https://github.com/dgenio/skdr-eval/issues/134
+[#116]: https://github.com/dgenio/skdr-eval/issues/116
+[#117]: https://github.com/dgenio/skdr-eval/issues/117
+[#118]: https://github.com/dgenio/skdr-eval/issues/118
+[#119]: https://github.com/dgenio/skdr-eval/issues/119
+[#120]: https://github.com/dgenio/skdr-eval/issues/120
+[#122]: https://github.com/dgenio/skdr-eval/issues/122
+[#126]: https://github.com/dgenio/skdr-eval/issues/126
 
 ## [0.6.0] - 2026-05-12
 
