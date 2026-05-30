@@ -163,6 +163,11 @@ def dr_value_with_strategy(
         diag_weights = pi_target_obs[overlap] / pi_obs[overlap]
     if not overlap.any():
         raise ValueError("No matched samples found")
+    # ``min_pscore`` and the pscore quantiles summarise the observed-action
+    # *logging propensity* e(A|x) over the overlap set — a data-overlap
+    # descriptor. On the MIPS/embedding path this is only loosely tied to the
+    # working weight (which is the embedding-marginal density ratio); ESS,
+    # tail_mass and Pareto-k describe that weight directly.
     pi_overlap = pi_obs[overlap]
     match_rate = float(overlap.mean())
     min_pscore = float(pi_overlap.min())

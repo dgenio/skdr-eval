@@ -114,6 +114,34 @@ def test_mips_recovery_is_stable_across_seeds() -> None:
     assert abs(mean_err) <= 3.0 * se_of_mean, (mean_err, se_of_mean)
 
 
+def test_bootstrap_se_restores_coverage() -> None:
+    # The full-pipeline bootstrap SE (n_bootstrap>0) refits q̂ on each resample,
+    # capturing the q̂-estimation variance the plug-in influence-function SE
+    # omits, so per-seed ±2*SE intervals cover the truth ~nominally (#142).
+    covered = 0
+    reps = 6
+    for seed in range(reps):
+        logs, cand, truth = make_llm_reranker_synth(
+            n_queries=1500, candidates_per_query=16, embed_dim=24, seed=100 + seed
+        )
+        res = evaluate_reranker_mips(logs, cand, n_bootstrap=200, bootstrap_seed=0)
+        if abs(res.V_hat - truth.V_sort_by_dot) <= 2.0 * res.SE_if:
+            covered += 1
+    assert covered >= reps - 1
+
+
+def test_bootstrap_se_exceeds_plugin_se_without_moving_point_estimate() -> None:
+    # The bootstrap SE is strictly wider than the optimistic plug-in IF-SE,
+    # while the V_hat point estimate (computed on the full data) is unchanged.
+    logs, cand, _ = make_llm_reranker_synth(
+        n_queries=1500, candidates_per_query=16, embed_dim=24, seed=100
+    )
+    plugin = evaluate_reranker_mips(logs, cand)
+    boot = evaluate_reranker_mips(logs, cand, n_bootstrap=200, bootstrap_seed=0)
+    assert boot.V_hat == plugin.V_hat
+    assert boot.SE_if > plugin.SE_if
+
+
 def test_reranker_rejects_out_of_range_candidate_id() -> None:
     logs, cand, _ = make_llm_reranker_synth(
         n_queries=20, candidates_per_query=6, embed_dim=8, seed=3

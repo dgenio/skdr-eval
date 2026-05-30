@@ -204,16 +204,19 @@ class MIPSTransform:
     pools, candidate-set rerankers).
 
     The current implementation assumes an action-level embedding
-    ``E in R^(n_actions x d)`` and computes the embedding-marginal propensity
+    ``E in R^(n_actions x d)`` and forms the embedding-marginal densities of
+    the *target* and *logging* policies at the observed action's embedding,
 
-        ``p_e(x_i) = Σ_a π_log(a | x_i) · k(E_a, E_{A_i})``
+        ``p_e_target(x_i) = Σ_a π(a | x_i)     · k(E_a, E_{A_i})``
+        ``p_e_log(x_i)    = Σ_a π_log(a | x_i) · k(E_a, E_{A_i})``
 
-    where ``k`` is a row-normalised Gaussian kernel over embeddings. The
-    working weight is the inverse logging embedding-marginal ``1 / p_e``; no
-    target-policy embedding-marginal numerator is formed here because the
-    target policy enters separately through the DR core's ``q_pi`` term. When
-    the kernel is the identity matrix this reduces to skdr-eval's per-action
-    IPS weight ``1 / π_log(A_i | x_i)``.
+    where ``k`` is a row-normalised kernel over embeddings. The working weight
+    is their ratio ``p_e_target / p_e_log`` (#142) — a genuine embedding
+    density ratio that marginalises the target numerator over the *same* kernel
+    as the logging denominator. Limiting cases: an identity kernel reduces to
+    the per-action DR ratio ``π(A_i | x_i) / π_log(A_i | x_i)`` (#106); a
+    uniform kernel makes both marginals ``1 / n_actions`` so the weight is
+    ``1`` (the embedding is uninformative and MIPS applies no reweighting).
 
     Parameters
     ----------
@@ -222,10 +225,10 @@ class MIPSTransform:
         sufficient statistics (skill vectors, capacity, role one-hots).
     bandwidth : float, default 1.0
         Gaussian-kernel bandwidth (used by the ``"rbf"`` kernel). ``inf``
-        collapses to a uniform kernel (every action equally relevant — pure
-        marginalisation). Small values collapse back to per-action IPS. Ignored
-        by the ``"linear"`` and callable kernels. Resolve the median heuristic
-        upstream (see :func:`median_bandwidth`) and pass the resulting float.
+        collapses to a uniform kernel (every action equally relevant), giving a
+        unit weight; small values collapse back to the per-action DR ratio.
+        Ignored by the ``"linear"`` and callable kernels. Resolve the median
+        heuristic upstream (see :func:`median_bandwidth`) and pass the float.
     clip : float, default ``float("inf")``
         Optional top-side clip on the marginalised weight.
     kernel : {"rbf", "linear"} or callable, default ``"rbf"``
