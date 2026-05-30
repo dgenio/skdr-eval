@@ -89,7 +89,7 @@ pools), standard per-action IPS has no overlap. **MIPS** marginalises the
 propensity over an **action embedding**, so common support only needs to hold
 over the embedding. It is available in `evaluate_sklearn_models` /
 `evaluate_pairwise_models` via `estimators=(..., "MIPS")` and is the engine
-behind the [LLM-reranker recipe](../README.md#recipes--llm-reranker-ope). MIPS
+behind the [LLM-reranker recipe](https://github.com/dgenio/skdr-eval/blob/main/README.md#recipes--llm-reranker-ope). MIPS
 is biased when the embedding is not a sufficient statistic for the reward —
 always read `embedding_sufficiency_diagnostic`.
 

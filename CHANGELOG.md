@@ -7,7 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **DR/SNDR importance weight now includes the target policy** ([#106]). The
+  estimator computed the importance weight as `1/e(A|x)` (inverse logging
+  propensity) instead of the textbook doubly-robust ratio `π(A|x)/e(A|x)`.
+  Combined with the marginal (1-D) outcome model — for which the direct-method
+  term `q_pi` collapses to `q_hat` — the estimate was **completely independent
+  of the policy under evaluation**: different candidate models produced
+  byte-identical `V_hat`/`SE`/`ESS`, and the correction term did not target any
+  well-defined policy value. The fix (`_dr_weight_components`) applies
+  `π(A|x)/e(A|x)` over the DR overlap set (behavior **and** target support on
+  the observed action) at every weight site — the clip-grid path, the
+  per-decision contributions, both bootstrap recomputations, and the
+  strategy-aware path (MRDR / SWITCH-DR / DRos / MIPS, whose transforms now
+  operate on the true importance weight). `match_rate` is now the DR overlap
+  rate, and PSIS Pareto-k / tail-mass use the actual weight tail. A new
+  simulation proof (`tests/sim_studies/test_policy_value_recovery.py`) shows the
+  corrected estimator recovers the analytic value of a non-uniform target while
+  the old `1/e` weight does not.
+- **Propensity calibration switched from isotonic to sigmoid (Platt)** ([#106]).
+  Isotonic `CalibratedClassifierCV(cv=2)` overfit the small time-aware folds and
+  drove some estimated propensities to ≈0 (`min_pscore≈0`), tripping
+  `POOR_OVERLAP` / `MISCAL_PROP` even on well-overlapped data — the alarming
+  `support_health=high_risk` newcomers saw on the library's own synthetic demos.
+  Sigmoid calibration (`cv=3`) yields well-calibrated, non-degenerate
+  propensities; well-explored logs now report `support_health=ok`.
+
 ### Added
+- **Documentation site** ([#68]). MkDocs Material + `mkdocstrings` site
+  (`mkdocs.yml`, `docs/index.md`, getting-started, concepts, recipes, API
+  reference), a `--strict` CI build job, a `.readthedocs.yaml` for versioned
+  publishing, and wired-up `make docs` / `make docs-serve` targets.
+- **Logs → experiment-review card recipe** ([#124]). New
+  `examples/use_cases/05_logs_to_experiment_card.py` and
+  `docs/recipes/logs-to-experiment-card.md`: the end-to-end practitioner
+  workflow on well-explored logs, reading the artifact in the order
+  `support_health → warnings → sensitivity → calibration → V_hat`.
+- **Good-vs-bad support tutorial** ([#121]). New
+  `examples/notebooks/06_good_vs_bad_support.ipynb` (nbmake-gated) and
+  `docs/recipes/good-vs-bad-support.md` contrasting a healthy (`ok`) and an
+  unsupported (`high_risk`) evaluation on the same problem.
+- **Public launch readiness checklist** ([#125]). New `docs/LAUNCH_CHECKLIST.md`
+  defining the trust/credibility/contribution gates before broad promotion.
 - **Slate + MIPS OPE completion** ([#135], [#136], [#137], [#95]). One-PR sweep
   finishing the slate / large-action-space surface deferred from [#75] / [#85]:
 
@@ -556,6 +597,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#135]: https://github.com/dgenio/skdr-eval/issues/135
 [#136]: https://github.com/dgenio/skdr-eval/issues/136
 [#137]: https://github.com/dgenio/skdr-eval/issues/137
+[#106]: https://github.com/dgenio/skdr-eval/issues/106
+[#68]: https://github.com/dgenio/skdr-eval/issues/68
+[#124]: https://github.com/dgenio/skdr-eval/issues/124
+[#121]: https://github.com/dgenio/skdr-eval/issues/121
+[#125]: https://github.com/dgenio/skdr-eval/issues/125
 
 ## [0.6.0] - 2026-05-12
 

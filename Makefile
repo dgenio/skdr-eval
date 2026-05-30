@@ -1,6 +1,6 @@
 # Makefile for skdr-eval development
 
-.PHONY: help install install-dev clean lint format typecheck test test-cov build docs check validate smoke coverage-sim notebooks use-cases known-failures all
+.PHONY: help install install-dev clean lint format typecheck test test-cov build docs docs-serve check validate smoke coverage-sim notebooks use-cases known-failures all
 
 # Default target
 help:
@@ -14,7 +14,8 @@ help:
 	@echo "  test         Run tests with pytest"
 	@echo "  test-cov     Run tests with coverage report"
 	@echo "  build        Build package for distribution"
-	@echo "  docs         Generate documentation (future)"
+	@echo "  docs         Build the MkDocs site (--strict; needs [docs] extra)"
+	@echo "  docs-serve   Serve the docs site locally with live reload"
 	@echo "  check        Run all quality checks (lint + typecheck + test)"
 	@echo "  validate     Run comprehensive contribution validation (AI agent friendly)"
 	@echo "  coverage-sim Run moving-block bootstrap coverage simulation (issues #81 #62)"
@@ -63,10 +64,12 @@ test-cov:
 build: clean
 	python -m build
 
-# Documentation targets (placeholder for future)
+# Documentation targets (MkDocs Material + mkdocstrings). Requires [docs] extra.
 docs:
-	@echo "Documentation generation not yet implemented"
-	@echo "Future: sphinx-build -b html docs/ docs/_build/"
+	mkdocs build --strict
+
+docs-serve:
+	mkdocs serve
 
 # Validation target for AI agents and contributors
 validate:
@@ -106,6 +109,7 @@ use-cases:
 	python examples/use_cases/02_ad_targeting.py
 	python examples/use_cases/03_healthcare_cate.py
 	python examples/use_cases/04_call_routing.py
+	python examples/use_cases/05_logs_to_experiment_card.py
 
 # Known-failure-mode tutorials (#134). These scripts intentionally
 # produce ``support_health=high_risk`` so a newcomer can see what a bad

@@ -53,9 +53,9 @@ what a *bad* offline evaluation looks like before they ship one:
 
 | Tutorial | Failure regime | What the user should learn |
 |---|---|---|
-| [`examples/known_failures/poor_overlap.py`](../examples/known_failures/poor_overlap.py) | Logging policy is near-argmax; target policy disagrees | `support_health = high_risk`; do not trust V_hat |
-| [`examples/known_failures/misspecified_q.py`](../examples/known_failures/misspecified_q.py) | Outcome model is severely under-fit | DR survives via the IPS leg; DM is biased — illustrates *double* robustness |
-| [`examples/known_failures/non_stationary.py`](../examples/known_failures/non_stationary.py) | Reward distribution drifts between fold 1 and fold N | Moving-block bootstrap absorbs short-range dependence; long-range drift still under-covers — confirms the assumption boundary |
+| [`examples/known_failures/poor_overlap.py`](https://github.com/dgenio/skdr-eval/blob/main/examples/known_failures/poor_overlap.py) | Logging policy is near-argmax; target policy disagrees | `support_health = high_risk`; do not trust V_hat |
+| [`examples/known_failures/misspecified_q.py`](https://github.com/dgenio/skdr-eval/blob/main/examples/known_failures/misspecified_q.py) | Outcome model is severely under-fit | DR survives via the IPS leg; DM is biased — illustrates *double* robustness |
+| [`examples/known_failures/non_stationary.py`](https://github.com/dgenio/skdr-eval/blob/main/examples/known_failures/non_stationary.py) | Reward distribution drifts between fold 1 and fold N | Moving-block bootstrap absorbs short-range dependence; long-range drift still under-covers — confirms the assumption boundary |
 
 ## Update policy
 
