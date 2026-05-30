@@ -114,30 +114,21 @@ def dr_value_with_strategy(
     rows = np.arange(n_samples)
     A_int = A.astype(int)
     pi_obs = propensities[rows, A_int]
-    # DR overlap set: behavior *and* target support on the observed action
-    # within the eligibility mask. Requiring π(A|x) > 0 mirrors the clip-grid
-    # path and is what makes match_rate the policy-agreement rate (#106).
     pi_target_obs = policy_probs[rows, A_int]
-    matched = _matched_mask(pi_obs, A, elig) & (pi_target_obs > 0)
-    if matched.sum() == 0:
+    # Behavioural overlap: positive logging propensity on an eligible observed
+    # action. Target support is *not* pre-filtered into the context mask — each
+    # transform layers its own target-policy numerator. Exact-action ratios
+    # zero out automatically where π(A|x) == 0, while MIPS keeps rows whose
+    # target has support in the observed action's embedding *neighbourhood*; an
+    # exact-action ``π(A|x) > 0`` pre-filter would wrongly drop those rows (and
+    # then zero the weight MIPS just computed for them) — see #142.
+    behaviour_matched = _matched_mask(pi_obs, A, elig)
+    if not behaviour_matched.any():
         raise ValueError("No matched samples found")
-
-    # Diagnostics on the matched subset (identical to the clip-grid path so
-    # downstream consumers see consistent fields regardless of strategy).
-    pi_matched = pi_obs[matched]
-    match_rate = float(matched.mean())
-    min_pscore = float(pi_matched.min())
-    pscore_q01 = float(np.percentile(pi_matched, 1))
-    pscore_q05 = float(np.percentile(pi_matched, 5))
-    pscore_q10 = float(np.percentile(pi_matched, 10))
-    # PSIS Pareto-k on the raw DR importance ratio π(A|x)/e(A|x) over the
-    # overlap set (the actual heavy-tailed quantity), not 1/e alone.
-    w_ratio_matched = pi_target_obs[matched] / pi_matched
-    pareto_k = float(psis_pareto_k(w_ratio_matched))
 
     context = TransformContext(
         pi_obs=pi_obs,
-        matched=matched,
+        matched=behaviour_matched,
         policy_probs=policy_probs,
         A=A,
         elig=elig,
@@ -155,7 +146,31 @@ def dr_value_with_strategy(
             f"WeightTransform {strategy.weight_transform!r} returned negative "
             "weights; transforms must be non-negative."
         )
-    w[~matched] = 0.0
+    w[~behaviour_matched] = 0.0
+
+    # Strategy-aware overlap & tail diagnostics (#142). MIPS marginalises over
+    # an embedding neighbourhood, so for the embedding path the overlap set and
+    # heavy-tailed quantity are the *realised MIPS weight* — not the
+    # exact-action π(A|x)/e(A|x) ratio, which would mislabel neighbourhood-
+    # supported rows as unmatched and diagnose the wrong tail. For
+    # clip/SWITCH/DRos the exact-action ratio is correct and retained (#106),
+    # keeping those estimators' diagnostics byte-identical.
+    if action_embedding is not None:
+        overlap = w > 0
+        diag_weights = w[overlap]
+    else:
+        overlap = behaviour_matched & (pi_target_obs > 0)
+        diag_weights = pi_target_obs[overlap] / pi_obs[overlap]
+    if not overlap.any():
+        raise ValueError("No matched samples found")
+    pi_overlap = pi_obs[overlap]
+    match_rate = float(overlap.mean())
+    min_pscore = float(pi_overlap.min())
+    pscore_q01 = float(np.percentile(pi_overlap, 1))
+    pscore_q05 = float(np.percentile(pi_overlap, 5))
+    pscore_q10 = float(np.percentile(pi_overlap, 10))
+    # PSIS Pareto-k on the strategy's own importance-weight tail.
+    pareto_k = float(psis_pareto_k(diag_weights))
 
     # Policy-weighted outcome (q_pi). Same broadcasting rules as the
     # clip-grid path: q_hat may be 1D (marginal) or 2D (per-action).

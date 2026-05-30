@@ -328,27 +328,34 @@ class MIPSTransform:
                 f"{n_actions}), got {context.propensities.shape!r}"
             )
 
-        # Embedding-marginal logging density at the observed action's
-        # embedding neighbourhood:
-        #   p_e_log[i] = Σ_{a'} π_log(a' | x_i) · k(E_{a'}, E_{A_i})
-        # When the kernel is the identity matrix this collapses to
-        # pi_obs[i] = π_log(A_i | x_i) and MIPS reduces to skdr-eval's IPS.
-        # When the kernel is uniform (every action equivalent in embedding
-        # space) p_e_log[i] = 1 / n_actions and the MIPS weight becomes a
-        # constant ``n_actions`` — the action propensity is fully ignored.
+        # MIPS weight is the embedding-marginal *target/logging* density ratio
+        # at the observed action's embedding neighbourhood. Both densities are
+        # marginalised over the *same* kernel so the ratio is the genuine MIPS
+        # importance weight (#142):
+        #   p_e_log[i]    = Σ_{a'} π_log(a' | x_i) · k(E_{a'}, E_{A_i})
+        #   p_e_target[i] = Σ_{a}  π(a    | x_i) · k(E_{a},  E_{A_i})
+        # and the weight is p_e_target over p_e_log. Limiting cases:
+        # * Identity kernel — both marginals collapse to the exact action, so
+        #   w[i] = π(A_i | x_i) / π_log(A_i | x_i): MIPS reduces to skdr-eval's
+        #   per-action DR ratio (#106), recovered by the identity-kernel tests.
+        # * Uniform kernel — every action shares the same embedding, so both
+        #   marginals equal ``1 / n_actions`` and w[i] = 1: the embedding is
+        #   uninformative and MIPS applies no reweighting. (Previously the
+        #   exact-action numerator left w = n_actions here, an asymmetry that
+        #   made the weight depend on the arbitrary logged action — #142.)
         a_idx = context.A.astype(int)
         # Column of kernel at A_i for each row.
         kernel_at_A = kernel[:, a_idx]  # (n_actions, n)
         # Weighted sum over actions of the logging propensity times kernel.
         p_e_log = np.einsum("na,an->n", context.propensities, kernel_at_A)
-        # Target-policy probability of the observed action. Without this
-        # numerator the weight is independent of the policy under evaluation
-        # (see issue #106); the identity-kernel case then recovers the
-        # per-action DR ratio π(A_i|x_i) / e(A_i|x_i).
-        pi_target_obs = context.policy_probs[np.arange(n), a_idx]
+        # Symmetric target-policy embedding-marginal density. Marginalising the
+        # numerator over the same kernel (rather than using only the exact
+        # observed-action target probability) is what makes the weight a valid
+        # density ratio for a non-identity kernel (#142).
+        p_e_target = np.einsum("na,an->n", context.policy_probs, kernel_at_A)
         safe = context.matched & (p_e_log > 0)
         w = np.zeros(n, dtype=np.float64)
-        w[safe] = pi_target_obs[safe] / p_e_log[safe]
+        w[safe] = p_e_target[safe] / p_e_log[safe]
         if np.isfinite(self.clip):
             w = np.minimum(w, self.clip)
         return w

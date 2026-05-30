@@ -348,6 +348,46 @@ class ContributionValidator:
         print("CLI smoke passed (mirrors CI cli-smoke job)")
         return True
 
+    def check_docs_build(self) -> bool:
+        """Build the docs site exactly as the CI ``docs`` job does.
+
+        Mirrors the ``docs`` workflow / ``make docs`` (``mkdocs build
+        --strict``) so a docs warning that fails CI also fails local
+        validation, keeping CI, the Makefile, and the validator aligned. The
+        ``[docs]`` extra is optional, so when MkDocs is not installed this
+        records a warning and skips rather than hard-failing — contributors
+        without the docs extra can still run the core validation.
+        """
+        print("Building docs (mkdocs build --strict, mirrors CI docs job)...")
+        self.total_checks += 1
+
+        # Probe for MkDocs in a child process so the import never pollutes this
+        # one and a missing optional dependency degrades to a skip.
+        probe_code, _, _ = self.run_command([sys.executable, "-c", "import mkdocs"])
+        if probe_code != 0:
+            self.warnings.append(
+                "MkDocs not installed; skipped 'mkdocs build --strict'. Install "
+                "the docs extra (pip install -e .[docs]) to mirror the CI docs "
+                "job locally."
+            )
+            self.success_count += 1
+            print("SKIP docs build (mkdocs not installed — install .[docs])")
+            return True
+
+        code, stdout, stderr = self.run_command(
+            [sys.executable, "-m", "mkdocs", "build", "--strict"]
+        )
+        if code != 0:
+            self.errors.append(
+                f"Docs build failed (mkdocs build --strict)\n"
+                f"stdout:\n{stdout}\nstderr:\n{stderr}"
+            )
+            return False
+
+        self.success_count += 1
+        print("Docs build passed (mirrors CI docs job)")
+        return True
+
     def validate_all(self) -> bool:
         """Run all validation checks."""
         print("Starting contribution validation...\n")
@@ -361,6 +401,7 @@ class ContributionValidator:
             self.check_examples_smoke,
             self.check_cli_smoke,
             self.check_documentation,
+            self.check_docs_build,
             self.check_commit_messages,
         ]
 

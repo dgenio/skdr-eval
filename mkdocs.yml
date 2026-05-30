@@ -35,9 +35,13 @@ theme:
         icon: material/weather-sunny
         name: Switch to light mode
 
-# Internal agent-guidance docs are not part of the public site.
+# Internal agent-guidance and contributor docs are not part of the public site.
+# DEVELOPMENT.md is the repo-root contributor guide (mirrored under docs/ only
+# for local editing); excluding it keeps `mkdocs build --strict` deterministic
+# regardless of MkDocs' default nav-omission log level.
 exclude_docs: |
   agent-context/
+  DEVELOPMENT.md
 
 plugins:
   - search

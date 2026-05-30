@@ -125,18 +125,19 @@ class TestMIPSTransform:
         w_ips = IdentityTransform()(ctx)
         np.testing.assert_allclose(w_mips, w_ips, rtol=1e-6)
 
-    def test_uniform_kernel_collapses_to_constant_weight(self) -> None:
-        # Bandwidth=inf -> kernel rows are uniform 1/n_actions, so every
-        # row's embedding-marginal logging density is 1/n_actions and the
-        # MIPS weight is the constant n_actions — fully marginalising over
-        # the action propensity.
+    def test_uniform_kernel_collapses_to_unit_weight(self) -> None:
+        # Bandwidth=inf -> kernel rows are uniform 1/n_actions, so the target
+        # and logging embedding-marginal densities are *both* 1/n_actions and
+        # the MIPS weight is 1 everywhere: the embedding is uninformative, so a
+        # valid density ratio applies no reweighting (#142). (The pre-#142
+        # exact-action numerator left w = n_actions here, an asymmetry that
+        # made the weight depend on the arbitrary logged action.)
         emb = np.random.default_rng(0).normal(size=(3, 2))
         pi = np.array([0.5, 0.25, 0.1])
         A = np.array([0, 1, 2])
         ctx = _context(pi, A)
         w = MIPSTransform(action_embedding=emb, bandwidth=float("inf"))(ctx)
-        # n_actions = 3 -> w = 3 everywhere on the matched subset.
-        np.testing.assert_allclose(w, np.full(3, 3.0))
+        np.testing.assert_allclose(w, np.ones(3))
 
     def test_action_mismatch_raises(self) -> None:
         emb = np.eye(4)  # 4 rows but design has 3 actions

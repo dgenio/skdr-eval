@@ -32,6 +32,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `support_health=high_risk` newcomers saw on the library's own synthetic demos.
   Sigmoid calibration (`cv=3`) yields well-calibrated, non-degenerate
   propensities; well-explored logs now report `support_health=ok`.
+- **MIPS weight now marginalises the target numerator over the embedding
+  kernel** ([#142]). For a non-identity kernel the MIPS weight kept the
+  *exact observed-action* target probability `π(A|x)` as the numerator while
+  marginalising only the logging denominator `Σ_a' e(a'|x) k(E_a', E_A)`. The
+  asymmetric ratio is not a valid embedding-marginal density ratio: with a
+  uniform kernel it returned `n_actions` instead of `1`, and the weight
+  depended on the arbitrary logged action rather than the embedding support.
+  The numerator is now the symmetric marginal `Σ_a π(a|x) k(E_a, E_A)`
+  (identity kernel still recovers `π(A|x)/e(A|x)`, #106). Relatedly, the
+  strategy-aware diagnostics no longer pre-filter the overlap set on exact
+  observed-action target support — which had been **zeroing** MIPS rows that
+  have target support in the observed action's embedding neighbourhood — and
+  Pareto-k / `match_rate` for the embedding path now use the realised MIPS
+  weight rather than the exact-action ratio (clip / SWITCH-DR / DRos keep the
+  #106 exact-action diagnostics unchanged). A new simulation proof
+  (`tests/sim_studies/test_mips_marginal_recovery.py`) recovers the analytic
+  value of a non-uniform target under a clustered (non-identity) kernel, while
+  the old exact-action numerator stays materially biased. Downstream, the
+  LLM-reranker recipe (`evaluate_reranker_mips`) now leverages embedding
+  similarity for a one-hot (arg-max) target across all logged rows, as the
+  recipe always intended, instead of contributing an IPS correction only on the
+  rare rows where the logged candidate equalled the target's top pick.
+- **`validate_contribution.py` now mirrors the CI docs build** ([#142]). The
+  `make validate` path gained a `mkdocs build --strict` check (skipped with a
+  warning when the optional `[docs]` extra is absent), so a docs warning that
+  fails the CI `docs` job also fails local/agent validation — restoring the
+  CI / Makefile / validator alignment invariant. `docs/DEVELOPMENT.md` is also
+  excluded from the site (`exclude_docs`) to keep the strict build
+  deterministic.
 
 ### Added
 - **Documentation site** ([#68]). MkDocs Material + `mkdocstrings` site
@@ -598,6 +627,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#136]: https://github.com/dgenio/skdr-eval/issues/136
 [#137]: https://github.com/dgenio/skdr-eval/issues/137
 [#106]: https://github.com/dgenio/skdr-eval/issues/106
+[#142]: https://github.com/dgenio/skdr-eval/pull/142
 [#68]: https://github.com/dgenio/skdr-eval/issues/68
 [#124]: https://github.com/dgenio/skdr-eval/issues/124
 [#121]: https://github.com/dgenio/skdr-eval/issues/121
