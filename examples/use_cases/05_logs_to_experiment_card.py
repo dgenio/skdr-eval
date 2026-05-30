@@ -57,9 +57,7 @@ def make_logged_decisions(
     behavior = np.full((n, n_ops), explore / n_ops)
     behavior[np.arange(n), greedy] += 1.0 - explore
     actions = np.array([rng.choice(n_ops, p=behavior[i]) for i in range(n)])
-    service_time = np.maximum(
-        mu[np.arange(n), actions] + rng.normal(0.0, 1.0, n), 0.1
-    )
+    service_time = np.maximum(mu[np.arange(n), actions] + rng.normal(0.0, 1.0, n), 0.1)
 
     data: dict[str, object] = {
         "arrival_ts": ts,
@@ -145,9 +143,7 @@ def main() -> None:
     # 7. Hand-off artifact: a stakeholder card.
     dr = artifact.report[artifact.report["estimator"] == "DR"]
     best = dr.loc[dr["V_hat"].idxmin(), "model"]
-    card_path = artifact.save_card(
-        f"artifacts/recipe_{best}_card.html", best
-    )
+    card_path = artifact.save_card(f"artifacts/recipe_{best}_card.html", best)
     print(f"\n8. Wrote stakeholder card for '{best}': {card_path}")
     print("\nDecision rule:")
     print("  - support_health == 'ok'  -> proceed to A/B-test planning.")

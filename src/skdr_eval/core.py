@@ -995,11 +995,11 @@ def _dr_weight_components(
     n = len(A)
     idx = np.arange(n)
     A_int = A.astype(int)
-    pi_obs = propensities[idx, A_int]
-    pi_target_obs = policy_probs[idx, A_int]
+    pi_obs: np.ndarray = propensities[idx, A_int]
+    pi_target_obs: np.ndarray = policy_probs[idx, A_int]
     elig_bool = elig.astype(bool)
-    matched = (pi_obs > 0) & (pi_target_obs > 0) & elig_bool[idx, A_int]
-    w_raw = np.divide(
+    matched: np.ndarray = (pi_obs > 0) & (pi_target_obs > 0) & elig_bool[idx, A_int]
+    w_raw: np.ndarray = np.divide(
         pi_target_obs,
         pi_obs,
         out=np.zeros(n, dtype=np.float64),
@@ -1008,10 +1008,9 @@ def _dr_weight_components(
     return pi_obs, w_raw, matched
 
 
-def _clip_weights(
-    w_raw: np.ndarray, matched: np.ndarray, clip: float
-) -> np.ndarray:
+def _clip_weights(w_raw: np.ndarray, matched: np.ndarray, clip: float) -> np.ndarray:
     """Clip the raw DR importance ratio and zero it outside the overlap set."""
+    w_clip: np.ndarray
     if clip == float("inf"):
         w_clip = np.where(matched, w_raw, 0.0)
     else:
