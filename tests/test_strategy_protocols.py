@@ -24,13 +24,18 @@ from skdr_eval.estimators import (
 
 def _context(pi_obs: np.ndarray, A: np.ndarray, n_actions: int = 3) -> TransformContext:
     n = pi_obs.shape[0]
-    policy_probs = np.full((n, n_actions), 1.0 / n_actions)
+    a_int = A.astype(int)
+    # The working weight is the DR importance ratio π(A|x)/e(A|x) (#106). To
+    # isolate the *propensity transform* math under test from the policy, put
+    # all target mass on the observed action so π(A|x) == 1 and the ratio
+    # reduces to 1/e(A|x) — the quantity these unit tests were written around.
+    policy_probs = np.zeros((n, n_actions))
+    policy_probs[np.arange(n), a_int] = 1.0
     elig = np.ones((n, n_actions))
     matched = pi_obs > 0
     # Build a full logging propensity matrix: pi_obs at the observed action,
     # uniform remainder over the other actions so rows sum to 1.
     propensities = np.full((n, n_actions), 0.0)
-    a_int = A.astype(int)
     propensities[np.arange(n), a_int] = pi_obs
     leftover = (1.0 - pi_obs) / max(n_actions - 1, 1)
     for i in range(n):

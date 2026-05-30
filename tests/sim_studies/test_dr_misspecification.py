@@ -8,9 +8,13 @@ holding q_hat fixed (correct) while varying the propensity model.
 
 The convention used here is the library's: ``policy_probs`` carries the
 target-policy mass; ``q_hat`` is the cross-fitted prediction; the weight
-transform returns ``1/π_b``. Under that convention DR is
-``E[ q_π(X) + (1/π_b(A|X)) · (Y - q_hat(X, A)) ]`` and the residual term
-contributes 0 in expectation whenever ``E[Y - q_hat | X, A] = 0``.
+transform returns the importance ratio ``π(A|X) / π_b(A|X)``. Under that
+convention DR is
+``E[ q_π(X) + (π(A|X)/π_b(A|X)) · (Y - q_hat(X, A)) ]`` and the residual
+term contributes 0 in expectation whenever *either* ``E[Y - q_hat | X, A] =
+0`` (correct outcome model) *or* ``π_b`` is the true logging policy
+(correct propensity). See issue #106 for the bug — a dropped ``π(A|X)``
+numerator — that this convention note previously mis-described.
 
 All studies are gated by ``SIM_REPS`` (default 30 for CI; set
 ``SIM_REPS=200`` locally for a thorough check).
@@ -146,28 +150,33 @@ def test_dr_survives_wrong_propensity_when_q_correct_simulation() -> None:
     assert abs(med_bias) < 0.5, med_bias
 
 
-def test_dr_breaks_when_q_residual_has_bias_simulation() -> None:
-    """A q_hat whose residual has *non-zero* conditional mean breaks DR.
+def test_dr_survives_biased_q_when_propensity_correct_simulation() -> None:
+    """The "e saves us" leg: a biased q_hat does NOT break DR when e is correct.
 
-    Concretely we set ``q_hat(x, a) = mu_0`` for every action — this leaves
-    a non-zero residual mean on actions 1 and 2 even though e is correct.
-    DR cannot save us because the IPS leg multiplies this bias by 1/π_b.
-    The point of this test is to confirm the assumption boundary: DR is
-    robust to *one* misspecification, not to both.
+    We set ``q_hat(x, a) = mu_0`` for every action — a per-action-biased
+    outcome model (its residual mean is ``mu_a - mu_0 != 0`` for a != 0). With
+    the *correct* propensity ``e`` the DR estimator with the textbook weight
+    ``π(A|x) / e(A|x)`` still recovers ``V*``: the importance-weighted residual
+    term exactly cancels the q_hat bias. This is the complement of
+    :func:`test_dr_survives_wrong_propensity_when_q_correct_simulation` — DR is
+    consistent when *either* nuisance is correct.
+
+    Note: an earlier version of this test asserted the *opposite* (that DR is
+    biased here). That only held because the implementation dropped the
+    ``π(A|x)`` numerator from the weight, inflating the residual leg by a
+    factor of ``n_actions`` and manufacturing a spurious bias — see issue #106.
     """
     biases = []
     for seed in range(40_000, 40_000 + SIM_REPS):
         prob = _build_problem(seed)
-        # q_hat = mu[0] everywhere. The residual is (Y - mu[0]) which has
-        # conditional mean ``mu_a - mu_0`` != 0 for a != 0.
+        # q_hat = mu[0] everywhere — per-action biased, but e is correct.
         n = prob["A"].shape[0]
         q_bad = np.full(n, float(prob["mu"][0]))
         v_hat, _ = _run(prob, q_hat=q_bad, logging_pred=prob["logging"])
         biases.append(v_hat - prob["V_star"])
     med_bias = float(np.median(biases))
-    # The bias must be materially non-zero — this is the failure-mode
-    # signature we care about. We assert > 0.5 (~25% of V_star).
-    assert abs(med_bias) > 0.5, (
-        f"expected DR to be biased when q_hat residual has non-zero mean; got"
+    # Correct propensity ⇒ DR recovers V* regardless of the q_hat bias.
+    assert abs(med_bias) < 0.1, (
+        f"expected DR to recover V* via the correct propensity leg; got"
         f" median bias={med_bias:.3f}"
     )

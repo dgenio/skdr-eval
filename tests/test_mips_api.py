@@ -97,7 +97,8 @@ def test_invalid_kernel_name_raises() -> None:
 
 def test_identity_embedding_recovers_ips_under_small_bandwidth() -> None:
     # With distinct one-hot embeddings and a tiny bandwidth the RBF kernel is
-    # the identity, so the MIPS weight collapses to 1 / pi_obs (per-action IPS).
+    # the identity, so the MIPS weight collapses to the per-action DR ratio
+    # π(A|x) / e(A|x) (per-action IPS with the target-policy numerator, #106).
     rng = np.random.default_rng(0)
     n, n_actions = 50, 3
     emb = np.eye(n_actions)
@@ -108,7 +109,8 @@ def test_identity_embedding_recovers_ips_under_small_bandwidth() -> None:
     t = MIPSTransform(action_embedding=emb, bandwidth=1e-6, kernel="rbf")
     w = t(_context(propensities, policy, A, elig))
     pi_obs = propensities[np.arange(n), A]
-    assert np.allclose(w, 1.0 / pi_obs)
+    pi_target_obs = policy[np.arange(n), A]
+    assert np.allclose(w, pi_target_obs / pi_obs)
 
 
 def test_column_name_embedding_resolution() -> None:
