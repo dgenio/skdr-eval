@@ -90,11 +90,22 @@ __all__ = [
 ]
 
 
-def _raw_inverse(pi_obs: np.ndarray, matched: np.ndarray) -> np.ndarray:
-    """Return ``1 / pi_obs`` with zeros on the unmatched rows."""
+def _raw_inverse(context: TransformContext) -> np.ndarray:
+    """Return the DR importance ratio ``π(A|x) / e(A|x)`` (#106).
+
+    The variance-reduction transforms (clip, SWITCH-DR, DRos) are nonlinear
+    functions of the *actual* importance weight, so they must operate on the
+    full ratio ``π(A_i|x_i) / e(A_i|x_i)`` — not on ``1 / e(A_i|x_i)`` alone.
+    Dropping the target-policy numerator ``π(A_i|x_i)`` made every estimate
+    independent of the policy being evaluated (see issue #106). Zeros on the
+    unmatched subset so callers can sum without masking.
+    """
+    pi_obs = context.pi_obs
+    a_idx = context.A.astype(int)
+    pi_target_obs = context.policy_probs[np.arange(pi_obs.shape[0]), a_idx]
     w = np.zeros_like(pi_obs, dtype=np.float64)
-    safe = matched & (pi_obs > 0)
-    w[safe] = 1.0 / pi_obs[safe]
+    safe = context.matched & (pi_obs > 0)
+    w[safe] = pi_target_obs[safe] / pi_obs[safe]
     return w
 
 
@@ -110,7 +121,7 @@ class IdentityTransform:
     name: str = "identity"
 
     def __call__(self, context: TransformContext) -> np.ndarray:
-        return _raw_inverse(context.pi_obs, context.matched)
+        return _raw_inverse(context)
 
 
 @dataclass(frozen=True)
@@ -128,7 +139,7 @@ class ClipTransform:
     name: str = "clip"
 
     def __call__(self, context: TransformContext) -> np.ndarray:
-        w = _raw_inverse(context.pi_obs, context.matched)
+        w = _raw_inverse(context)
         if np.isfinite(self.clip):
             w = np.minimum(w, self.clip)
         return w
@@ -151,7 +162,7 @@ class SwitchTauTransform:
             raise ValueError(f"tau must be a positive finite float, got {self.tau!r}")
 
     def __call__(self, context: TransformContext) -> np.ndarray:
-        w_raw = _raw_inverse(context.pi_obs, context.matched)
+        w_raw = _raw_inverse(context)
         # Fall back to direct-method on rows where the raw weight blows past tau.
         w = np.where(w_raw <= self.tau, w_raw, 0.0)
         return w
@@ -176,7 +187,7 @@ class DRosShrinkTransform:
             )
 
     def __call__(self, context: TransformContext) -> np.ndarray:
-        w_raw = _raw_inverse(context.pi_obs, context.matched)
+        w_raw = _raw_inverse(context)
         if self.lam == 0:
             return np.zeros_like(w_raw)
         denom = w_raw**2 + self.lam
@@ -330,9 +341,14 @@ class MIPSTransform:
         kernel_at_A = kernel[:, a_idx]  # (n_actions, n)
         # Weighted sum over actions of the logging propensity times kernel.
         p_e_log = np.einsum("na,an->n", context.propensities, kernel_at_A)
+        # Target-policy probability of the observed action. Without this
+        # numerator the weight is independent of the policy under evaluation
+        # (see issue #106); the identity-kernel case then recovers the
+        # per-action DR ratio π(A_i|x_i) / e(A_i|x_i).
+        pi_target_obs = context.policy_probs[np.arange(n), a_idx]
         safe = context.matched & (p_e_log > 0)
         w = np.zeros(n, dtype=np.float64)
-        w[safe] = 1.0 / p_e_log[safe]
+        w[safe] = pi_target_obs[safe] / p_e_log[safe]
         if np.isfinite(self.clip):
             w = np.minimum(w, self.clip)
         return w

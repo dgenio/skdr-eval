@@ -114,7 +114,11 @@ def dr_value_with_strategy(
     rows = np.arange(n_samples)
     A_int = A.astype(int)
     pi_obs = propensities[rows, A_int]
-    matched = _matched_mask(pi_obs, A, elig)
+    # DR overlap set: behavior *and* target support on the observed action
+    # within the eligibility mask. Requiring π(A|x) > 0 mirrors the clip-grid
+    # path and is what makes match_rate the policy-agreement rate (#106).
+    pi_target_obs = policy_probs[rows, A_int]
+    matched = _matched_mask(pi_obs, A, elig) & (pi_target_obs > 0)
     if matched.sum() == 0:
         raise ValueError("No matched samples found")
 
@@ -126,7 +130,10 @@ def dr_value_with_strategy(
     pscore_q01 = float(np.percentile(pi_matched, 1))
     pscore_q05 = float(np.percentile(pi_matched, 5))
     pscore_q10 = float(np.percentile(pi_matched, 10))
-    pareto_k = float(psis_pareto_k(1.0 / pi_matched))
+    # PSIS Pareto-k on the raw DR importance ratio π(A|x)/e(A|x) over the
+    # overlap set (the actual heavy-tailed quantity), not 1/e alone.
+    w_ratio_matched = pi_target_obs[matched] / pi_matched
+    pareto_k = float(psis_pareto_k(w_ratio_matched))
 
     context = TransformContext(
         pi_obs=pi_obs,
