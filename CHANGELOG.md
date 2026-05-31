@@ -63,6 +63,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deterministic.
 
 ### Added
+- **Generic trace → OPE-log adapter** ([#149]). New `skdr_eval.adapters`
+  package with `from_records` and `from_jsonl_trace`: map generic
+  `(context, action, reward[, timestamp, propensity])` decision records —
+  including JSONL agent traces — into the canonical logs schema consumed by
+  `evaluate_sklearn_models`, no hand-shaping required. Mapping context (a dict
+  of named numeric features or a flat sequence) becomes `cli_*` columns; the
+  chosen action and optional per-row `eligible_actions` define the `*_elig`
+  universe; missing timestamps synthesize a monotonic order. Logged
+  propensities are flagged via `TraceAdapterResult.had_logged_propensities`
+  (skdr-eval estimates calibrated propensities internally). Output passes
+  `validate_logs` / `doctor`.
+- **Agent routing / tool-selection example** ([#150]).
+  `examples/use_cases/06_agent_routing_policy.py` evaluates a candidate agent
+  routing policy from logged traces via the adapter, showing both a healthy
+  (`support_health=ok`) and an unhealthy (`high_risk`) regime. Wired into the
+  CI use-cases smoke job.
+- **Offline-evaluation companion guide** ([#148]). `docs/weaver-stack.md`
+  positions skdr-eval as a standalone-first, MIT companion (not core) to agent
+  stacks, with the trace-adapter seam and reciprocal cross-links.
+- **Flagship LLM-reranker OPE recipe page** ([#145]).
+  `docs/recipes/llm-reranker-ope.md` plus a Colab badge and an explicit
+  deploy/don't-deploy verdict in `examples/notebooks/10_llm_reranker_ope.ipynb`,
+  framed for the LLM/agents audience; a README "Evaluate LLM / agent policies
+  offline" section links both.
 - **Honest bootstrap SE for the LLM-reranker recipe** ([#142]).
   `evaluate_reranker_mips` gained an opt-in `n_bootstrap` (default `0`): when
   set it reports a full-pipeline bootstrap SE that refits `q̂` on each resample,
@@ -117,6 +141,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     dependency; CPU-only.
 
 ### Changed
+- **`doctor(kind="standard")` honours `metric_col` in the schema check**
+  ([#149]). The standard preflight previously validated the logs schema with
+  the hard-coded `service_time` reward column, so general-purpose OPE logs with
+  a differently-named reward (e.g. `reward`, `cost`) falsely failed. The
+  standard schema check now passes `metric_col` through to
+  `validate_logs(y_col=...)`, and the finite-outcomes check includes
+  `metric_col`. No change for the default `service_time` reward.
 - **MIPS no-embedding behaviour is now a graceful SNDR fallback** ([#136],
   [#85]). Requesting `"MIPS"` without `action_embedding=` previously raised
   `ValueError`; it now **falls back to SNDR with a `UserWarning`** (the `MIPS`
@@ -645,6 +676,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#124]: https://github.com/dgenio/skdr-eval/issues/124
 [#121]: https://github.com/dgenio/skdr-eval/issues/121
 [#125]: https://github.com/dgenio/skdr-eval/issues/125
+[#145]: https://github.com/dgenio/skdr-eval/issues/145
+[#148]: https://github.com/dgenio/skdr-eval/issues/148
+[#149]: https://github.com/dgenio/skdr-eval/issues/149
+[#150]: https://github.com/dgenio/skdr-eval/issues/150
 
 ## [0.6.0] - 2026-05-12
 

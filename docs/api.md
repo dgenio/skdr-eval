@@ -27,6 +27,14 @@ exported from the top-level `skdr_eval` package.
 
 ::: skdr_eval.get_capabilities
 
+## Input adapters
+
+::: skdr_eval.adapters.from_records
+
+::: skdr_eval.adapters.from_jsonl_trace
+
+::: skdr_eval.adapters.TraceAdapterResult
+
 ## Synthetic data
 
 ::: skdr_eval.make_synth_logs
