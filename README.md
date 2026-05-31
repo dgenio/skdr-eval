@@ -129,7 +129,8 @@ library actually gets used, and it does not require reading any theory first:
 - **Have logs already?** Skim [Quick Start](#quick-start) below; the standard / pairwise variants are both two screens long. The full workflow is the [logs → experiment-review card recipe](docs/recipes/logs-to-experiment-card.md).
 - **Not sure whether to trust an estimate?** Read the [report interpretation guide](docs/report-interpretation.md), the [metrics glossary](docs/metrics-glossary.md), and the [good-vs-bad support tutorial](docs/recipes/good-vs-bad-support.md).
 - **Comparing against another OPE library?** See [`docs/comparisons.md`](docs/comparisons.md) for OBP / SCOPE-RL / d3rlpy / banditml, and [`docs/methods.md`](docs/methods.md) for the methodological positioning.
-- **Looking for end-to-end examples by domain?** Browse [`examples/use_cases/`](examples/use_cases/) for runnable scripts (e-commerce ranking, ad targeting, healthcare CATE, call routing, logs→card).
+- **Looking for end-to-end examples by domain?** Browse [`examples/use_cases/`](examples/use_cases/) for runnable scripts (e-commerce ranking, ad targeting, healthcare CATE, call routing, logs→card, agent routing).
+- **Evaluating an LLM reranker or an agent routing/tool-selection policy?** See [Evaluate LLM / agent policies offline](#evaluate-llm--agent-policies-offline) below.
 
 > The `skdr-eval` CLI (`pip install 'skdr-eval[cli]'`) makes the same
 > evaluators reachable from a terminal — see [Command-line interface](#command-line-interface).
@@ -597,6 +598,42 @@ with FileTracker(root="runs/2026-05-20") as tracker:
 #   runs/2026-05-20/cards/<model>_<estimator>.card.yaml
 ```
 
+## Evaluate LLM / agent policies offline
+
+You don't need a classic tabular logging pipeline to use `skdr-eval`. If you
+have **logged LLM-reranker or agent routing / tool-selection decisions**, you
+can estimate whether a *candidate* policy would do better — offline, CPU-only,
+before an A/B test.
+
+- **LLM reranker:** *"How do I know my new reranker is actually better, without
+  shipping it?"* The [LLM-reranker OPE recipe](docs/recipes/llm-reranker-ope.md)
+  ([notebook](examples/notebooks/10_llm_reranker_ope.ipynb) ·
+  [Colab](https://colab.research.google.com/github/dgenio/skdr-eval/blob/main/examples/notebooks/10_llm_reranker_ope.ipynb))
+  evaluates a candidate reranker with embedding-**MIPS** and recovers a known
+  ground-truth value within ±2 SE.
+- **Agent routing / tool selection:** map generic `(context, action, reward)`
+  traces with the trace adapter and evaluate a candidate routing policy:
+
+  ```python
+  import skdr_eval
+
+  adapted = skdr_eval.adapters.from_jsonl_trace("agent_traces.jsonl", reward_col="cost")
+  artifact = skdr_eval.evaluate_sklearn_models(
+      logs=adapted.logs, models={"candidate": my_cost_model}, y_col=adapted.reward_col,
+  )
+  print(artifact.report[["model", "estimator", "V_hat", "support_health"]])
+  ```
+
+  See [`examples/use_cases/06_agent_routing_policy.py`](examples/use_cases/06_agent_routing_policy.py)
+  (healthy vs. `high_risk` support) and the
+  [offline-evaluation companion guide](docs/weaver-stack.md).
+
+The trace adapter (`skdr_eval.adapters.from_records` / `from_jsonl_trace`) maps
+`(context, action, reward[, timestamp, propensity])` records — including JSONL
+agent traces — into a schema-valid logs frame, so you don't hand-shape a
+DataFrame. skdr-eval estimates calibrated propensities internally; a logged
+propensity in the trace is reported but not consumed.
+
 ## Examples
 
 `examples/` ships three kinds of runnable artifacts — pick the one that
@@ -787,6 +824,19 @@ If Trusted Publishing is not configured:
    - **Repository**: `dgenio/skdr-eval`
    - **Workflow**: `release.yml`
    - **Environment**: `release`
+
+## Ecosystem
+
+`skdr-eval` is **standalone-first and MIT-licensed**, with no runtime dependency
+on any other framework. It also serves as an optional **offline-evaluation
+companion** to agent stacks (e.g. the Weaver stack): those systems produce
+logged agent decisions, and `skdr-eval` answers *"would this candidate
+routing/tool-selection policy actually perform better, from these logs, before
+we ship it?"* — including the honest *"your logs don't support that question
+yet"* answer.
+
+See [`docs/weaver-stack.md`](docs/weaver-stack.md) for the companion guide,
+positioning boundary, and cross-links.
 
 ## Citation
 
