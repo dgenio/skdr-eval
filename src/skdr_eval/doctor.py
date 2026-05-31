@@ -173,9 +173,9 @@ def _check_optional_extras() -> Check:
     )
 
 
-def _check_logs_schema(logs: pd.DataFrame, *, strict: bool) -> Check:
+def _check_logs_schema(logs: pd.DataFrame, *, metric_col: str, strict: bool) -> Check:
     try:
-        validate_logs(logs, strict=strict)
+        validate_logs(logs, y_col=metric_col, strict=strict)
     except (DataValidationError, InsufficientDataError) as exc:
         return Check(
             name="schema",
@@ -443,8 +443,10 @@ def doctor(
     op_daily_df : pd.DataFrame, optional
         Required when ``kind="pairwise"``; ignored otherwise.
     metric_col : str, default ``"service_time"``
-        Pairwise metric column name. Used both by the pairwise validator and
-        by the finite-outcomes check.
+        Name of the reward/outcome column. Used by the standard and pairwise
+        schema validators (as ``validate_logs(y_col=...)`` in standard mode) and
+        by the finite-outcomes check. Pass your own column name for
+        general-purpose OPE logs whose reward is not ``"service_time"``.
     n_splits : int, default 3
         CV split count used by the sample-size floor heuristic.
     strict : bool, default False
@@ -486,9 +488,9 @@ def doctor(
         )
         outcome_cols: tuple[str, ...] = (metric_col,)
     else:
-        checks.append(_check_logs_schema(logs, strict=strict))
+        checks.append(_check_logs_schema(logs, metric_col=metric_col, strict=strict))
         checks.append(_check_no_duplicates(logs, key_cols=["client_id", "arrival_ts"]))
-        outcome_cols = ("service_time", "reward", "y")
+        outcome_cols = tuple(dict.fromkeys((metric_col, "service_time", "reward", "y")))
 
     checks.append(_check_finite_outcomes(logs, outcome_cols=outcome_cols))
     checks.append(_check_positivity(logs))

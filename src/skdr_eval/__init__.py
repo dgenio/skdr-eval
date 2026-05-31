@@ -2,6 +2,7 @@
 
 import importlib
 
+from . import adapters as adapters
 from . import estimators as estimators
 from . import slate as slate
 from ._simulation import CoverageResult, simulate_coverage

@@ -79,6 +79,14 @@ class TestDoctorChecks:
         assert not report.ok
         assert any(c.name == "schema" and c.status == "fail" for c in report.checks)
 
+    def test_standard_schema_honors_custom_metric_col(self):
+        # General-purpose OPE logs whose reward column is not "service_time"
+        # must pass the standard schema check when metric_col names it (#149).
+        logs = _good_logs().rename(columns={"service_time": "reward"})
+        report = doctor(logs, metric_col="reward")
+        assert report.ok
+        assert any(c.name == "schema" and c.status == "pass" for c in report.checks)
+
     def test_small_sample_size_fails(self):
         logs = _good_logs(n=100)  # well below 500 floor
         report = doctor(logs)
