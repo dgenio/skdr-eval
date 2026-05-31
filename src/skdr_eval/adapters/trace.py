@@ -16,7 +16,7 @@ Propensity handling
 skdr-eval estimates (calibrated) logging propensities internally from the logged
 actions and features, so a logged ``propensity`` value in the trace is
 *informational*: it is surfaced via
-:attr:`TraceAdapterResult.had_logged_propensities` and a one-time warning, not
+:attr:`TraceAdapterResult.had_logged_propensities` and a logged warning, not
 consumed by the DR/SNDR estimators. The no-logged-propensity case is the default
 and requires nothing extra.
 """
