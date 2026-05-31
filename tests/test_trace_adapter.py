@@ -265,3 +265,27 @@ def test_sequence_non_numeric_element_raises() -> None:
     records = [{"context": [1.0, "x"], "action": "a", "reward": 1.0}]
     with pytest.raises(DataValidationError, match=r"index 1.* is not numeric"):
         from_records(records, timestamp_key=None)
+
+
+def test_zero_dim_array_context_raises() -> None:
+    # A 0-d ndarray satisfies isinstance(..., np.ndarray) but is not iterable;
+    # it must surface as a DataValidationError, not a raw TypeError.
+    records = [{"context": np.array(5.0), "action": "a", "reward": 1.0}]
+    with pytest.raises(DataValidationError, match="0-d array"):
+        from_records(records, timestamp_key=None)
+
+
+def test_reward_col_colliding_with_structural_column_raises() -> None:
+    # reward_col="action" would silently overwrite the action column; the
+    # adapter must reject the collision instead of emitting a corrupt frame.
+    records = [{"context": {"x": 1.0}, "action": "a", "reward": 1.0}]
+    with pytest.raises(DataValidationError, match="column name collision"):
+        from_records(records, timestamp_key=None, reward_col="action")
+
+
+def test_feature_prefix_collision_with_action_raises() -> None:
+    # An empty feature_prefix lets a context key named "action" collide with
+    # the structural action column.
+    records = [{"context": {"action": 1.0}, "action": "a", "reward": 1.0}]
+    with pytest.raises(DataValidationError, match="column name collision"):
+        from_records(records, timestamp_key=None, feature_prefix="")

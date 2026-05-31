@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -114,6 +115,11 @@ def _context_to_features(
             )
         values = [context[k] for k in feature_keys]
     elif isinstance(context, list | tuple | np.ndarray):
+        if isinstance(context, np.ndarray) and context.ndim == 0:
+            raise DataValidationError(
+                f"record {record_index}: context must be a mapping or a sequence "
+                "of numeric features, got a 0-d array"
+            )
         seq = list(context)
         if feature_len is not None and len(seq) != feature_len:
             raise DataValidationError(
@@ -214,6 +220,11 @@ def from_records(
         feature_keys = list(first_ctx.keys())
         feature_names = [f"{feature_prefix}{k}" for k in feature_keys]
     elif isinstance(first_ctx, list | tuple | np.ndarray):
+        if isinstance(first_ctx, np.ndarray) and first_ctx.ndim == 0:
+            raise DataValidationError(
+                "record 0: context must be a mapping or a sequence of numeric "
+                "features, got a 0-d array"
+            )
         feature_len = len(list(first_ctx))
         feature_names = [f"{feature_prefix}{i}" for i in range(feature_len)]
     else:
@@ -322,6 +333,26 @@ def from_records(
             synthesized = False
     else:
         arrival_ts = np.arange(n, dtype=np.int64)
+
+    # Guard against silent column overwrites: the emitted frame stacks
+    # arrival_ts, the feature columns, one ``*_elig`` column per action, the
+    # action column and the reward column into one namespace. A pathological
+    # reward_col (e.g. "action") or a feature/eligibility name clash would
+    # otherwise overwrite an earlier column without warning.
+    column_order = [
+        "arrival_ts",
+        *feature_names,
+        *(f"{a}_elig" for a in action_vocab),
+        "action",
+        reward_col,
+    ]
+    counts = Counter(column_order)
+    clashes = sorted(name for name, count in counts.items() if count > 1)
+    if clashes:
+        raise DataValidationError(
+            f"output column name collision on {clashes}: choose a distinct "
+            "reward_col / feature_prefix so emitted columns stay unique"
+        )
 
     data: dict[str, Any] = {"arrival_ts": arrival_ts}
     for j, name in enumerate(feature_names):
