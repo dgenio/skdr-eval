@@ -172,3 +172,96 @@ def test_from_jsonl_trace_rejects_bad_json(tmp_path) -> None:
     path.write_text('{"context": {"x": 1.0}, "action": "a", "reward": 1.0}\nnot json\n')
     with pytest.raises(DataValidationError, match="not valid JSON"):
         from_jsonl_trace(path)
+
+
+def test_from_jsonl_trace_rejects_non_object_line(tmp_path) -> None:
+    path = tmp_path / "arr.jsonl"
+    path.write_text("[1, 2, 3]\n")
+    with pytest.raises(DataValidationError, match="must be a JSON object"):
+        from_jsonl_trace(path)
+
+
+def test_summary_is_descriptive() -> None:
+    res = from_records(_mapping_records(n=5))
+    summary = res.summary()
+    assert "5 records" in summary
+    assert "timestamps from trace" in summary
+    assert "logged propensities absent" in summary
+
+
+def test_numeric_timestamps_are_used_not_synthesized() -> None:
+    records = [
+        {"context": {"x": 1.0}, "action": "a", "reward": 1.0, "timestamp": 10},
+        {"context": {"x": 2.0}, "action": "a", "reward": 2.0, "timestamp": 20},
+    ]
+    res = from_records(records)
+    assert res.synthesized_timestamps is False
+    assert res.logs["arrival_ts"].tolist() == [10.0, 20.0]
+
+
+def test_unparseable_timestamps_raise() -> None:
+    records = [
+        {"context": {"x": 1.0}, "action": "a", "reward": 1.0, "timestamp": "nope"},
+        {"context": {"x": 2.0}, "action": "a", "reward": 2.0, "timestamp": "nah"},
+    ]
+    with pytest.raises(DataValidationError, match="could not all be parsed"):
+        from_records(records)
+
+
+def test_non_finite_context_raises() -> None:
+    records = [{"context": {"x": float("inf")}, "action": "a", "reward": 1.0}]
+    with pytest.raises(DataValidationError, match="non-finite"):
+        from_records(records, timestamp_key=None)
+
+
+def test_first_record_missing_context_raises() -> None:
+    with pytest.raises(DataValidationError, match="record 0: missing context key"):
+        from_records([{"action": "a", "reward": 1.0}], timestamp_key=None)
+
+
+def test_scalar_context_raises() -> None:
+    records = [{"context": 5, "action": "a", "reward": 1.0}]
+    with pytest.raises(DataValidationError, match="must be a mapping or a sequence"):
+        from_records(records, timestamp_key=None)
+
+
+def test_empty_context_has_no_features_raises() -> None:
+    records = [{"context": {}, "action": "a", "reward": 1.0}]
+    with pytest.raises(DataValidationError, match="context has no features"):
+        from_records(records, timestamp_key=None)
+
+
+def test_later_record_missing_context_raises() -> None:
+    records = [
+        {"context": {"x": 1.0}, "action": "a", "reward": 1.0},
+        {"action": "b", "reward": 2.0},
+    ]
+    with pytest.raises(DataValidationError, match="record 1: missing context key"):
+        from_records(records, timestamp_key=None)
+
+
+def test_missing_action_key_raises() -> None:
+    records = [{"context": {"x": 1.0}, "reward": 1.0}]
+    with pytest.raises(DataValidationError, match="missing action key"):
+        from_records(records, timestamp_key=None)
+
+
+def test_non_numeric_reward_raises() -> None:
+    records = [{"context": {"x": 1.0}, "action": "a", "reward": "high"}]
+    with pytest.raises(DataValidationError, match=r"reward .* is not numeric"):
+        from_records(records, timestamp_key=None)
+
+
+def test_sequence_length_mismatch_raises() -> None:
+    records = [
+        {"context": [1.0, 2.0], "action": "a", "reward": 1.0},
+        {"context": [1.0], "action": "b", "reward": 2.0},
+    ]
+    with pytest.raises(DataValidationError, match="context length 1 differs"):
+        from_records(records, timestamp_key=None)
+
+
+def test_sequence_non_numeric_element_raises() -> None:
+    records = [{"context": [1.0, "x"], "action": "a", "reward": 1.0}]
+    with pytest.raises(DataValidationError, match=r"index 1.* is not numeric"):
+        from_records(records, timestamp_key=None)
