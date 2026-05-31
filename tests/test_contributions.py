@@ -188,10 +188,13 @@ def test_compute_contributions_unbounded_clip():
     n, k = 16, 3
     propensities = rng.uniform(0.1, 0.9, size=(n, k))
     propensities /= propensities.sum(axis=1, keepdims=True)
-    policy_probs = np.eye(k)[rng.integers(0, k, size=n)]
+    A = rng.integers(0, k, size=n)
+    # Target puts mass on the observed action so π(A|x) = 1 and every row is in
+    # the DR overlap set (matched requires both behavior and target support on
+    # the observed action — see #106).
+    policy_probs = np.eye(k)[A]
     Y = rng.normal(size=n)
     q_hat = rng.normal(size=n)
-    A = rng.integers(0, k, size=n)
     elig = np.ones((n, k))
     q_pi, w_clip, dr_contrib, decision_id, matched = _compute_contributions(
         propensities, policy_probs, Y, q_hat, A, elig, clip=float("inf")

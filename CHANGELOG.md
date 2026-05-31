@@ -7,7 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **DR/SNDR importance weight now includes the target policy** ([#106]). The
+  estimator computed the importance weight as `1/e(A|x)` (inverse logging
+  propensity) instead of the textbook doubly-robust ratio `π(A|x)/e(A|x)`.
+  Combined with the marginal (1-D) outcome model — for which the direct-method
+  term `q_pi` collapses to `q_hat` — the estimate was **completely independent
+  of the policy under evaluation**: different candidate models produced
+  byte-identical `V_hat`/`SE`/`ESS`, and the correction term did not target any
+  well-defined policy value. The fix (`_dr_weight_components`) applies
+  `π(A|x)/e(A|x)` over the DR overlap set (behavior **and** target support on
+  the observed action) at every weight site — the clip-grid path, the
+  per-decision contributions, both bootstrap recomputations, and the
+  strategy-aware path (MRDR / SWITCH-DR / DRos / MIPS, whose transforms now
+  operate on the true importance weight). `match_rate` is now the DR overlap
+  rate, and PSIS Pareto-k / tail-mass use the actual weight tail. A new
+  simulation proof (`tests/sim_studies/test_policy_value_recovery.py`) shows the
+  corrected estimator recovers the analytic value of a non-uniform target while
+  the old `1/e` weight does not.
+- **Propensity calibration switched from isotonic to sigmoid (Platt)** ([#106]).
+  Isotonic `CalibratedClassifierCV(cv=2)` overfit the small time-aware folds and
+  drove some estimated propensities to ≈0 (`min_pscore≈0`), tripping
+  `POOR_OVERLAP` / `MISCAL_PROP` even on well-overlapped data — the alarming
+  `support_health=high_risk` newcomers saw on the library's own synthetic demos.
+  Sigmoid calibration (`cv=3`) yields well-calibrated, non-degenerate
+  propensities; well-explored logs now report `support_health=ok`.
+- **MIPS weight now marginalises the target numerator over the embedding
+  kernel** ([#142]). For a non-identity kernel the MIPS weight kept the
+  *exact observed-action* target probability `π(A|x)` as the numerator while
+  marginalising only the logging denominator `Σ_a' e(a'|x) k(E_a', E_A)`. The
+  asymmetric ratio is not a valid embedding-marginal density ratio: with a
+  uniform kernel it returned `n_actions` instead of `1`, and the weight
+  depended on the arbitrary logged action rather than the embedding support.
+  The numerator is now the symmetric marginal `Σ_a π(a|x) k(E_a, E_A)`
+  (identity kernel still recovers `π(A|x)/e(A|x)`, #106). Relatedly, the
+  strategy-aware diagnostics no longer pre-filter the overlap set on exact
+  observed-action target support — which had been **zeroing** MIPS rows that
+  have target support in the observed action's embedding neighbourhood — and
+  Pareto-k / `match_rate` for the embedding path now use the realised MIPS
+  weight rather than the exact-action ratio (clip / SWITCH-DR / DRos keep the
+  #106 exact-action diagnostics unchanged). A new simulation proof
+  (`tests/sim_studies/test_mips_marginal_recovery.py`) recovers the analytic
+  value of a non-uniform target under a clustered (non-identity) kernel, while
+  the old exact-action numerator stays materially biased. Downstream, the
+  LLM-reranker recipe (`evaluate_reranker_mips`) now leverages embedding
+  similarity for a one-hot (arg-max) target across all logged rows, as the
+  recipe always intended, instead of contributing an IPS correction only on the
+  rare rows where the logged candidate equalled the target's top pick.
+- **`validate_contribution.py` now mirrors the CI docs build** ([#142]). The
+  `make validate` path gained a `mkdocs build --strict` check (skipped with a
+  warning when the optional `[docs]` extra is absent), so a docs warning that
+  fails the CI `docs` job also fails local/agent validation — restoring the
+  CI / Makefile / validator alignment invariant. `docs/DEVELOPMENT.md` is also
+  excluded from the site (`exclude_docs`) to keep the strict build
+  deterministic.
+
 ### Added
+- **Honest bootstrap SE for the LLM-reranker recipe** ([#142]).
+  `evaluate_reranker_mips` gained an opt-in `n_bootstrap` (default `0`): when
+  set it reports a full-pipeline bootstrap SE that refits `q̂` on each resample,
+  capturing the `q̂`-estimation variance the plug-in influence-function SE omits.
+  The plug-in SE conditions on a fixed `q̂` and so understates run-to-run
+  variance (per-seed ±2·SE intervals under-cover); the bootstrap SE restores
+  nominal coverage. The point estimate is unchanged.
+- **Propensity-calibration recovery proof** ([#142]).
+  `tests/sim_studies/test_propensity_calibration_recovery.py` proves the #106
+  isotonic→sigmoid switch: on a well-overlapped DGP the sigmoid path yields
+  non-degenerate propensities that track the truth, while isotonic(cv=2)
+  collapses to hard-zero propensities on the same fold-sized data (the
+  `min_pscore≈0` / `POOR_OVERLAP` mechanism #106 fixed).
+- **Documentation site** ([#68]). MkDocs Material + `mkdocstrings` site
+  (`mkdocs.yml`, `docs/index.md`, getting-started, concepts, recipes, API
+  reference), a `--strict` CI build job, a `.readthedocs.yaml` for versioned
+  publishing, and wired-up `make docs` / `make docs-serve` targets.
+- **Logs → experiment-review card recipe** ([#124]). New
+  `examples/use_cases/05_logs_to_experiment_card.py` and
+  `docs/recipes/logs-to-experiment-card.md`: the end-to-end practitioner
+  workflow on well-explored logs, reading the artifact in the order
+  `support_health → warnings → sensitivity → calibration → V_hat`.
+- **Good-vs-bad support tutorial** ([#121]). New
+  `examples/notebooks/06_good_vs_bad_support.ipynb` (nbmake-gated) and
+  `docs/recipes/good-vs-bad-support.md` contrasting a healthy (`ok`) and an
+  unsupported (`high_risk`) evaluation on the same problem.
+- **Public launch readiness checklist** ([#125]). New `docs/LAUNCH_CHECKLIST.md`
+  defining the trust/credibility/contribution gates before broad promotion.
 - **Slate + MIPS OPE completion** ([#135], [#136], [#137], [#95]). One-PR sweep
   finishing the slate / large-action-space surface deferred from [#75] / [#85]:
 
@@ -556,6 +639,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#135]: https://github.com/dgenio/skdr-eval/issues/135
 [#136]: https://github.com/dgenio/skdr-eval/issues/136
 [#137]: https://github.com/dgenio/skdr-eval/issues/137
+[#106]: https://github.com/dgenio/skdr-eval/issues/106
+[#142]: https://github.com/dgenio/skdr-eval/pull/142
+[#68]: https://github.com/dgenio/skdr-eval/issues/68
+[#124]: https://github.com/dgenio/skdr-eval/issues/124
+[#121]: https://github.com/dgenio/skdr-eval/issues/121
+[#125]: https://github.com/dgenio/skdr-eval/issues/125
 
 ## [0.6.0] - 2026-05-12
 

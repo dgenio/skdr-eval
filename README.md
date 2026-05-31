@@ -123,12 +123,13 @@ library actually gets used, and it does not require reading any theory first:
 
 ## Where to start
 
+- **Full documentation:** **[skdr-eval.readthedocs.io](https://skdr-eval.readthedocs.io/)** (built from [`docs/`](docs/) with MkDocs Material).
 - **Just want to see it work?** Click any "Open in Colab" badge above.
 - **First time here?** Follow [First 10 minutes](#first-10-minutes-understand-what-skdr-eval-does) above.
-- **Have logs already?** Skim [Quick Start](#quick-start) below; the standard / pairwise variants are both two screens long.
-- **Got a report and not sure what it means?** Read the [report interpretation guide](docs/report-interpretation.md) and the [metrics glossary](docs/metrics-glossary.md).
+- **Have logs already?** Skim [Quick Start](#quick-start) below; the standard / pairwise variants are both two screens long. The full workflow is the [logs → experiment-review card recipe](docs/recipes/logs-to-experiment-card.md).
+- **Not sure whether to trust an estimate?** Read the [report interpretation guide](docs/report-interpretation.md), the [metrics glossary](docs/metrics-glossary.md), and the [good-vs-bad support tutorial](docs/recipes/good-vs-bad-support.md).
 - **Comparing against another OPE library?** See [`docs/comparisons.md`](docs/comparisons.md) for OBP / SCOPE-RL / d3rlpy / banditml, and [`docs/methods.md`](docs/methods.md) for the methodological positioning.
-- **Looking for end-to-end examples by domain?** Browse [`examples/use_cases/`](examples/use_cases/) for runnable scripts (e-commerce ranking, ad targeting, healthcare CATE, call routing).
+- **Looking for end-to-end examples by domain?** Browse [`examples/use_cases/`](examples/use_cases/) for runnable scripts (e-commerce ranking, ad targeting, healthcare CATE, call routing, logs→card).
 
 > The `skdr-eval` CLI (`pip install 'skdr-eval[cli]'`) makes the same
 > evaluators reachable from a terminal — see [Command-line interface](#command-line-interface).

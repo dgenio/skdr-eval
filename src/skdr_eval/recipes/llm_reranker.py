@@ -315,6 +315,61 @@ def _fit_dot_outcome(
     return cast("np.ndarray", beta[0] + beta[1] * dot_full)
 
 
+def _reranker_bootstrap_se(
+    *,
+    logs: pd.DataFrame,
+    candidate_embeddings: np.ndarray,
+    propensities: np.ndarray,
+    policy_probs: np.ndarray,
+    Y: np.ndarray,
+    actions: np.ndarray,
+    elig: np.ndarray,
+    q_hat_fixed: np.ndarray | None,
+    bandwidth: float | str,
+    kernel: str,
+    n_bootstrap: int,
+    seed: int,
+) -> float:
+    """Full-pipeline bootstrap SE for the reranker MIPS estimate (#142).
+
+    Resamples decisions with replacement and, on each resample, **refits** the
+    dot-feature outcome model before recomputing ``V_hat``. This captures the
+    ``q̂`` estimation-error variance that the plug-in influence-function SE —
+    which conditions on a fixed ``q̂`` — omits; that omission makes the IF-SE
+    understate run-to-run variance (the per-seed ±2*SE interval under-covers).
+    The kernel bandwidth depends only on the fixed candidate pool, so it is not
+    re-resolved. When the caller supplied their own ``q_hat`` it is held fixed
+    (resampled by row), since the recipe cannot know how to refit it.
+    """
+    from ..estimators import mips_value  # noqa: PLC0415
+
+    n = len(Y)
+    dot_full = _query_embeddings(logs) @ candidate_embeddings.T
+    rng = np.random.default_rng(seed)
+    v_hats = np.empty(n_bootstrap, dtype=np.float64)
+    for b in range(n_bootstrap):
+        idx = rng.integers(0, n, size=n)
+        if q_hat_fixed is None:
+            f_obs = dot_full[idx, actions[idx]]
+            design = np.column_stack([np.ones_like(f_obs), f_obs])
+            beta, *_ = np.linalg.lstsq(design, Y[idx], rcond=None)
+            q_b = beta[0] + beta[1] * dot_full[idx]
+        else:
+            q_b = q_hat_fixed[idx]
+        v_hats[b] = mips_value(
+            propensities=propensities[idx],
+            policy_probs=policy_probs[idx],
+            Y=Y[idx],
+            q_hat=q_b,
+            A=actions[idx],
+            elig=elig[idx],
+            action_embedding=candidate_embeddings,
+            bandwidth=bandwidth,
+            kernel=kernel,
+        ).V_hat
+    return float(np.std(v_hats, ddof=1))
+
+
 def evaluate_reranker_mips(
     logs: pd.DataFrame,
     candidate_embeddings: np.ndarray,
@@ -323,6 +378,8 @@ def evaluate_reranker_mips(
     q_hat: np.ndarray | None = None,
     bandwidth: float | str = "median",
     kernel: str = "rbf",
+    n_bootstrap: int = 0,
+    bootstrap_seed: int = 0,
 ) -> DRResult:
     """Evaluate a reranker target policy with MIPS.
 
@@ -332,10 +389,22 @@ def evaluate_reranker_mips(
     dot-feature outcome model is fitted from the logs (the doubly-robust form);
     pass an ``(n_decisions, n_candidates)`` array to supply your own.
 
+    Standard error
+    --------------
+    By default the returned ``SE_if`` is the plug-in influence-function SE,
+    which conditions on the fitted ``q̂`` and therefore **understates**
+    run-to-run variance (its ±2*SE interval under-covers; #142). Pass
+    ``n_bootstrap > 0`` (e.g. ``200``) to instead report a full-pipeline
+    bootstrap SE that refits ``q̂`` on each resample — this captures the ``q̂``
+    estimation variance and restores nominal coverage, at ``n_bootstrap`` extra
+    MIPS evaluations.
+
     Returns
     -------
     DRResult
-        With ``V_hat`` the MIPS estimate of the target reranker's value.
+        With ``V_hat`` the MIPS estimate of the target reranker's value. When
+        ``n_bootstrap > 0``, ``SE_if`` (and ``MSE_est``) are the bootstrap
+        estimates; all other fields are the point-estimate values.
     """
     from ..estimators import mips_value  # noqa: PLC0415
 
@@ -391,11 +460,12 @@ def evaluate_reranker_mips(
         propensities += rest[:, None]
     propensities[np.arange(n), actions] = pi_obs
     Y = logs["reward"].to_numpy(dtype=np.float64)
+    user_supplied_q = q_hat is not None
     if q_hat is None:
         q_hat = _fit_dot_outcome(logs, candidate_embeddings)
     elig = np.ones((n, n_candidates), dtype=np.float64)
 
-    return mips_value(
+    result = mips_value(
         propensities=propensities,
         policy_probs=policy_probs,
         Y=Y,
@@ -406,3 +476,24 @@ def evaluate_reranker_mips(
         bandwidth=bandwidth,
         kernel=kernel,
     )
+
+    if n_bootstrap > 0:
+        from dataclasses import replace  # noqa: PLC0415
+
+        se_boot = _reranker_bootstrap_se(
+            logs=logs,
+            candidate_embeddings=candidate_embeddings,
+            propensities=propensities,
+            policy_probs=policy_probs,
+            Y=Y,
+            actions=actions,
+            elig=elig,
+            q_hat_fixed=q_hat if user_supplied_q else None,
+            bandwidth=bandwidth,
+            kernel=kernel,
+            n_bootstrap=n_bootstrap,
+            seed=bootstrap_seed,
+        )
+        result = replace(result, SE_if=se_boot, MSE_est=se_boot**2)
+
+    return result

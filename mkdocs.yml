@@ -1,0 +1,94 @@
+site_name: skdr-eval
+site_description: >-
+  Practitioner-focused offline policy evaluation for sklearn-compatible
+  contextual-bandit policies — time-aware Doubly Robust (DR) and Stabilized
+  DR (SNDR) estimators, calibrated propensities, trust diagnostics, and
+  stakeholder evaluation cards.
+site_url: https://skdr-eval.readthedocs.io/
+repo_url: https://github.com/dgenio/skdr-eval
+repo_name: dgenio/skdr-eval
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; Diogo Santos — MIT License
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - content.code.copy
+    - content.action.edit
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+# Internal agent-guidance and contributor docs are not part of the public site.
+# DEVELOPMENT.md is the repo-root contributor guide (mirrored under docs/ only
+# for local editing); excluding it keeps `mkdocs build --strict` deterministic
+# regardless of MkDocs' default nav-omission log level.
+exclude_docs: |
+  agent-context/
+  DEVELOPMENT.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: numpy
+            show_root_heading: true
+            show_source: false
+            members_order: source
+            separate_signature: true
+            filters: ["!^_"]
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.arithmatex:
+      generic: true
+  - toc:
+      permalink: true
+
+extra_javascript:
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Install: getting-started/install.md
+      - Quickstart: getting-started/quickstart.md
+  - Concepts:
+      - Estimands & assumptions: concepts/estimands-and-assumptions.md
+      - Methods (DR / SNDR): methods.md
+      - Metrics glossary: metrics-glossary.md
+      - Reading the report: report-interpretation.md
+      - Statistical validation matrix: statistical-validation-matrix.md
+  - Recipes:
+      - Logs → experiment-review card: recipes/logs-to-experiment-card.md
+      - Good vs bad support: recipes/good-vs-bad-support.md
+  - Comparisons:
+      - vs OBP / SCOPE-RL / d3rlpy: comparisons.md
+      - Slate vs pairwise vs standard: slate-vs-pairwise-vs-standard.md
+  - Project:
+      - Launch readiness checklist: LAUNCH_CHECKLIST.md
+      - Citing & DOI: zenodo.md
+  - API reference: api.md

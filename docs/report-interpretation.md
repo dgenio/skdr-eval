@@ -115,7 +115,7 @@ Paste-ready for a PR description, experiment-review doc, or product chat:
 ## Where to go next
 
 - [Metrics glossary](metrics-glossary.md) — definitions for every field.
-- [Good-vs-bad support tutorial](../examples/known_failures/README.md) —
+- [Good-vs-bad support tutorial](https://github.com/dgenio/skdr-eval/blob/main/examples/known_failures/README.md) —
   runnable demos of what healthy vs unhealthy support looks like.
 - [Estimand and assumptions](concepts/estimands-and-assumptions.md) — the
   formal contract behind `V_hat`.

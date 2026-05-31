@@ -262,7 +262,11 @@ class DRResult:
     MSE_est : float
         Estimated MSE (bias^2 + variance).
     match_rate : float
-        Fraction of samples with positive propensity.
+        Fraction of decisions in the DR overlap set — where the behavior and
+        the target policy both put positive probability on the observed action
+        (within the eligibility mask). For a deterministic target this is the
+        familiar "policy agrees with the log" rate; for a full-support
+        stochastic target it is the behavior-support rate.
     min_pscore : float
         Minimum propensity score in matched set.
     pscore_q10 : float
@@ -581,7 +585,7 @@ def fit_propensity_timecal(
             try:
                 if clf is not None and len(np.unique(A_train)) > 1:
                     # Use calibrated classifier for better probability estimates
-                    cal_clf = CalibratedClassifierCV(clf, method="isotonic", cv=2)
+                    cal_clf = CalibratedClassifierCV(clf, method="sigmoid", cv=3)
                     cal_clf.fit(X_train, A_train)
 
                     # Get calibrated predictions
@@ -944,6 +948,76 @@ def induce_policy_from_sklearn(
         raise PolicyInductionError(f"Error inducing policy: {e!s}") from e
 
 
+def _dr_weight_components(
+    propensities: np.ndarray,
+    policy_probs: np.ndarray,
+    A: np.ndarray,
+    elig: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Shared building blocks for the DR importance weights (#106).
+
+    The doubly-robust importance ratio for the *observed* action is
+
+        ``w_raw = π(A_i | x_i) / e(A_i | x_i)``
+
+    — the **target-policy** probability over the **behavior** (logging)
+    propensity. The earlier implementation used only ``1 / e(A_i | x_i)`` and
+    so dropped the ``π(A_i | x_i)`` numerator. That made every estimate
+    independent of the policy being evaluated, so different candidate models
+    collapsed to an identical ``V_hat`` and the correction term no longer
+    targeted any well-defined policy value. See issue #106.
+
+    Parameters
+    ----------
+    propensities : np.ndarray
+        Behavior propensities ``e(a | x)`` (n_samples, n_actions).
+    policy_probs : np.ndarray
+        Target policy ``π(a | x)`` (n_samples, n_actions).
+    A : np.ndarray
+        Observed action indices (n_samples,).
+    elig : np.ndarray
+        Eligibility matrix (n_samples, n_actions).
+
+    Returns
+    -------
+    pi_obs : np.ndarray
+        Behavior propensity of the observed action, ``e(A_i | x_i)``.
+    w_raw : np.ndarray
+        Unclipped DR importance ratio ``π(A_i | x_i) / e(A_i | x_i)``; zero
+        where the behavior propensity is zero.
+    matched : np.ndarray
+        Boolean DR overlap set: rows where the observed action is eligible and
+        both the behavior **and** the target put positive probability on it.
+        ``match_rate`` is ``matched.mean()`` — for a deterministic target this
+        is the familiar "policy agrees with the log" rate; for a full-support
+        stochastic target it is the behavior-support rate.
+    """
+    n = len(A)
+    idx = np.arange(n)
+    A_int = A.astype(int)
+    pi_obs: np.ndarray = propensities[idx, A_int]
+    pi_target_obs: np.ndarray = policy_probs[idx, A_int]
+    elig_bool = elig.astype(bool)
+    matched: np.ndarray = (pi_obs > 0) & (pi_target_obs > 0) & elig_bool[idx, A_int]
+    w_raw: np.ndarray = np.divide(
+        pi_target_obs,
+        pi_obs,
+        out=np.zeros(n, dtype=np.float64),
+        where=pi_obs > 0,
+    )
+    return pi_obs, w_raw, matched
+
+
+def _clip_weights(w_raw: np.ndarray, matched: np.ndarray, clip: float) -> np.ndarray:
+    """Clip the raw DR importance ratio and zero it outside the overlap set."""
+    w_clip: np.ndarray
+    if clip == float("inf"):
+        w_clip = np.where(matched, w_raw, 0.0)
+    else:
+        w_clip = np.where(matched, np.minimum(w_raw, clip), 0.0)
+    return w_clip
+
+
 def dr_value_with_clip(
     propensities: np.ndarray,
     policy_probs: np.ndarray,
@@ -998,16 +1072,19 @@ def dr_value_with_clip(
     # compute the textbook  Σ_a π(a|x) q̂(x, a).  The code is written to
     # support both shapes without changes — only fit_outcome_crossfit would
     # need to return a 2D array.  See issue #58 for discussion.
+    #
+    # With a marginal (1D) q_hat the *direct-method* term is policy-independent,
+    # but the DR estimate as a whole is NOT: the policy enters through the
+    # importance weight π(A|x)/e(A|x) below (the correction term). With a
+    # per-action q_hat the direct term would carry the policy as well. The
+    # earlier code dropped the π(A|x) numerator from the weight, which made the
+    # whole estimate collapse to a policy-independent value — see issue #106.
     q_pi = np.sum(policy_probs * q_hat.reshape(n_samples, -1), axis=1)
 
-    # Get propensity scores for observed actions
-    pi_obs = propensities[np.arange(n_samples), A]
-
-    # Compute importance weights and matched set
-    # Ensure A is integer type for indexing and elig is boolean for bitwise ops
-    A_int: np.ndarray = A.astype(int)
-    elig_bool: np.ndarray = elig.astype(bool)
-    matched = (pi_obs > 0) & elig_bool[np.arange(n_samples), A_int]
+    # DR importance ratio for the observed action: π(A|x) / e(A|x). The
+    # target-policy probability π(A|x) is essential — without it every
+    # candidate policy collapses to the same estimate (see #106).
+    pi_obs, w_raw, matched = _dr_weight_components(propensities, policy_probs, A, elig)
 
     if matched.sum() == 0:
         raise ValueError("No matched samples found")
@@ -1028,17 +1105,12 @@ def dr_value_with_clip(
     # cycle with reporting.py.
     from .diagnostics import psis_pareto_k  # noqa: PLC0415
 
-    raw_weights_matched = 1.0 / pi_matched
+    raw_weights_matched = w_raw[matched]
     pareto_k = psis_pareto_k(raw_weights_matched)
 
     for clip_val in clip_grid:
-        # Compute clipped weights with safe division
-        if clip_val == float("inf"):
-            w_clip = np.where(pi_obs > 0, 1.0 / pi_obs, 0.0)
-            w_clip[~matched] = 0
-        else:
-            w_clip = np.where(pi_obs > 0, np.minimum(1.0 / pi_obs, clip_val), 0.0)
-            w_clip[~matched] = 0
+        # Clip the DR importance ratio π(A|x)/e(A|x) at clip_val.
+        w_clip = _clip_weights(w_raw, matched, clip_val)
 
         # DR estimate
         dr_contrib = q_pi + w_clip * (Y - q_hat)
@@ -1053,11 +1125,12 @@ def dr_value_with_clip(
         # Effective sample size
         ess = w_clip.sum() ** 2 / (w_clip**2).sum() if w_clip.sum() > 0 else 0
 
-        # Tail mass
+        # Tail mass: fraction of overlap-set decisions whose raw DR weight
+        # π(A|x)/e(A|x) exceeds the clip and is therefore truncated.
         if clip_val == float("inf"):
             tail_mass = 0.0
         else:
-            tail_mass = (pi_obs[matched] < 1.0 / clip_val).mean()
+            tail_mass = float((w_raw[matched] > clip_val).mean())
 
         # Variance estimates (simplified)
         se_dr = np.std(dr_contrib) / np.sqrt(n_samples)
@@ -1466,16 +1539,9 @@ def _compute_contributions(
     n = len(Y)
     # q_pi == q_hat when q_hat is 1D; see design note in dr_value_with_clip.
     q_pi = np.sum(policy_probs * q_hat.reshape(n, -1), axis=1)
-    pi_obs = propensities[np.arange(n), A]
-    A_int = A.astype(int)
-    elig_bool = elig.astype(bool)
-    matched = (pi_obs > 0) & elig_bool[np.arange(n), A_int]
-
-    if clip == float("inf"):
-        w_clip = np.where(pi_obs > 0, 1.0 / pi_obs, 0.0)
-    else:
-        w_clip = np.where(pi_obs > 0, np.minimum(1.0 / pi_obs, clip), 0.0)
-    w_clip[~matched] = 0
+    # DR importance ratio π(A|x)/e(A|x) over the overlap set (#106).
+    _pi_obs, w_raw, matched = _dr_weight_components(propensities, policy_probs, A, elig)
+    w_clip = _clip_weights(w_raw, matched, clip)
 
     dr_contrib = q_pi + w_clip * (Y - q_hat)
 
@@ -2018,22 +2084,13 @@ def evaluate_sklearn_models(
                     q_pi = np.sum(
                         policy_probs * q_hat.reshape(len(eval_design.Y), -1), axis=1
                     )
-                    pi_obs = propensities[np.arange(len(eval_design.Y)), eval_design.A]
-                    A_int: np.ndarray = eval_design.A.astype(int)
-                    elig_bool: np.ndarray = eval_design.elig.astype(bool)
-                    matched = (pi_obs > 0) & elig_bool[
-                        np.arange(len(eval_design.Y)), A_int
-                    ]
+                    # DR importance ratio π(A|x)/e(A|x) over the overlap set (#106).
+                    _pi_obs, w_raw, matched = _dr_weight_components(
+                        propensities, policy_probs, eval_design.A, eval_design.elig
+                    )
 
                     if matched.sum() > 0:
-                        # Compute clipped weights
-                        if result.clip == float("inf"):
-                            w_clip = np.where(pi_obs > 0, 1.0 / pi_obs, 0.0)
-                        else:
-                            w_clip = np.where(
-                                pi_obs > 0, np.minimum(1.0 / pi_obs, result.clip), 0.0
-                            )
-                        w_clip[~matched] = 0
+                        w_clip = _clip_weights(w_raw, matched, result.clip)
 
                         # Estimator-specific pseudo-outcome for the bootstrap:
                         # DR: q_pi + w*(Y - q_hat)  # noqa: ERA001
@@ -2989,22 +3046,13 @@ def evaluate_pairwise_models(
                         # is anchored to the same point estimate as V_hat
                         # (fixes #58).
                         q_pi = np.sum(policy_probs * q_hat.reshape(len(Y), -1), axis=1)
-                        pi_obs = propensities[np.arange(len(Y)), A]
-                        A_int: np.ndarray = A.astype(int)
-                        elig_bool: np.ndarray = elig.astype(bool)
-                        matched = (pi_obs > 0) & elig_bool[np.arange(len(Y)), A_int]
+                        # DR importance ratio π(A|x)/e(A|x) over overlap set (#106).
+                        _pi_obs, w_raw, matched = _dr_weight_components(
+                            propensities, policy_probs, A, elig
+                        )
 
                         if matched.sum() > 0:
-                            # Compute clipped weights
-                            if result.clip == float("inf"):
-                                w_clip = np.where(pi_obs > 0, 1.0 / pi_obs, 0.0)
-                            else:
-                                w_clip = np.where(
-                                    pi_obs > 0,
-                                    np.minimum(1.0 / pi_obs, result.clip),
-                                    0.0,
-                                )
-                            w_clip[~matched] = 0
+                            w_clip = _clip_weights(w_raw, matched, result.clip)
 
                             # Estimator-specific pseudo-outcome for bootstrap:
                             # DR: q_pi + w*(Y - q_hat)  # noqa: ERA001

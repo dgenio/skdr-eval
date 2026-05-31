@@ -90,11 +90,22 @@ __all__ = [
 ]
 
 
-def _raw_inverse(pi_obs: np.ndarray, matched: np.ndarray) -> np.ndarray:
-    """Return ``1 / pi_obs`` with zeros on the unmatched rows."""
+def _raw_inverse(context: TransformContext) -> np.ndarray:
+    """Return the DR importance ratio ``π(A|x) / e(A|x)`` (#106).
+
+    The variance-reduction transforms (clip, SWITCH-DR, DRos) are nonlinear
+    functions of the *actual* importance weight, so they must operate on the
+    full ratio ``π(A_i|x_i) / e(A_i|x_i)`` — not on ``1 / e(A_i|x_i)`` alone.
+    Dropping the target-policy numerator ``π(A_i|x_i)`` made every estimate
+    independent of the policy being evaluated (see issue #106). Zeros on the
+    unmatched subset so callers can sum without masking.
+    """
+    pi_obs = context.pi_obs
+    a_idx = context.A.astype(int)
+    pi_target_obs = context.policy_probs[np.arange(pi_obs.shape[0]), a_idx]
     w = np.zeros_like(pi_obs, dtype=np.float64)
-    safe = matched & (pi_obs > 0)
-    w[safe] = 1.0 / pi_obs[safe]
+    safe = context.matched & (pi_obs > 0)
+    w[safe] = pi_target_obs[safe] / pi_obs[safe]
     return w
 
 
@@ -110,7 +121,7 @@ class IdentityTransform:
     name: str = "identity"
 
     def __call__(self, context: TransformContext) -> np.ndarray:
-        return _raw_inverse(context.pi_obs, context.matched)
+        return _raw_inverse(context)
 
 
 @dataclass(frozen=True)
@@ -128,7 +139,7 @@ class ClipTransform:
     name: str = "clip"
 
     def __call__(self, context: TransformContext) -> np.ndarray:
-        w = _raw_inverse(context.pi_obs, context.matched)
+        w = _raw_inverse(context)
         if np.isfinite(self.clip):
             w = np.minimum(w, self.clip)
         return w
@@ -151,7 +162,7 @@ class SwitchTauTransform:
             raise ValueError(f"tau must be a positive finite float, got {self.tau!r}")
 
     def __call__(self, context: TransformContext) -> np.ndarray:
-        w_raw = _raw_inverse(context.pi_obs, context.matched)
+        w_raw = _raw_inverse(context)
         # Fall back to direct-method on rows where the raw weight blows past tau.
         w = np.where(w_raw <= self.tau, w_raw, 0.0)
         return w
@@ -176,7 +187,7 @@ class DRosShrinkTransform:
             )
 
     def __call__(self, context: TransformContext) -> np.ndarray:
-        w_raw = _raw_inverse(context.pi_obs, context.matched)
+        w_raw = _raw_inverse(context)
         if self.lam == 0:
             return np.zeros_like(w_raw)
         denom = w_raw**2 + self.lam
@@ -193,16 +204,19 @@ class MIPSTransform:
     pools, candidate-set rerankers).
 
     The current implementation assumes an action-level embedding
-    ``E in R^(n_actions x d)`` and computes the embedding-marginal propensity
+    ``E in R^(n_actions x d)`` and forms the embedding-marginal densities of
+    the *target* and *logging* policies at the observed action's embedding,
 
-        ``p_e(x_i) = Σ_a π_log(a | x_i) · k(E_a, E_{A_i})``
+        ``p_e_target(x_i) = Σ_a π(a | x_i)     · k(E_a, E_{A_i})``
+        ``p_e_log(x_i)    = Σ_a π_log(a | x_i) · k(E_a, E_{A_i})``
 
-    where ``k`` is a row-normalised Gaussian kernel over embeddings. The
-    working weight is the inverse logging embedding-marginal ``1 / p_e``; no
-    target-policy embedding-marginal numerator is formed here because the
-    target policy enters separately through the DR core's ``q_pi`` term. When
-    the kernel is the identity matrix this reduces to skdr-eval's per-action
-    IPS weight ``1 / π_log(A_i | x_i)``.
+    where ``k`` is a row-normalised kernel over embeddings. The working weight
+    is their ratio ``p_e_target / p_e_log`` (#142) — a genuine embedding
+    density ratio that marginalises the target numerator over the *same* kernel
+    as the logging denominator. Limiting cases: an identity kernel reduces to
+    the per-action DR ratio ``π(A_i | x_i) / π_log(A_i | x_i)`` (#106); a
+    uniform kernel makes both marginals ``1 / n_actions`` so the weight is
+    ``1`` (the embedding is uninformative and MIPS applies no reweighting).
 
     Parameters
     ----------
@@ -211,10 +225,10 @@ class MIPSTransform:
         sufficient statistics (skill vectors, capacity, role one-hots).
     bandwidth : float, default 1.0
         Gaussian-kernel bandwidth (used by the ``"rbf"`` kernel). ``inf``
-        collapses to a uniform kernel (every action equally relevant — pure
-        marginalisation). Small values collapse back to per-action IPS. Ignored
-        by the ``"linear"`` and callable kernels. Resolve the median heuristic
-        upstream (see :func:`median_bandwidth`) and pass the resulting float.
+        collapses to a uniform kernel (every action equally relevant), giving a
+        unit weight; small values collapse back to the per-action DR ratio.
+        Ignored by the ``"linear"`` and callable kernels. Resolve the median
+        heuristic upstream (see :func:`median_bandwidth`) and pass the float.
     clip : float, default ``float("inf")``
         Optional top-side clip on the marginalised weight.
     kernel : {"rbf", "linear"} or callable, default ``"rbf"``
@@ -317,22 +331,34 @@ class MIPSTransform:
                 f"{n_actions}), got {context.propensities.shape!r}"
             )
 
-        # Embedding-marginal logging density at the observed action's
-        # embedding neighbourhood:
-        #   p_e_log[i] = Σ_{a'} π_log(a' | x_i) · k(E_{a'}, E_{A_i})
-        # When the kernel is the identity matrix this collapses to
-        # pi_obs[i] = π_log(A_i | x_i) and MIPS reduces to skdr-eval's IPS.
-        # When the kernel is uniform (every action equivalent in embedding
-        # space) p_e_log[i] = 1 / n_actions and the MIPS weight becomes a
-        # constant ``n_actions`` — the action propensity is fully ignored.
+        # MIPS weight is the embedding-marginal *target/logging* density ratio
+        # at the observed action's embedding neighbourhood. Both densities are
+        # marginalised over the *same* kernel so the ratio is the genuine MIPS
+        # importance weight (#142):
+        #   p_e_log[i]    = Σ_{a'} π_log(a' | x_i) · k(E_{a'}, E_{A_i})
+        #   p_e_target[i] = Σ_{a}  π(a    | x_i) · k(E_{a},  E_{A_i})
+        # and the weight is p_e_target over p_e_log. Limiting cases:
+        # * Identity kernel — both marginals collapse to the exact action, so
+        #   w[i] = π(A_i | x_i) / π_log(A_i | x_i): MIPS reduces to skdr-eval's
+        #   per-action DR ratio (#106), recovered by the identity-kernel tests.
+        # * Uniform kernel — every action shares the same embedding, so both
+        #   marginals equal ``1 / n_actions`` and w[i] = 1: the embedding is
+        #   uninformative and MIPS applies no reweighting. (Previously the
+        #   exact-action numerator left w = n_actions here, an asymmetry that
+        #   made the weight depend on the arbitrary logged action — #142.)
         a_idx = context.A.astype(int)
         # Column of kernel at A_i for each row.
         kernel_at_A = kernel[:, a_idx]  # (n_actions, n)
         # Weighted sum over actions of the logging propensity times kernel.
         p_e_log = np.einsum("na,an->n", context.propensities, kernel_at_A)
+        # Symmetric target-policy embedding-marginal density. Marginalising the
+        # numerator over the same kernel (rather than using only the exact
+        # observed-action target probability) is what makes the weight a valid
+        # density ratio for a non-identity kernel (#142).
+        p_e_target = np.einsum("na,an->n", context.policy_probs, kernel_at_A)
         safe = context.matched & (p_e_log > 0)
         w = np.zeros(n, dtype=np.float64)
-        w[safe] = 1.0 / p_e_log[safe]
+        w[safe] = p_e_target[safe] / p_e_log[safe]
         if np.isfinite(self.clip):
             w = np.minimum(w, self.clip)
         return w

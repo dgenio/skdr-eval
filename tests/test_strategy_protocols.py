@@ -24,13 +24,18 @@ from skdr_eval.estimators import (
 
 def _context(pi_obs: np.ndarray, A: np.ndarray, n_actions: int = 3) -> TransformContext:
     n = pi_obs.shape[0]
-    policy_probs = np.full((n, n_actions), 1.0 / n_actions)
+    a_int = A.astype(int)
+    # The working weight is the DR importance ratio π(A|x)/e(A|x) (#106). To
+    # isolate the *propensity transform* math under test from the policy, put
+    # all target mass on the observed action so π(A|x) == 1 and the ratio
+    # reduces to 1/e(A|x) — the quantity these unit tests were written around.
+    policy_probs = np.zeros((n, n_actions))
+    policy_probs[np.arange(n), a_int] = 1.0
     elig = np.ones((n, n_actions))
     matched = pi_obs > 0
     # Build a full logging propensity matrix: pi_obs at the observed action,
     # uniform remainder over the other actions so rows sum to 1.
     propensities = np.full((n, n_actions), 0.0)
-    a_int = A.astype(int)
     propensities[np.arange(n), a_int] = pi_obs
     leftover = (1.0 - pi_obs) / max(n_actions - 1, 1)
     for i in range(n):
@@ -120,18 +125,19 @@ class TestMIPSTransform:
         w_ips = IdentityTransform()(ctx)
         np.testing.assert_allclose(w_mips, w_ips, rtol=1e-6)
 
-    def test_uniform_kernel_collapses_to_constant_weight(self) -> None:
-        # Bandwidth=inf -> kernel rows are uniform 1/n_actions, so every
-        # row's embedding-marginal logging density is 1/n_actions and the
-        # MIPS weight is the constant n_actions — fully marginalising over
-        # the action propensity.
+    def test_uniform_kernel_collapses_to_unit_weight(self) -> None:
+        # Bandwidth=inf -> kernel rows are uniform 1/n_actions, so the target
+        # and logging embedding-marginal densities are *both* 1/n_actions and
+        # the MIPS weight is 1 everywhere: the embedding is uninformative, so a
+        # valid density ratio applies no reweighting (#142). (The pre-#142
+        # exact-action numerator left w = n_actions here, an asymmetry that
+        # made the weight depend on the arbitrary logged action.)
         emb = np.random.default_rng(0).normal(size=(3, 2))
         pi = np.array([0.5, 0.25, 0.1])
         A = np.array([0, 1, 2])
         ctx = _context(pi, A)
         w = MIPSTransform(action_embedding=emb, bandwidth=float("inf"))(ctx)
-        # n_actions = 3 -> w = 3 everywhere on the matched subset.
-        np.testing.assert_allclose(w, np.full(3, 3.0))
+        np.testing.assert_allclose(w, np.ones(3))
 
     def test_action_mismatch_raises(self) -> None:
         emb = np.eye(4)  # 4 rows but design has 3 actions
