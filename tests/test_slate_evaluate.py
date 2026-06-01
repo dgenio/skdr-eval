@@ -179,3 +179,17 @@ def test_cascade_dr_qhat_is_cross_fitted_out_of_sample() -> None:
     # Out-of-sample => no leakage of the row's own click into its own q̂.
     for i in range(n):
         assert q_hat[i, 0, i] == 0.0
+
+
+def test_cascade_dr_qhat_single_impression_uses_full_table() -> None:
+    """With fewer than two impressions there is nothing to hold out, so the
+    full in-sample click-rate table is returned (broadcast over the single
+    row)."""
+    logs = pd.DataFrame({"slate": [[0, 1]], "clicks": [[1.0, 0.0]]})
+    q_hat = _empirical_q_hat_per_rank(logs, slate_size=2, n_items=3, random_state=0)
+    assert q_hat.shape == (1, 2, 3)
+    # In-sample rate: rank 0 / item 0 saw a click; rank 1 / item 1 did not.
+    assert q_hat[0, 0, 0] == 1.0
+    assert q_hat[0, 1, 1] == 0.0
+    # Unobserved (rank, item) cells stay at 0.
+    assert q_hat[0, 0, 2] == 0.0

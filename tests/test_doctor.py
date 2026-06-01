@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import sys
+
 import numpy as np
 import pandas as pd
 
 import skdr_eval
-from skdr_eval.doctor import Check, DoctorReport, doctor
+from skdr_eval.doctor import Check, DoctorReport, _check_environment, doctor
 
 
 def _good_logs(n: int = 800):
@@ -182,3 +184,16 @@ class TestDoctorBadKwargs:
         assert any(
             "kind" in c.name.lower() or "bogus" in c.message for c in report.checks
         )
+
+
+def test_environment_check_fails_below_minimum(monkeypatch) -> None:
+    """The environment check fails when the running Python is below the
+    declared minimum. Forced here by raising the floor above the runtime so
+    the fail branch is exercised on the supported (3.10+) matrix."""
+    # ``skdr_eval.doctor`` the package attribute is shadowed by the re-exported
+    # ``doctor`` function, so reach the real module via ``sys.modules``.
+    monkeypatch.setattr(sys.modules["skdr_eval.doctor"], "_PYTHON_MIN", (3, 99))
+    check = _check_environment()
+    assert check.status == "fail"
+    assert check.category == "environment"
+    assert "below" in check.message
