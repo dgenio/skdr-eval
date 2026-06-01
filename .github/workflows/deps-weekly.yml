@@ -1,4 +1,4 @@
-name: Nightly latest/pre-release deps
+name: Weekly latest/pre-release deps
 
 # Safety net for the "no upper-bound caps" dependency policy (#152). A normal
 # CI run resolves whatever is current at the time; this scheduled job goes one

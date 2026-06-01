@@ -137,10 +137,12 @@ correctness allows — it must compose inside a downstream scientific stack:
 - **No exact pins (`==`)** and **no speculative upper-bound caps** (`<`) in
   install requirements. Any cap that ever becomes necessary must carry an
   inline comment citing the specific incompatibility.
-- **`floor-deps` CI job** installs the declared minimums
-  (`uv pip install --resolution lowest-direct`) on Python 3.10 and runs the
-  suite — this proves every `>=X` is truthful.
-- **Scheduled `deps-nightly` job** installs the newest releases including
+- **`floor-deps` CI job** installs the scientific core pinned to the declared
+  minimums via `constraints-min.txt` (`uv pip install -e .[dev] --constraint
+  constraints-min.txt`) on Python 3.10 and runs the suite — this proves every
+  `>=X` is truthful while the test tooling still resolves at current versions.
+  Keep `constraints-min.txt` in sync with the floors in `pyproject.toml`.
+- **Scheduled `deps-weekly` job** installs the newest releases including
   pre-releases (`--prerelease allow`, `continue-on-error`) as the early-warning
   net that justifies leaving the upper end uncapped.
 

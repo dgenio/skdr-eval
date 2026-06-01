@@ -72,7 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Floor-deps and nightly dependency CI** ([#152]). A `floor-deps` job
   installs the declared minimum scientific-core versions (via
   `constraints-min.txt`) and runs the suite, proving every `>=` lower bound is
-  truthful; a scheduled `deps-nightly` workflow installs the newest/pre-release
+  truthful; a scheduled `deps-weekly` workflow installs the newest/pre-release
   dependencies (`continue-on-error`) as an early-warning net for the no-cap
   policy. The policy is documented in `DEVELOPMENT.md`.
 - **`CITATION.bib` + foundational references** ([#77]). A BibTeX companion to
