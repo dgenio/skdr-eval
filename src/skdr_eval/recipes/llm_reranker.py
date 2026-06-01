@@ -154,7 +154,8 @@ def _unit_rows(x: np.ndarray) -> np.ndarray:
     """L2-normalise each row to the unit sphere (zero rows left untouched)."""
     norms = np.linalg.norm(x, axis=1, keepdims=True)
     norms = np.where(norms > 0, norms, 1.0)
-    return x / norms
+    normalized: np.ndarray = x / norms
+    return normalized
 
 
 def make_llm_reranker_synth(
