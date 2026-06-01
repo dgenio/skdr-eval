@@ -63,6 +63,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deterministic.
 
 ### Added
+- **Python 3.10 support** ([#123]). `requires-python` is now
+  `>=3.10,<3.15`, a `Programming Language :: Python :: 3.10` classifier is
+  added, and the CI test matrix runs 3.10–3.14. 3.11-only usages were
+  backported: `datetime.UTC` → `datetime.now(timezone.utc)` and a `tomli`
+  fallback for the bare `tomllib` import in the capabilities test. `ruff`,
+  `black`, and `mypy` now target `py310`.
+- **Floor-deps and nightly dependency CI** ([#152]). A `floor-deps` job
+  installs the declared minimum scientific-core versions (via
+  `constraints-min.txt`) and runs the suite, proving every `>=` lower bound is
+  truthful; a scheduled `deps-weekly` workflow installs the newest/pre-release
+  dependencies (`continue-on-error`) as an early-warning net for the no-cap
+  policy. The policy is documented in `DEVELOPMENT.md`.
+- **`CITATION.bib` + foundational references** ([#77]). A BibTeX companion to
+  `CITATION.cff` for one-click copy, plus a `references` block in
+  `CITATION.cff` (DR, PSIS, calibration, double machine learning) mirroring
+  `docs/methods.md`; both linked from the README citation section.
 - **Generic trace → OPE-log adapter** ([#149]). New `skdr_eval.adapters`
   package with `from_records` and `from_jsonl_trace`: map generic
   `(context, action, reward[, timestamp, propensity])` decision records —
@@ -141,6 +157,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     dependency; CPU-only.
 
 ### Changed
+- **Library-grade dependency constraints** ([#152]). The scientific core now
+  uses lower bounds only — `numpy>=1.24`, `pandas>=2.0`, `scipy>=1.10`,
+  `scikit-learn>=1.2` — with no exact pins and no speculative upper-bound caps,
+  so the library composes inside existing data-science environments.
+- **OPE-forward package metadata** ([#144]). The PyPI summary now leads with
+  "offline policy evaluation (OPE)" and the deploy/don't-deploy verdict, and
+  keywords are aligned. The canonical GitHub repository description and topics
+  are recorded in `DEVELOPMENT.md` (the repo-settings change is a manual
+  maintainer action).
 - **`doctor(kind="standard")` honours `metric_col` in the schema check**
   ([#149]). The standard preflight previously validated the logs schema with
   the hard-coded `service_time` reward column, so general-purpose OPE logs with
@@ -680,6 +705,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#148]: https://github.com/dgenio/skdr-eval/issues/148
 [#149]: https://github.com/dgenio/skdr-eval/issues/149
 [#150]: https://github.com/dgenio/skdr-eval/issues/150
+[#123]: https://github.com/dgenio/skdr-eval/issues/123
+[#144]: https://github.com/dgenio/skdr-eval/issues/144
+[#152]: https://github.com/dgenio/skdr-eval/issues/152
 
 ## [0.6.0] - 2026-05-12
 
