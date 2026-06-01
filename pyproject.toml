@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "skdr-eval"
 dynamic = ["version"]
-description = "Practitioner-focused offline policy evaluation for sklearn-compatible contextual-bandit policies, with time-aware Doubly Robust (DR) and Stabilized DR (SNDR) estimators, calibrated propensities, trust diagnostics, and stakeholder evaluation cards"
+description = "Offline policy evaluation (OPE) for scikit-learn policies — time-aware doubly-robust (DR/SNDR) estimates with honest trust diagnostics and a deploy / don't-deploy verdict"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -14,6 +14,7 @@ authors = [
 keywords = [
     "offline policy evaluation",
     "ope",
+    "policy evaluation",
     "doubly robust",
     "stabilized doubly robust",
     "sndr",
@@ -29,6 +30,7 @@ keywords = [
     "service time",
     "time series",
     "scikit-learn",
+    "python",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -36,6 +38,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -45,13 +48,18 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Mathematics",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.10,<3.15"
+# Library-grade dependency constraints (#152): lower bounds only — no exact
+# pins (``==``) and no speculative upper-bound caps. Floors are the lowest
+# versions the test suite is known to pass on (proven by the ``floor-deps``
+# CI job). The scheduled latest/pre-release CI job is the safety net that
+# justifies leaving the upper end uncapped. See DEVELOPMENT.md.
 dependencies = [
-    "numpy",
-    "pandas",
+    "numpy>=1.24",
+    "pandas>=2.0",
     "pyyaml>=5.1",
-    "scikit-learn>=1.1",
-    "scipy>=1.9",
+    "scikit-learn>=1.2",
+    "scipy>=1.10",
     "jinja2>=3.1",
     "pydantic>=2.0",
 ]
@@ -84,6 +92,7 @@ dev = [
     "coverage",
     "mypy",
     "types-PyYAML",
+    "tomli; python_version < '3.11'",
     "ruff",
     "black",
     "build",
@@ -176,7 +185,7 @@ exclude_lines = [
 
 [tool.black]
 line-length = 88
-target-version = ["py311"]
+target-version = ["py310", "py311"]
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -193,7 +202,7 @@ extend-exclude = '''
 '''
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

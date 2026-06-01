@@ -1,0 +1,39 @@
+name: Nightly latest/pre-release deps
+
+# Safety net for the "no upper-bound caps" dependency policy (#152). A normal
+# CI run resolves whatever is current at the time; this scheduled job goes one
+# step further and installs the *newest* releases including pre-releases, so a
+# breaking numpy / scipy / scikit-learn / pandas release is caught early rather
+# than at a user's install time. It is allowed to fail (continue-on-error) —
+# a red run here is an early-warning signal, not a merge blocker.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"  # Mondays 06:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  latest-deps:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Needed for setuptools_scm
+
+    - name: Set up Python 3.14
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.14"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Install with newest deps (pre-releases allowed)
+      run: |
+        uv pip install --system --upgrade --prerelease allow -e .[dev]
+
+    - name: Test with pytest (latest/pre-release deps)
+      run: |
+        pytest -q --no-header

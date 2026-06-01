@@ -121,6 +121,40 @@ git push origin feature/descriptive-name
 - **Examples**: Include usage examples in docstrings
 - **API changes**: Must update README.md
 
+### Supported Python Versions (#123)
+- **Range**: Python **3.10 – 3.14 inclusive** (`requires-python = ">=3.10,<3.15"`).
+- **Tested**: every version in the range runs the full suite in CI (`test` matrix).
+- **Floor signal**: lint/format (`ruff`), type-checking (`mypy`), and `black`
+  all target `py310`, so 3.11+-only syntax (e.g. `datetime.UTC`, bare
+  `tomllib`) is caught before it ships.
+
+### Dependency Constraint Policy (#152)
+This is a **library**, so it constrains dependencies as *loosely* as
+correctness allows — it must compose inside a downstream scientific stack:
+- **Lower bounds only** (`>=`) on the scientific core (numpy, pandas,
+  scikit-learn, scipy). Floors are the lowest versions the suite is known to
+  pass on, **not** the latest.
+- **No exact pins (`==`)** and **no speculative upper-bound caps** (`<`) in
+  install requirements. Any cap that ever becomes necessary must carry an
+  inline comment citing the specific incompatibility.
+- **`floor-deps` CI job** installs the declared minimums
+  (`uv pip install --resolution lowest-direct`) on Python 3.10 and runs the
+  suite — this proves every `>=X` is truthful.
+- **Scheduled `deps-nightly` job** installs the newest releases including
+  pre-releases (`--prerelease allow`, `continue-on-error`) as the early-warning
+  net that justifies leaving the upper end uncapped.
+
+### Repository Discoverability Metadata (#144)
+The PyPI summary (`project.description`) and `keywords` in `pyproject.toml`
+carry the canonical *"offline policy evaluation (OPE)"* phrasing. The matching
+**GitHub repository description and topics are a repo *settings* action** (not
+expressible in a PR) — a maintainer should set them once to:
+
+- **Description**: `Offline policy evaluation (OPE) for scikit-learn policies — doubly-robust estimates with honest trust diagnostics and a deploy/don't-deploy verdict.`
+- **Topics**: `offline-policy-evaluation`, `ope`, `counterfactual`,
+  `doubly-robust`, `contextual-bandits`, `causal-inference`, `scikit-learn`,
+  `recommender-systems`, `policy-evaluation`, `python`.
+
 ## 🤖 AI Agent Specific Guidelines
 
 ### Code Analysis Checklist

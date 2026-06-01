@@ -1,0 +1,11 @@
+# Minimum (floor) versions of the scientific-core runtime dependencies,
+# matching the lower bounds declared in pyproject.toml (#152). The `floor-deps`
+# CI job installs the package + dev tooling under this constraint so the
+# scientific core resolves to its declared floors (proving every `>=X` is
+# truthful) while pytest/matplotlib/etc. still resolve at current versions.
+#
+# Keep these in sync with the `dependencies` lower bounds in pyproject.toml.
+numpy==1.24.0
+pandas==2.0.0
+scipy==1.10.0
+scikit-learn==1.2.0
