@@ -188,6 +188,24 @@ def test_empty_policies_raises():
         )
 
 
+def test_fit_models_true_with_external_policies_warns():
+    """fit_models=True is ignored on the external path and says so."""
+    logs_df, op_daily_df = _synth()
+    pol = _random_policy(logs_df, op_daily_df, seed=1)
+    with pytest.warns(UserWarning, match="fit_models=True is ignored"):
+        evaluate_pairwise_models(
+            logs_df=logs_df,
+            op_daily_df=op_daily_df,
+            models={},
+            metric_col="service_time",
+            task_type="regression",
+            direction="min",
+            n_splits=2,
+            external_policies={"sim": pol},
+            fit_models=True,
+        )
+
+
 def test_reserved_kwargs_rejected():
     logs_df, op_daily_df = _synth()
     pol = _random_policy(logs_df, op_daily_df, seed=1)

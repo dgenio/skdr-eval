@@ -56,8 +56,11 @@ def _kept_operators_by_day(
             kept[day] = ops
             continue
         k = max(1, round(capacity_multiplier * n_day))
-        seed = abs(hash((random_state, "capacity"))) % (2**32) + day_idx
-        rng = np.random.default_rng(seed)
+        # Deterministic per-day stream: a list seed feeds NumPy's SeedSequence,
+        # which is reproducible across processes/interpreters (unlike Python's
+        # per-process-salted built-in ``hash()``) and gives an independent draw
+        # per day regardless of day ordering.
+        rng = np.random.default_rng([int(random_state), day_idx])
         chosen_idx = rng.choice(n_day, size=k, replace=False)
         # Preserve original operator order for stable, comparable output.
         kept[day] = [ops[i] for i in sorted(chosen_idx)]
@@ -171,8 +174,9 @@ def simulate_autoscaling_scenario(
             new_elig.append(list(kept))
             continue
         # Mode as_logged keeps the logged eligibility intersected with the kept
-        # set, preserving order; fall back to the kept set if empty.
-        if isinstance(elig, (list, tuple, np.ndarray)):
+        # set; fall back to the kept set if empty. ``validate_pairwise_inputs``
+        # blesses list/tuple/set eligibility values, so all three are honored.
+        if isinstance(elig, (list, tuple, set, np.ndarray)):
             filtered = [op for op in elig if op in kept_set]
         else:
             filtered = list(kept)

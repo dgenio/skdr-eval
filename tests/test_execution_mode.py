@@ -8,6 +8,7 @@ builder level and the full-report level, plus the ``"auto"`` resolution.
 """
 
 import numpy as np
+import pandas as pd
 import pytest
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import LogisticRegression, Ridge
@@ -173,6 +174,42 @@ def test_execution_mode_auto_resolution():
         execution_mode="auto",
     )
     assert art.metadata["execution_mode"] == "standard"
+
+
+def test_large_data_handles_duplicate_op_daily_rows():
+    """A duplicated (day, operator) row in op_daily_df must not misalign x_obs.
+
+    The vectorized lookup deduplicates on (day, operator_id) keeping the first
+    match, mirroring the standard path's ``op_row.iloc[0]``, so large_data still
+    matches standard exactly.
+    """
+    logs_df, op_daily_df = make_pairwise_synth(
+        n_days=2, n_clients_day=120, n_ops=5, seed=3
+    )
+    op_daily_dup = pd.concat(
+        [op_daily_df, op_daily_df.iloc[[0]]], ignore_index=True
+    )  # duplicate one (day, operator) snapshot
+    models = _fit_models(logs_df, "service_time")
+    common = {
+        "logs_df": logs_df,
+        "op_daily_df": op_daily_dup,
+        "models": models,
+        "metric_col": "service_time",
+        "task_type": "regression",
+        "direction": "min",
+        "n_splits": 2,
+        "strategy": "direct",
+        "random_state": 0,
+        "policy_train": "all",
+    }
+    std = evaluate_pairwise_models(execution_mode="standard", **common).report
+    big = evaluate_pairwise_models(execution_mode="large_data", **common).report
+    np.testing.assert_allclose(
+        std.sort_values(["model", "estimator"])["V_hat"].to_numpy(),
+        big.sort_values(["model", "estimator"])["V_hat"].to_numpy(),
+        rtol=0,
+        atol=1e-10,
+    )
 
 
 def test_invalid_execution_mode_raises():

@@ -2731,6 +2731,13 @@ def evaluate_pairwise_models(
     # are no policy models to fit, so the pre_split machinery is skipped and the
     # deprecation warning is irrelevant.
     if use_external:
+        if fit_models:
+            warnings.warn(
+                "evaluate_pairwise_models: external_policies was provided, so "
+                "fit_models=True is ignored — externally-supplied policies are "
+                "evaluated directly, without fitting models or splitting data.",
+                stacklevel=2,
+            )
         policy_train = "all"
     elif policy_train is None:
         warnings.warn(

@@ -103,6 +103,27 @@ def test_scenario_is_reproducible():
     )
 
 
+def test_set_valued_eligibility_is_honored():
+    """set eligibility (allowed by validate_pairwise_inputs) is intersected,
+    not silently replaced by the full kept set — equivalent to list input."""
+    logs_df, op_daily_df, models = _setup()
+    set_logs = logs_df.copy()
+    set_logs["elig_mask"] = set_logs["elig_mask"].apply(set)
+    scen = {"capacity_multiplier": 0.6, "eligibility_mode": "as_logged"}
+    from_list = simulate_autoscaling_scenario(
+        logs_df, op_daily_df, models, scen, **_eval_common()
+    )
+    from_set = simulate_autoscaling_scenario(
+        set_logs, op_daily_df, models, scen, **_eval_common()
+    )
+    np.testing.assert_allclose(
+        from_list.report.sort_values(["model", "estimator"])["V_hat"].to_numpy(),
+        from_set.report.sort_values(["model", "estimator"])["V_hat"].to_numpy(),
+        rtol=0,
+        atol=1e-9,
+    )
+
+
 def test_unknown_scenario_knob_raises():
     logs_df, op_daily_df, models = _setup()
     with pytest.raises(DataValidationError, match="Unknown scenario knob"):

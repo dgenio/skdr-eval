@@ -884,6 +884,19 @@ def induce_policy(
 LARGE_DATA_ROW_THRESHOLD = 50_000
 
 
+def _first_index_map(ops: list[Any]) -> dict[str, int]:
+    """Map ``str(operator) -> first column index``.
+
+    Mirrors the standard path's ``ops_all_by_day[day].index(str(op))`` (which
+    returns the *first* occurrence) so the vectorized path stays identical even
+    if a day's operator list contains duplicates.
+    """
+    pos: dict[str, int] = {}
+    for i, op in enumerate(ops):
+        pos.setdefault(str(op), i)
+    return pos
+
+
 def build_eval_arrays_vectorized(
     design: PairwiseDesign,
     metric_col: str,
@@ -945,7 +958,17 @@ def build_eval_arrays_vectorized(
             sub = op_df[[op_id_col, *design.op_features]].copy()
             sub["__day_key"] = str(day_key)
             frames.append(sub)
-        lookup = pd.concat(frames, ignore_index=True) if frames else None
+        # Deduplicate on (day, operator) keeping the first match, mirroring the
+        # standard path's ``op_row.iloc[0]`` — otherwise a duplicated
+        # (day, operator_id) row in op_daily_df would make the left-merge
+        # one-to-many and misalign / inflate x_obs.
+        lookup = (
+            pd.concat(frames, ignore_index=True).drop_duplicates(
+                ["__day_key", op_id_col], keep="first"
+            )
+            if frames
+            else None
+        )
         left = pd.DataFrame(
             {"__day_key": day_keys, op_id_col: logs_df[op_id_col].to_numpy()}
         )
@@ -968,7 +991,7 @@ def build_eval_arrays_vectorized(
     has_elig_col = bool(design.elig_col) and design.elig_col in logs_df.columns
     elig_values = logs_df[design.elig_col].to_numpy() if has_elig_col else None
     for day_key, ops in design.ops_all_by_day.items():
-        pos = {str(op): i for i, op in enumerate(ops)}
+        pos = _first_index_map(ops)
         n_ops_day = len(ops)
         rows = np.flatnonzero(day_keys == str(day_key))
         if rows.size == 0:
@@ -1019,7 +1042,7 @@ def build_policy_probs_vectorized(
     chosen = np.asarray(policy_decisions).astype(str)
     policy_probs = np.zeros((n, max_ops))
     for day_key, ops in design.ops_all_by_day.items():
-        pos = {str(op): i for i, op in enumerate(ops)}
+        pos = _first_index_map(ops)
         rows = np.flatnonzero(day_keys == str(day_key))
         if rows.size == 0:
             continue
