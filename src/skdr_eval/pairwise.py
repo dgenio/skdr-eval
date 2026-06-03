@@ -872,3 +872,259 @@ def induce_policy(
         )
     else:
         raise ValueError(f"Unknown strategy: {strategy}")
+
+
+# Auto execution-mode threshold (#33). Above this many evaluation decisions the
+# ``"auto"`` execution mode switches to the vectorized ``"large_data"`` path,
+# which builds the observed-feature / action / eligibility / policy arrays
+# without a per-row ``DataFrame.iterrows()`` loop. The vectorized path is
+# proven numerically identical to the standard path (see
+# ``tests/test_execution_mode.py``); the threshold only trades a little
+# constant overhead on tiny inputs for a large speedup on big ones.
+LARGE_DATA_ROW_THRESHOLD = 50_000
+
+
+def build_eval_arrays_vectorized(
+    design: PairwiseDesign,
+    metric_col: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    """Build the per-decision observed features, action indices and eligibility.
+
+    Vectorized equivalent (#33) of the per-row ``logs_df.iterrows()`` loops in
+    :func:`skdr_eval.core.evaluate_pairwise_models`. It reproduces the standard
+    path's semantics **exactly** so the two execution modes return identical
+    numbers (asserted in ``tests/test_execution_mode.py``):
+
+    - observed operator features are looked up from ``design.day_to_op_df`` keyed
+      by ``(str(day), raw operator_id)``; a missing day or operator yields a
+      zero row (the standard fallback);
+    - the action index is the position of ``str(operator_id)`` within
+      ``ops_all_by_day[str(day)]``, falling back to ``0``;
+    - eligibility uses the per-row ``elig_col`` list when present (only operators
+      listed *and* available that day are eligible), otherwise every operator
+      available that day is eligible.
+
+    Parameters
+    ----------
+    design : PairwiseDesign
+        Evaluation design. ``design.logs_df`` must carry a contiguous
+        ``RangeIndex`` (guaranteed by :meth:`PairwiseDesign.from_dataframes`).
+    metric_col : str
+        Outcome column (unused here; accepted so callers can pass the same
+        argument set as the loop path for symmetry).
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray, np.ndarray, int]
+        ``(X_obs, A, elig, max_ops)`` where ``X_obs`` has shape
+        ``(n, len(cli_features) + len(op_features))`` and dtype ``float32``,
+        ``A`` is ``(n,)`` int action indices, ``elig`` is ``(n, max_ops)`` and
+        ``max_ops`` is the largest per-day operator count.
+    """
+    del metric_col  # symmetry with the loop path; features come from the design
+    logs_df = design.logs_df
+    n = len(logs_df)
+    op_id_col = design.operator_id_col
+    day_keys = logs_df[design.day_col].astype(str).to_numpy()
+    op_strs = logs_df[op_id_col].astype(str).to_numpy()
+    max_ops = max((len(ops) for ops in design.ops_all_by_day.values()), default=0)
+
+    # --- Observed client features -----------------------------------------
+    if design.cli_features:
+        cli_part = logs_df[design.cli_features].to_numpy(dtype=np.float64)
+    else:
+        cli_part = np.zeros((n, 0), dtype=np.float64)
+
+    # --- Observed operator features (chosen operator, that day) -----------
+    # Lookup keyed by (str(day), raw operator_id) to mirror the standard path,
+    # which filters ``op_df[op_df[op_id_col] == chosen_op]`` on the *raw* id.
+    n_op_feat = len(design.op_features)
+    if n_op_feat:
+        frames = []
+        for day_key, op_df in design.day_to_op_df.items():
+            sub = op_df[[op_id_col, *design.op_features]].copy()
+            sub["__day_key"] = str(day_key)
+            frames.append(sub)
+        lookup = pd.concat(frames, ignore_index=True) if frames else None
+        left = pd.DataFrame(
+            {"__day_key": day_keys, op_id_col: logs_df[op_id_col].to_numpy()}
+        )
+        if lookup is not None:
+            merged = left.merge(
+                lookup, on=["__day_key", op_id_col], how="left", sort=False
+            )
+            op_part = merged[design.op_features].to_numpy(dtype=np.float64)
+            op_part = np.nan_to_num(op_part, nan=0.0)
+        else:
+            op_part = np.zeros((n, n_op_feat), dtype=np.float64)
+    else:
+        op_part = np.zeros((n, 0), dtype=np.float64)
+
+    x_obs = np.hstack([cli_part, op_part]).astype(np.float32)
+
+    # --- Action indices and eligibility, grouped by day -------------------
+    actions = np.zeros(n, dtype=int)
+    elig = np.zeros((n, max_ops))
+    has_elig_col = bool(design.elig_col) and design.elig_col in logs_df.columns
+    elig_values = logs_df[design.elig_col].to_numpy() if has_elig_col else None
+    for day_key, ops in design.ops_all_by_day.items():
+        pos = {str(op): i for i, op in enumerate(ops)}
+        n_ops_day = len(ops)
+        rows = np.flatnonzero(day_keys == str(day_key))
+        if rows.size == 0:
+            continue
+        # Action index: position of str(chosen_op); default 0.
+        actions[rows] = [pos.get(o, 0) for o in op_strs[rows]]
+        # Eligibility.
+        for ri in rows:
+            val = elig_values[ri] if elig_values is not None else None
+            if isinstance(val, (list, tuple, np.ndarray)):
+                cols = [pos[str(op)] for op in val if str(op) in pos]
+                if cols:
+                    elig[ri, cols] = 1.0
+            else:
+                elig[ri, :n_ops_day] = 1.0
+    return x_obs, actions, elig, max_ops
+
+
+def build_policy_probs_vectorized(
+    design: PairwiseDesign,
+    policy_decisions: np.ndarray,
+    max_ops: int,
+) -> np.ndarray:
+    """Vectorized one-hot policy-probability matrix for a single policy (#33).
+
+    Reproduces the standard per-row loop: for each decision the chosen operator
+    ``str(policy_decisions[i])`` is mapped to its column in
+    ``ops_all_by_day[str(day)]`` and set to ``1.0``; operators not available
+    that day leave the row all-zero.
+
+    Parameters
+    ----------
+    design : PairwiseDesign
+        Evaluation design (provides the per-day operator ordering).
+    policy_decisions : np.ndarray
+        Chosen operator id per decision, aligned to ``design.logs_df`` rows.
+    max_ops : int
+        Column count of the returned matrix (largest per-day operator count).
+
+    Returns
+    -------
+    np.ndarray
+        ``(n, max_ops)`` one-hot policy-probability matrix.
+    """
+    logs_df = design.logs_df
+    n = len(logs_df)
+    day_keys = logs_df[design.day_col].astype(str).to_numpy()
+    chosen = np.asarray(policy_decisions).astype(str)
+    policy_probs = np.zeros((n, max_ops))
+    for day_key, ops in design.ops_all_by_day.items():
+        pos = {str(op): i for i, op in enumerate(ops)}
+        rows = np.flatnonzero(day_keys == str(day_key))
+        if rows.size == 0:
+            continue
+        cols = np.array([pos.get(c, -1) for c in chosen[rows]])
+        ok = cols >= 0
+        policy_probs[rows[ok], cols[ok]] = 1.0
+    return policy_probs
+
+
+def map_external_policies(
+    external_policies: dict[str, pd.DataFrame],
+    design: PairwiseDesign,
+) -> dict[str, np.ndarray]:
+    """Map externally-supplied client→operator assignments to policy arrays (#56).
+
+    Each policy is a DataFrame holding at least the design's ``client_id`` and
+    ``operator_id`` columns (the schema a routing/queueing simulator emits). The
+    assignment is keyed by ``client_id``: every evaluation decision for a given
+    client is routed to that client's assigned operator. A client that appears
+    on multiple days therefore receives the same (static) assignment; per-call
+    assignments are a documented follow-up.
+
+    Eligibility is **not** silently repaired: an assignment to an operator that
+    is unavailable on a decision's day simply does not match (its
+    policy-probability row stays all-zero and the decision contributes through
+    the direct-method term only), which surfaces in ``match_rate``. Assignments
+    to operators unknown to the whole system, or missing client coverage, fail
+    loud.
+
+    Parameters
+    ----------
+    external_policies : dict[str, pd.DataFrame]
+        Mapping of policy name to assignment frame.
+    design : PairwiseDesign
+        Evaluation design built from the logs being evaluated.
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Mapping of policy name to an operator-id array aligned to
+        ``design.logs_df`` rows — the same contract :func:`induce_policy`
+        returns.
+
+    Raises
+    ------
+    DataValidationError
+        If ``external_policies`` is not a non-empty dict, a frame is missing the
+        required columns, a client in the logs has no assignment, or an assigned
+        operator is unknown to the system.
+    """
+    if not isinstance(external_policies, dict) or not external_policies:
+        raise DataValidationError(
+            "external_policies must be a non-empty dict of "
+            "{policy_name: DataFrame[client_id, operator_id]}."
+        )
+
+    client_col = design.client_id_col
+    op_col = design.operator_id_col
+    logs_clients = design.logs_df[client_col].to_numpy()
+    known_ops = {str(op) for ops in design.ops_all_by_day.values() for op in ops}
+
+    policies: dict[str, np.ndarray] = {}
+    for name, frame in external_policies.items():
+        if not isinstance(frame, pd.DataFrame):
+            raise DataValidationError(
+                f"external_policies[{name!r}] must be a pandas DataFrame, "
+                f"got {type(frame).__name__}."
+            )
+        missing_cols = [c for c in (client_col, op_col) if c not in frame.columns]
+        if missing_cols:
+            raise DataValidationError(
+                f"external_policies[{name!r}] is missing required column(s) "
+                f"{missing_cols}; expected at least {[client_col, op_col]}."
+            )
+        if frame[client_col].duplicated().any():
+            dup = frame.loc[frame[client_col].duplicated(), client_col].unique()[:5]
+            raise DataValidationError(
+                f"external_policies[{name!r}] has duplicate client assignments "
+                f"(e.g. {list(dup)}); provide one operator per client."
+            )
+
+        assignment = dict(zip(frame[client_col], frame[op_col], strict=False))
+
+        # Validate client coverage against the evaluation logs.
+        missing_clients = {c for c in logs_clients if c not in assignment}
+        if missing_clients:
+            sample = list(missing_clients)[:5]
+            raise DataValidationError(
+                f"external_policies[{name!r}] does not cover "
+                f"{len(missing_clients)} client(s) present in the logs "
+                f"(e.g. {sample}); every logged decision needs an assignment."
+            )
+
+        # Validate assigned operators are known to the system.
+        unknown_ops = {
+            str(op) for op in assignment.values() if str(op) not in known_ops
+        }
+        if unknown_ops:
+            sample = list(unknown_ops)[:5]
+            raise DataValidationError(
+                f"external_policies[{name!r}] assigns unknown operator(s) "
+                f"{sample} not present in op_daily_df."
+            )
+
+        decisions = np.array([assignment[c] for c in logs_clients], dtype=object)
+        policies[name] = decisions
+
+    return policies

@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **External-policy evaluation for pairwise OPE** ([#56]). New
+  `evaluate_external_policies(logs_df, op_daily_df, policies, ...)` (and an
+  `external_policies=` parameter on `evaluate_pairwise_models`) scores policies
+  produced by an *external* decision process — e.g. a discrete-event call-centre
+  simulator that accounts for queues and shifts — instead of inducing them
+  greedily from candidate models. Assignments are `{policy_name:
+  DataFrame[client_id, operator_id]}`, keyed by `client_id`; the same DR/SNDR
+  estimators and trust diagnostics apply. A simulation proof
+  (`tests/sim_studies/test_external_policy_recovery.py`) shows the
+  external-policy DR recovers the analytic value of a known target.
+- **What-if autoscaling scenario simulator** ([#34]). New
+  `simulate_autoscaling_scenario(logs_df, op_daily_df, models, scenario, ...)`
+  re-evaluates a candidate policy under documented operational knobs —
+  `capacity_multiplier` (fraction of operators available per day) and
+  `eligibility_mode` (`"as_logged"` / `"restricted"`). Only the policy's
+  eligibility is changed; logged actions, outcomes and propensities are
+  untouched, and the applied scenario + its assumptions are recorded on
+  `artifact.metadata["scenario"]`.
+- **Large-data execution path for pairwise evaluation** ([#33]). New
+  `execution_mode` parameter on `evaluate_pairwise_models`
+  (`"auto"` / `"standard"` / `"large_data"`). `"large_data"` builds the
+  per-decision observed-feature / action / eligibility / policy-probability
+  arrays with vectorized operations instead of a per-row `DataFrame.iterrows()`
+  loop; it is **numerically identical** to `"standard"` (parity-tested to
+  <1e-10). `"auto"` selects it once the evaluation set reaches
+  `skdr_eval.pairwise.LARGE_DATA_ROW_THRESHOLD` rows.
+
 ### Fixed
 - **DR/SNDR importance weight now includes the target policy** ([#106]). The
   estimator computed the importance weight as `1/e(A|x)` (inverse logging
@@ -527,6 +555,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behind a Colab-detection check to avoid unintended side-effects in
   non-Colab environments.
 
+[#33]: https://github.com/dgenio/skdr-eval/issues/33
+[#34]: https://github.com/dgenio/skdr-eval/issues/34
+[#56]: https://github.com/dgenio/skdr-eval/issues/56
 [#67]: https://github.com/dgenio/skdr-eval/issues/67
 [#69]: https://github.com/dgenio/skdr-eval/issues/69
 [#77]: https://github.com/dgenio/skdr-eval/issues/77
