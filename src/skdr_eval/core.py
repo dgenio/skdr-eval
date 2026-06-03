@@ -1630,7 +1630,8 @@ def _sndr_bootstrap_values(
     if w_sum > 0:
         result: np.ndarray = q_pi + (n * w_clip / w_sum) * (Y - q_hat)
         return result
-    return q_pi.copy()
+    copied: np.ndarray = q_pi.copy()
+    return copied
 
 
 def block_bootstrap_ci(

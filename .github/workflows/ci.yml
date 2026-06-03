@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
     - uses: actions/checkout@v4
@@ -48,6 +48,38 @@ jobs:
         flags: unittests
         name: codecov-umbrella
         fail_ci_if_error: false
+
+  # Floor-deps job (#152): install the *minimum* declared dependency versions
+  # on the lowest supported Python (3.10) and run the full suite. This proves
+  # every ``>=X`` lower bound in pyproject.toml is truthful — a normal CI run
+  # resolves the latest deps and would silently mask a broken floor.
+  floor-deps:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Needed for setuptools_scm
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Install with scientific-core deps pinned to their declared floors
+      # constraints-min.txt pins numpy/pandas/scipy/scikit-learn to the floors
+      # declared in pyproject.toml, while dev/test tooling (pytest, matplotlib,
+      # …) still resolves at current versions. Flooring the test tooling itself
+      # is not the point — only the runtime scientific core.
+      run: |
+        uv pip install --system -e .[dev] --constraint constraints-min.txt
+
+    - name: Test with pytest (minimum dependency floors)
+      run: |
+        pytest -q --no-header
 
   examples-smoke:
     runs-on: ubuntu-latest

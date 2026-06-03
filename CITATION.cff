@@ -55,3 +55,81 @@ preferred-citation:
   version: "0.9.0"
   year: 2026
   url: "https://github.com/dgenio/skdr-eval"
+# Foundational methods the library builds on. These mirror the citations in
+# docs/methods.md so the citation metadata and the methods note stay in sync.
+references:
+  - type: article
+    title: "Estimation of Regression Coefficients When Some Regressors Are Not Always Observed"
+    authors:
+      - family-names: "Robins"
+        given-names: "James M."
+      - family-names: "Rotnitzky"
+        given-names: "Andrea"
+      - family-names: "Zhao"
+        given-names: "Lue Ping"
+    year: 1994
+    journal: "Journal of the American Statistical Association"
+    notes: "Foundational result for doubly robust / AIPW estimation."
+  - type: conference-paper
+    title: "Doubly Robust Policy Evaluation and Learning"
+    authors:
+      - family-names: "Dudík"
+        given-names: "Miroslav"
+      - family-names: "Langford"
+        given-names: "John"
+      - family-names: "Li"
+        given-names: "Lihong"
+    year: 2011
+    collection-title: "Proceedings of the 28th International Conference on Machine Learning (ICML)"
+    url: "https://arxiv.org/abs/1103.4601"
+    notes: "The DR estimator for off-policy evaluation."
+  - type: article
+    title: "Pareto Smoothed Importance Sampling"
+    authors:
+      - family-names: "Vehtari"
+        given-names: "Aki"
+      - family-names: "Simpson"
+        given-names: "Daniel"
+      - family-names: "Gelman"
+        given-names: "Andrew"
+      - family-names: "Yao"
+        given-names: "Yuling"
+      - family-names: "Gabry"
+        given-names: "Jonah"
+    year: 2024
+    journal: "Journal of Machine Learning Research"
+    url: "https://arxiv.org/abs/1507.02646"
+    notes: "PSIS and the Pareto-k support-health diagnostic thresholds."
+  - type: conference-paper
+    title: "Obtaining Well Calibrated Probabilities Using Bayesian Binning"
+    authors:
+      - family-names: "Naeini"
+        given-names: "Mahdi Pakdaman"
+      - family-names: "Cooper"
+        given-names: "Gregory F."
+      - family-names: "Hauskrecht"
+        given-names: "Milos"
+    year: 2015
+    collection-title: "Proceedings of the 29th AAAI Conference on Artificial Intelligence"
+    notes: "Binned calibration error (ECE) used in the propensity-calibration diagnostic."
+  - type: article
+    title: "Double/Debiased Machine Learning for Treatment and Structural Parameters"
+    authors:
+      - family-names: "Chernozhukov"
+        given-names: "Victor"
+      - family-names: "Chetverikov"
+        given-names: "Denis"
+      - family-names: "Demirer"
+        given-names: "Mert"
+      - family-names: "Duflo"
+        given-names: "Esther"
+      - family-names: "Hansen"
+        given-names: "Christian"
+      - family-names: "Newey"
+        given-names: "Whitney"
+      - family-names: "Robins"
+        given-names: "James"
+    year: 2018
+    journal: "The Econometrics Journal"
+    doi: "10.1111/ectj.12097"
+    notes: "Cross-fitting / sample-splitting underpinning the time-aware crossfit design."

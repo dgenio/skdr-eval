@@ -7,7 +7,23 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 
 import skdr_eval
-from skdr_eval.core import block_bootstrap_ci
+from skdr_eval.core import _sndr_bootstrap_values, block_bootstrap_ci
+
+
+def test_sndr_bootstrap_values_zero_weight_fallback() -> None:
+    """When the clipped weights sum to zero there is no self-normalisation to
+    apply, so the SNDR pseudo-outcomes fall back to the direct-method term
+    ``q_pi`` (a copy, leaving the input untouched)."""
+    q_pi = np.array([1.0, 2.0, 3.0])
+    w_clip = np.zeros(3)
+    Y = np.array([0.5, 0.5, 0.5])
+    q_hat = np.array([0.1, 0.2, 0.3])
+
+    out = _sndr_bootstrap_values(q_pi, w_clip, Y, q_hat)
+
+    np.testing.assert_array_equal(out, q_pi)
+    assert out is not q_pi  # returned a copy, not the original array
+
 
 # Constants for CI validation
 CI_TOLERANCE_MULTIPLIER = 2.0

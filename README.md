@@ -853,6 +853,11 @@ If you use this software in your research, please cite:
 }
 ```
 
+For one-click copy, the same entry — plus the foundational method references
+(DR, PSIS, calibration, double machine learning) — is available as
+[`CITATION.bib`](CITATION.bib) and as machine-readable
+[`CITATION.cff`](CITATION.cff).
+
 A Zenodo concept DOI is being minted on the next tagged release (see
 [`docs/zenodo.md`](docs/zenodo.md)); after that, `CITATION.cff` will carry
 the canonical DOI and replace the URL field above.

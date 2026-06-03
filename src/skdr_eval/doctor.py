@@ -124,7 +124,7 @@ class DoctorReport:
         print(self.to_text(color=use_color))
 
 
-_PYTHON_MIN: tuple[int, int] = (3, 11)
+_PYTHON_MIN: tuple[int, int] = (3, 10)
 
 
 def _check_environment() -> Check:
@@ -135,9 +135,9 @@ def _check_environment() -> Check:
             status="fail",
             message=(
                 f"Python {platform.python_version()} is below skdr-eval's "
-                f"minimum of 3.11."
+                f"minimum of 3.10."
             ),
-            fix_hint="Upgrade to Python 3.11+ (CI matrix covers 3.11-3.14).",
+            fix_hint="Upgrade to Python 3.10+ (CI matrix covers 3.10-3.14).",
             category="environment",
         )
     return Check(
