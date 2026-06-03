@@ -141,7 +141,9 @@ correctness allows — it must compose inside a downstream scientific stack:
   minimums via `constraints-min.txt` (`uv pip install -e .[dev] --constraint
   constraints-min.txt`) on Python 3.10 and runs the suite — this proves every
   `>=X` is truthful while the test tooling still resolves at current versions.
-  Keep `constraints-min.txt` in sync with the floors in `pyproject.toml`.
+  Keep `constraints-min.txt` in sync with the floors in `pyproject.toml`. (In
+  CI the same install runs with `--system` so it targets the runner's
+  interpreter; locally, drop `--system` and install into a virtualenv.)
 - **Scheduled `deps-weekly` job** installs the newest releases including
   pre-releases (`--prerelease allow`, `continue-on-error`) as the early-warning
   net that justifies leaving the upper end uncapped.

@@ -127,10 +127,10 @@ def _empirical_q_hat_per_rank(
 
     if n < _MIN_IMPRESSIONS_FOR_CROSSFIT:  # nothing to hold out — use full table.
         rate = _rate(total_sum, total_cnt)
-        full: np.ndarray = np.broadcast_to(
-            rate[None, :, :], (n, slate_size, n_items)
-        ).copy()
-        return full
+        return cast(
+            "np.ndarray",
+            np.broadcast_to(rate[None, :, :], (n, slate_size, n_items)).copy(),
+        )
 
     k_folds = min(n_folds, n)
     rng = np.random.default_rng(random_state)
