@@ -24,7 +24,14 @@ from skdr_eval.datasets import (
     load_movielens_ope,
     load_obd,
 )
-from skdr_eval.datasets._cache import fetch_file, sha256_of
+from skdr_eval.datasets import _cache as cache_mod
+from skdr_eval.datasets._cache import (
+    fetch_file,
+    read_manifest,
+    sha256_of,
+    write_manifest,
+)
+from skdr_eval.datasets.obd import _encode_features
 from skdr_eval.exceptions import DatasetError
 
 
@@ -158,8 +165,6 @@ class TestLoadObdOffline:
 
 class TestEncodingAndCleaning:
     def test_categorical_encoding_is_row_order_independent(self) -> None:
-        from skdr_eval.datasets.obd import _encode_features  # noqa: PLC0415
-
         frame = pd.DataFrame({"f": ["b", "a", "c", "a"]})
         codes = _encode_features(frame)["f"].tolist()
         # Sorted categories: a->0, b->1, c->2 regardless of appearance order.
@@ -196,6 +201,90 @@ class TestEncodingAndCleaning:
         assert len(logs) == 2  # the "bad" position row dropped
         assert not logs["cli_position"].isna().any()
         skdr_eval.validate_logs(logs, y_col="click")
+
+
+def _write_csvs(src: Path, log_df: pd.DataFrame, items_df: pd.DataFrame) -> str:
+    """Write arbitrary ``random/all.csv`` + ``item_context.csv`` under a root."""
+    d = src / "random"
+    d.mkdir(parents=True, exist_ok=True)
+    log_df.to_csv(d / "all.csv", index=False)
+    items_df.to_csv(d / "item_context.csv", index=False)
+    return str(src)
+
+
+class TestLoadObdBranches:
+    def test_empty_log_raises(self, tmp_path: Path) -> None:
+        base = _write_csvs(
+            tmp_path / "s",
+            pd.DataFrame(
+                {"timestamp": [], "item_id": [], "click": [], "user_feature_0": []}
+            ),
+            pd.DataFrame({"item_id": [0]}),
+        )
+        with pytest.raises(DatasetError, match="empty"):
+            load_obd("random", "all", cache_dir=tmp_path / "c", base_url=base)
+
+    def test_missing_user_feature_raises(self, tmp_path: Path) -> None:
+        base = _write_csvs(
+            tmp_path / "s",
+            pd.DataFrame({"timestamp": ["2020-01-01"], "item_id": [0], "click": [1]}),
+            pd.DataFrame({"item_id": [0]}),
+        )
+        with pytest.raises(DatasetError, match="no 'user_feature'"):
+            load_obd("random", "all", cache_dir=tmp_path / "c", base_url=base)
+
+    def test_missing_click_raises(self, tmp_path: Path) -> None:
+        base = _write_csvs(
+            tmp_path / "s",
+            pd.DataFrame(
+                {"timestamp": ["2020-01-01"], "item_id": [0], "user_feature_0": [1]}
+            ),
+            pd.DataFrame({"item_id": [0]}),
+        )
+        with pytest.raises(DatasetError, match="no 'click'"):
+            load_obd("random", "all", cache_dir=tmp_path / "c", base_url=base)
+
+    def test_timestamp_and_position_absent_and_catalog_fallback(
+        self, tmp_path: Path
+    ) -> None:
+        # No timestamp (→ synthesized), no position (→ omitted), item_context
+        # lacks item_id (→ catalog derived from observed item_ids).
+        base = _write_csvs(
+            tmp_path / "s",
+            pd.DataFrame(
+                {"item_id": [0, 1, 0], "click": [1, 0, 1], "user_feature_0": [2, 3, 2]}
+            ),
+            pd.DataFrame({"other": [9]}),
+        )
+        logs, ops_all, _ = load_obd(
+            "random", "all", cache_dir=tmp_path / "c", base_url=base
+        )
+        assert "arrival_ts" in logs.columns
+        assert "cli_position" not in logs.columns
+        assert list(ops_all) == ["item_0", "item_1"]
+        skdr_eval.validate_logs(logs, y_col="click")
+
+
+class TestCacheBranches:
+    def test_insufficient_disk_space_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_usage = type("Usage", (), {"free": 1})()
+        monkeypatch.setattr(cache_mod.shutil, "disk_usage", lambda _p: fake_usage)
+        src = tmp_path / "src.csv"
+        src.write_text("x", encoding="utf-8")
+        with pytest.raises(DatasetError, match="Insufficient disk space"):
+            fetch_file(str(src), tmp_path / "out.csv", min_free_bytes=10_000)
+
+    def test_read_manifest_absent_and_garbage(self, tmp_path: Path) -> None:
+        missing = tmp_path / "nope.json"
+        assert read_manifest(missing) == {}
+        garbage = tmp_path / "bad.json"
+        garbage.write_text("{not json", encoding="utf-8")
+        assert read_manifest(garbage) == {}
+        good = tmp_path / "m.json"
+        write_manifest(good, {"a": 1})
+        assert read_manifest(good) == {"a": 1}
 
 
 class TestStubs:

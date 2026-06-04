@@ -53,6 +53,21 @@ class TestXGBAdapter:
         assert "V_hat" in art.report.columns
         assert not art.report.empty
 
+    def test_repr_includes_estimator(self) -> None:
+        adapter = XGBRegressorAdapter(n_estimators=10, random_state=0)
+        assert "XGBRegressorAdapter" in repr(adapter)
+
+    def test_per_call_fit_kwarg_overrides_construction(self) -> None:
+        import numpy as np  # noqa: PLC0415
+
+        rng = np.random.RandomState(0)
+        X = rng.normal(size=(60, 3))
+        y = X[:, 0] + rng.normal(size=60)
+        # Construction sets verbose=True; per-call kwarg flips it — must not error.
+        model = XGBRegressorAdapter(n_estimators=10, random_state=0)
+        model.fit(X, y, verbose=False)
+        assert model.predict(X).shape == (60,)
+
 
 @requires_lgbm
 class TestLGBMAdapter:
