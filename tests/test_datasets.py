@@ -156,6 +156,48 @@ class TestLoadObdOffline:
             load_obd("random", "nope", cache_dir=tmp_path)
 
 
+class TestEncodingAndCleaning:
+    def test_categorical_encoding_is_row_order_independent(self) -> None:
+        from skdr_eval.datasets.obd import _encode_features  # noqa: PLC0415
+
+        frame = pd.DataFrame({"f": ["b", "a", "c", "a"]})
+        codes = _encode_features(frame)["f"].tolist()
+        # Sorted categories: a->0, b->1, c->2 regardless of appearance order.
+        assert codes == [1, 0, 2, 0]
+        # Shuffling rows must not change a value's code.
+        shuffled = frame.iloc[[3, 2, 1, 0]].reset_index(drop=True)
+        shuffled_codes = _encode_features(shuffled)["f"].tolist()
+        assert shuffled_codes == [0, 2, 0, 1]
+
+    def test_rows_with_nan_features_are_dropped(self, tmp_path: Path) -> None:
+        # A non-numeric position value coerces to NaN and the row must drop,
+        # keeping the frame schema-valid for the design builder.
+        src = tmp_path / "obd_src" / "random"
+        src.mkdir(parents=True)
+        pd.DataFrame(
+            {
+                "timestamp": ["2020-01-01", "2020-01-02", "2020-01-03"],
+                "item_id": [0, 1, 2],
+                "position": [1, "bad", 3],
+                "click": [1, 0, 1],
+                "propensity_score": [0.5, 0.5, 0.5],
+                "user_feature_0": [1, 2, 3],
+            }
+        ).to_csv(src / "all.csv", index=False)
+        pd.DataFrame({"item_id": [0, 1, 2]}).to_csv(
+            src / "item_context.csv", index=False
+        )
+        logs, _, _ = load_obd(
+            "random",
+            "all",
+            cache_dir=tmp_path / "c",
+            base_url=str(tmp_path / "obd_src"),
+        )
+        assert len(logs) == 2  # the "bad" position row dropped
+        assert not logs["cli_position"].isna().any()
+        skdr_eval.validate_logs(logs, y_col="click")
+
+
 class TestStubs:
     def test_criteo_stub_raises(self) -> None:
         with pytest.raises(DatasetError, match="not implemented yet"):

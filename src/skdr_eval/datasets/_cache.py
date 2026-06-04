@@ -89,6 +89,7 @@ def fetch_file(
     dest: Path,
     *,
     min_free_bytes: int = 16 * 1024 * 1024,
+    timeout: float = 30.0,
     force: bool = False,
 ) -> Path:
     """Fetch ``source`` to ``dest`` (cached), returning ``dest``.
@@ -97,11 +98,17 @@ def fetch_file(
     filesystem path (copied). When ``dest`` already exists and ``force`` is
     False, the cached copy is returned without re-fetching.
 
+    Parameters
+    ----------
+    timeout : float, default=30.0
+        Per-connection timeout (seconds) for URL downloads, so a stalled
+        remote host fails loud instead of hanging indefinitely.
+
     Raises
     ------
     DatasetError
-        On network failure, a missing local source, or insufficient disk
-        space — each with an actionable message.
+        On network failure (including timeout), a missing local source, or
+        insufficient disk space — each with an actionable message.
     """
     dest = Path(dest)
     if dest.exists() and not force:
@@ -114,7 +121,10 @@ def fetch_file(
 
     if _is_url(source):
         try:
-            with urllib.request.urlopen(source) as resp, tmp.open("wb") as out:
+            with (
+                urllib.request.urlopen(source, timeout=timeout) as resp,
+                tmp.open("wb") as out,
+            ):
                 shutil.copyfileobj(resp, out, length=_BLOCK)
         except (urllib.error.URLError, OSError) as exc:
             tmp.unlink(missing_ok=True)

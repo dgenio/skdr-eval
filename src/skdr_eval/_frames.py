@@ -58,9 +58,10 @@ def coerce_to_pandas(obj: Any, *, name: str = "input") -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        A pandas frame. Polars frames are converted with
-        ``use_pyarrow_extension_array=True`` (zero-copy where possible);
-        PyArrow tables via ``Table.to_pandas()``.
+        A pandas frame. Polars frames and PyArrow tables are converted via
+        ``.to_pandas()`` with NumPy-backed columns (no Arrow extension
+        arrays) so the downstream NumPy paths behave identically to a
+        pandas-native input.
 
     Raises
     ------

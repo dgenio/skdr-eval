@@ -94,7 +94,12 @@ def _encode_features(frame: pd.DataFrame) -> pd.DataFrame:
         if pd.api.types.is_numeric_dtype(series):
             out[col] = series.to_numpy()
         else:
-            cats = pd.Categorical(series.astype("string"))
+            as_str = series.astype("string")
+            # Explicit sorted categories so the integer encoding is stable
+            # regardless of row order (cache reproducibility / cross-run
+            # comparability). NaNs map to code -1.
+            categories = sorted(as_str.dropna().unique())
+            cats = pd.Categorical(as_str, categories=categories)
             out[col] = cats.codes.astype(np.int64)
     return pd.DataFrame(out, index=frame.index)
 
@@ -238,8 +243,14 @@ def load_obd(
 
     logs = pd.DataFrame(out)
     # Drop rows with unparseable timestamps/features rather than emit NaNs that
-    # would trip the design builder downstream.
-    logs = logs.dropna(subset=["arrival_ts", "click"]).reset_index(drop=True)
+    # would trip the design builder downstream. This covers the timestamp, the
+    # reward, and every numeric feature column (``cli_position`` and the
+    # ``cli_user_feature_*`` set), any of which can pick up NaNs from a
+    # ``to_numeric(..., errors="coerce")`` on a malformed source row.
+    feature_cols = [c for c in logs.columns if c.startswith("cli_")]
+    logs = logs.dropna(subset=["arrival_ts", "click", *feature_cols]).reset_index(
+        drop=True
+    )
 
     ops_all = pd.Index([f"item_{i}" for i in catalog])
     return DatasetBundle(logs=logs, ops_all=ops_all, ground_truth=None)
