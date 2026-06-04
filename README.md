@@ -327,6 +327,34 @@ print(artifact.report[["model", "estimator", "V_hat", "ESS", "match_rate"]])
 print(artifact.warnings)
 ```
 
+#### External (simulator) policies, what-if scenarios, and large data
+
+Three pairwise extensions share the same `EvaluationArtifact` and trust
+diagnostics (see [`examples/use_cases/07_simulator_and_scenarios.py`](examples/use_cases/07_simulator_and_scenarios.py)):
+
+```python
+# Score policies from an external decision process (e.g. a call-centre
+# simulator), instead of inducing them from candidate models:
+artifact = skdr_eval.evaluate_external_policies(
+    logs_df=logs_df,
+    op_daily_df=op_daily_df,
+    policies={"simulator_a": assignments_df},  # DataFrame[client_id, operator_id]
+    metric_col="service_time", task_type="regression", direction="min",
+)
+
+# What-if: re-evaluate a policy under reduced operator capacity:
+artifact = skdr_eval.simulate_autoscaling_scenario(
+    logs_df, op_daily_df, models={"HGB": model},
+    scenario={"capacity_multiplier": 0.6, "eligibility_mode": "as_logged"},
+    metric_col="service_time", task_type="regression", direction="min",
+)
+
+# Large inputs: a vectorized path, numerically identical to the default:
+artifact = skdr_eval.evaluate_pairwise_models(
+    ..., execution_mode="large_data",
+)
+```
+
 ## API Reference
 
 ### Core Functions

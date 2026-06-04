@@ -24,6 +24,7 @@ from .core import (
     block_bootstrap_ci,
     build_design,
     dr_value_with_clip,
+    evaluate_external_policies,
     evaluate_pairwise_models,
     evaluate_propensity_diagnostics,
     evaluate_sklearn_models,
@@ -111,6 +112,7 @@ from .reporting import (
     render_evaluation_card,
     summarize_sensitivity,
 )
+from .scenarios import simulate_autoscaling_scenario
 from .slate import (
     SlateGroundTruth,
     SlateResult,
@@ -245,6 +247,7 @@ __all__ = [
     "dr_value_with_strategy",
     "embedding_sufficiency_diagnostic",
     "estimators",
+    "evaluate_external_policies",
     "evaluate_pairwise_models",
     "evaluate_propensity_diagnostics",
     "evaluate_sklearn_models",
@@ -276,6 +279,7 @@ __all__ = [
     "reward_interaction_ips",
     "sample_size_calculation",
     "save_config_to_file",
+    "simulate_autoscaling_scenario",
     "simulate_coverage",
     "slate",
     "slate_cascade_dr",

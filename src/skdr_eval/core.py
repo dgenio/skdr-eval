@@ -42,7 +42,14 @@ from .exceptions import (
     PolicyInductionError,
     PropensityScoreError,
 )
-from .pairwise import PairwiseDesign, induce_policy
+from .pairwise import (
+    LARGE_DATA_ROW_THRESHOLD,
+    PairwiseDesign,
+    build_eval_arrays_vectorized,
+    build_policy_probs_vectorized,
+    induce_policy,
+    map_external_policies,
+)
 from .validation import (
     validate_dataframe,
     validate_finite_values,
@@ -2548,6 +2555,8 @@ def evaluate_pairwise_models(
     mips_kernel: "str | Callable[[np.ndarray], np.ndarray]" = "rbf",
     tracker: "Tracker | None" = None,
     baseline: float | str | None = None,
+    external_policies: "dict[str, pd.DataFrame] | None" = None,
+    execution_mode: Literal["auto", "standard", "large_data"] = "auto",
 ) -> "EvaluationArtifact":
     """Evaluate pairwise models using autoscale strategy.
 
@@ -2662,6 +2671,26 @@ def evaluate_pairwise_models(
     mips_bandwidth : float, default=1.0
         Gaussian-kernel bandwidth for the MIPS embedding marginal. Used only
         for ``"MIPS"``.
+    external_policies : dict[str, pd.DataFrame], optional
+        Externally-supplied policies to evaluate instead of inducing them from
+        ``models`` (issue #56). Maps ``policy_name -> DataFrame`` where each
+        frame carries at least the ``client_id`` and ``operator_id`` columns —
+        the assignment schema a routing/queueing simulator emits. When given,
+        the ``models``-based policy induction (and ``fit_models`` /
+        ``policy_train`` pre-split) is skipped and every logged decision is
+        evaluated; ``models`` may be an empty dict. Assignments are keyed by
+        ``client_id`` (one operator per client). Prefer the thin wrapper
+        :func:`evaluate_external_policies` for this workflow.
+    execution_mode : Literal["auto", "standard", "large_data"], default="auto"
+        Execution path for building the per-decision arrays (issue #33).
+        ``"standard"`` uses the row-wise reference implementation;
+        ``"large_data"`` uses a vectorized builder that avoids the per-row
+        ``iterrows()`` loop and is **numerically identical** to ``"standard"``
+        (parity-tested to <1e-10). ``"auto"`` selects ``"large_data"`` once the
+        number of evaluation decisions reaches
+        :data:`skdr_eval.pairwise.LARGE_DATA_ROW_THRESHOLD` and ``"standard"``
+        otherwise. Does not change the induction strategy (see ``strategy`` /
+        ``chunk_pairs`` for the memory-aware induction controls).
 
     Returns
     -------
@@ -2682,7 +2711,14 @@ def evaluate_pairwise_models(
     logger.info("Starting pairwise evaluation")
 
     # Validate parameters
-    validate_models_dict(models)
+    use_external = external_policies is not None
+    if not use_external:
+        validate_models_dict(models)
+    if execution_mode not in ("auto", "standard", "large_data"):
+        raise ValueError(
+            f"Unknown execution_mode: {execution_mode}. "
+            "Must be 'auto', 'standard', or 'large_data'."
+        )
     if task_type not in ["regression", "binary"]:
         raise ValueError(
             f"Unknown task_type: {task_type}. Must be 'regression' or 'binary'"
@@ -2691,7 +2727,19 @@ def evaluate_pairwise_models(
         raise ValueError(f"Unknown direction: {direction}. Must be 'min' or 'max'")
 
     # Resolve policy_train sentinel: None means "pre_split" + emit warning.
-    if policy_train is None:
+    # External policies (#56) are evaluated against every logged decision; there
+    # are no policy models to fit, so the pre_split machinery is skipped and the
+    # deprecation warning is irrelevant.
+    if use_external:
+        if fit_models:
+            warnings.warn(
+                "evaluate_pairwise_models: external_policies was provided, so "
+                "fit_models=True is ignored — externally-supplied policies are "
+                "evaluated directly, without fitting models or splitting data.",
+                stacklevel=2,
+            )
+        policy_train = "all"
+    elif policy_train is None:
         warnings.warn(
             "evaluate_pairwise_models: policy_train was not specified and now "
             "defaults to 'pre_split' (was 'all'). The 'all' mode fits and "
@@ -2777,7 +2825,7 @@ def evaluate_pairwise_models(
     )
 
     # Fit on all data (legacy behavior, biased but supported for compatibility)
-    if fit_models and policy_train == "all":
+    if fit_models and policy_train == "all" and not use_external:
         feature_cols = design.cli_features + design.op_features
         X_fit = design.logs_df[feature_cols].values.astype(np.float32)
         y_fit = design.logs_df[metric_col].values
@@ -2787,21 +2835,38 @@ def evaluate_pairwise_models(
             f"Fitted {len(models)} policy model(s) on {len(X_fit)} pairs (policy_train='all')"
         )
 
-    # Induce policies (held-out for pre_split, full data for "all")
-    policies = induce_policy(
-        models,
-        design,
-        strategy,
-        direction,
-        topk,
-        chunk_pairs,
-        metric_col,
-        surrogate_model=surrogate_model,
-        random_state=random_state,
-    )
+    # Obtain policies: either map externally-supplied assignments (#56) or
+    # induce them from ``models`` (held-out for pre_split, full data for "all").
+    if use_external:
+        assert external_policies is not None  # narrowed by use_external
+        policies = map_external_policies(external_policies, design)
+        logger.info(f"Evaluating {len(policies)} external policy(ies)")
+    else:
+        policies = induce_policy(
+            models,
+            design,
+            strategy,
+            direction,
+            topk,
+            chunk_pairs,
+            metric_col,
+            surrogate_model=surrogate_model,
+            random_state=random_state,
+        )
 
     # Mirror eval_logs_df into the local variable used downstream
     logs_df = design.logs_df
+
+    # Resolve execution_mode (#33). "auto" selects the vectorized large-data
+    # path once the evaluation set is large enough; the vectorized path is
+    # numerically identical to the standard row-wise path.
+    resolved_execution_mode = execution_mode
+    if execution_mode == "auto":
+        resolved_execution_mode = (
+            "large_data" if len(logs_df) >= LARGE_DATA_ROW_THRESHOLD else "standard"
+        )
+    use_vectorized = resolved_execution_mode == "large_data"
+    logger.info(f"Execution mode: {resolved_execution_mode}")
 
     # Estimate propensity scores
     propensities = estimate_propensity_pairwise(
@@ -2818,48 +2883,56 @@ def evaluate_pairwise_models(
     # Fit outcome models with cross-fitting
     Y = logs_df[metric_col].values
 
-    # Create observed features (client + chosen operator features)
-    X_obs_list = []
-    A_list = []  # Action indices
+    # Create observed features (client + chosen operator features). The
+    # vectorized large-data path (#33) builds the same X_obs / A / eligibility
+    # arrays without a per-row iterrows() loop and is numerically identical.
+    elig_shared: np.ndarray | None = None
+    if use_vectorized:
+        X_obs, A, elig_shared, _max_ops_vec = build_eval_arrays_vectorized(
+            design, metric_col
+        )
+    else:
+        X_obs_list = []
+        A_list = []  # Action indices
 
-    for _i, row in logs_df.iterrows():
-        day = row[day_col]
-        chosen_op = row[operator_id_col]
+        for _i, row in logs_df.iterrows():
+            day = row[day_col]
+            chosen_op = row[operator_id_col]
 
-        # Client features
-        obs_features: list[float] = []
-        for feat in design.cli_features:
-            obs_features.append(float(row[feat]))
+            # Client features
+            obs_features: list[float] = []
+            for feat in design.cli_features:
+                obs_features.append(float(row[feat]))
 
-        # Chosen operator features
-        if str(day) in design.day_to_op_df:
-            op_df = design.day_to_op_df[str(day)]
-            op_row = op_df[op_df[operator_id_col] == chosen_op]
-            if len(op_row) > 0:
-                for feat in design.op_features:
-                    obs_features.append(float(op_row.iloc[0][feat]))
+            # Chosen operator features
+            if str(day) in design.day_to_op_df:
+                op_df = design.day_to_op_df[str(day)]
+                op_row = op_df[op_df[operator_id_col] == chosen_op]
+                if len(op_row) > 0:
+                    for feat in design.op_features:
+                        obs_features.append(float(op_row.iloc[0][feat]))
+                else:
+                    # Fallback to zeros
+                    for _feat in design.op_features:
+                        obs_features.append(0.0)
             else:
                 # Fallback to zeros
                 for _feat in design.op_features:
                     obs_features.append(0.0)
-        else:
-            # Fallback to zeros
-            for _feat in design.op_features:
-                obs_features.append(0.0)
 
-        X_obs_list.append(obs_features)
+            X_obs_list.append(obs_features)
 
-        # Action index
-        if (
-            str(day) in design.ops_all_by_day
-            and str(chosen_op) in design.ops_all_by_day[str(day)]
-        ):
-            A_list.append(design.ops_all_by_day[str(day)].index(str(chosen_op)))
-        else:
-            A_list.append(0)  # Fallback
+            # Action index
+            if (
+                str(day) in design.ops_all_by_day
+                and str(chosen_op) in design.ops_all_by_day[str(day)]
+            ):
+                A_list.append(design.ops_all_by_day[str(day)].index(str(chosen_op)))
+            else:
+                A_list.append(0)  # Fallback
 
-    X_obs = np.array(X_obs_list, dtype=np.float32)
-    A = np.array(A_list)
+        X_obs = np.array(X_obs_list, dtype=np.float32)
+        A = np.array(A_list)
 
     # Fit outcome model
     estimator_obj = _get_outcome_estimator(outcome_estimator, task_type)
@@ -2904,40 +2977,51 @@ def evaluate_pairwise_models(
     report_rows = []
 
     for model_name, policy_decisions in policies.items():
-        # Convert policy decisions to probabilities
-        policy_probs = np.zeros((len(logs_df), max_ops))
+        # Convert policy decisions to probabilities and build the eligibility
+        # matrix. The vectorized path (#33) reuses the day-grouped builders;
+        # ``elig`` is policy-independent so it is built once above.
+        if use_vectorized:
+            assert elig_shared is not None  # set together with use_vectorized
+            policy_probs = build_policy_probs_vectorized(
+                design, policy_decisions, max_ops
+            )
+            elig = elig_shared
+        else:
+            policy_probs = np.zeros((len(logs_df), max_ops))
 
-        for i, (_idx, row) in enumerate(logs_df.iterrows()):
-            day_str = str(row[day_col])
-            if day_str in design.ops_all_by_day:
-                chosen_op_str = str(policy_decisions[i])
-                if chosen_op_str in design.ops_all_by_day[day_str]:
-                    op_idx = design.ops_all_by_day[day_str].index(chosen_op_str)
-                    policy_probs[i, op_idx] = 1.0
+            for i, (_idx, row) in enumerate(logs_df.iterrows()):
+                day_str = str(row[day_col])
+                if day_str in design.ops_all_by_day:
+                    chosen_op_str = str(policy_decisions[i])
+                    if chosen_op_str in design.ops_all_by_day[day_str]:
+                        op_idx = design.ops_all_by_day[day_str].index(chosen_op_str)
+                        policy_probs[i, op_idx] = 1.0
 
-        # Create eligibility matrix
-        elig = np.zeros((len(logs_df), max_ops))
-        for idx, row in logs_df.iterrows():
-            i = int(idx) if isinstance(idx, int) else 0
-            day_str = str(row[day_col])
-            if day_str in design.ops_all_by_day:
-                if elig_col and elig_col in row:
-                    elig_ops = row[elig_col]
-                    # Handle pandas Series or direct list/tuple values
-                    if hasattr(elig_ops, "iloc"):
-                        # It's a pandas Series, get the actual value
-                        elig_value = elig_ops.iloc[0] if len(elig_ops) > 0 else []
-                    else:
-                        elig_value = elig_ops
-                    if isinstance(elig_value, (list, tuple)):
-                        for op in elig_value:
-                            if str(op) in design.ops_all_by_day[day_str]:
-                                op_idx = design.ops_all_by_day[day_str].index(str(op))
-                                elig[i, op_idx] = 1.0
+            # Create eligibility matrix
+            elig = np.zeros((len(logs_df), max_ops))
+            for idx, row in logs_df.iterrows():
+                i = int(idx) if isinstance(idx, int) else 0
+                day_str = str(row[day_col])
+                if day_str in design.ops_all_by_day:
+                    if elig_col and elig_col in row:
+                        elig_ops = row[elig_col]
+                        # Handle pandas Series or direct list/tuple values
+                        if hasattr(elig_ops, "iloc"):
+                            # It's a pandas Series, get the actual value
+                            elig_value = elig_ops.iloc[0] if len(elig_ops) > 0 else []
+                        else:
+                            elig_value = elig_ops
+                        if isinstance(elig_value, (list, tuple)):
+                            for op in elig_value:
+                                if str(op) in design.ops_all_by_day[day_str]:
+                                    op_idx = design.ops_all_by_day[day_str].index(
+                                        str(op)
+                                    )
+                                    elig[i, op_idx] = 1.0
+                        else:
+                            elig[i, : len(design.ops_all_by_day[day_str])] = 1.0
                     else:
                         elig[i, : len(design.ops_all_by_day[day_str])] = 1.0
-                else:
-                    elig[i, : len(design.ops_all_by_day[day_str])] = 1.0
 
         # Compute DR values
         try:
@@ -3125,12 +3209,97 @@ def evaluate_pairwise_models(
             "clip_grid": [None if not np.isfinite(c) else float(c) for c in clip_grid],
             "ci_bootstrap": bool(ci_bootstrap),
             "estimators": list(estimators),
+            "execution_mode": resolved_execution_mode,
+            "external_policies": bool(use_external),
         },
         baseline_kind=baseline_kind,
         baseline_value=baseline_value,
     )
     _autolog_tracker(tracker, artifact, evaluator="evaluate_pairwise_models")
     return artifact
+
+
+def evaluate_external_policies(
+    logs_df: pd.DataFrame,
+    op_daily_df: pd.DataFrame,
+    policies: dict[str, pd.DataFrame],
+    metric_col: str,
+    task_type: Literal["regression", "binary"],
+    direction: Literal["min", "max"],
+    **eval_kwargs: Any,
+) -> "EvaluationArtifact":
+    """Evaluate externally-supplied pairwise policies with DR/SNDR (issue #56).
+
+    Use this when the assignments come from an **external decision process** —
+    e.g. a discrete-event call-centre simulator that accounts for queues, shift
+    schedules and sequential dependencies — rather than from a per-client greedy
+    ``induce_policy`` over candidate operators. Each policy is a DataFrame of
+    ``client_id -> operator_id`` assignments; the DR/SNDR estimators then score
+    those assignments against the logged outcomes, with the same trust
+    diagnostics and confidence intervals as :func:`evaluate_pairwise_models`.
+
+    This is a thin wrapper over :func:`evaluate_pairwise_models` with
+    ``external_policies=policies`` (so policy induction and model fitting are
+    skipped and every logged decision is evaluated). All other keyword arguments
+    accepted by :func:`evaluate_pairwise_models` — ``propensity``, ``n_splits``,
+    ``clip_grid``, ``ci_bootstrap``, ``estimators``, ``execution_mode``, the
+    column-name overrides, etc. — are forwarded unchanged via ``eval_kwargs``.
+
+    Parameters
+    ----------
+    logs_df : pd.DataFrame
+        Observed decisions (one row per logged call) with the required columns.
+    op_daily_df : pd.DataFrame
+        Daily operator snapshots.
+    policies : dict[str, pd.DataFrame]
+        Mapping of policy name to an assignment frame carrying at least the
+        ``client_id`` and ``operator_id`` columns. One operator per client.
+    metric_col : str
+        Outcome column to evaluate (e.g. service time).
+    task_type : Literal["regression", "binary"]
+        Outcome type.
+    direction : Literal["min", "max"]
+        Whether lower or higher outcomes are better.
+    **eval_kwargs : Any
+        Additional keyword arguments forwarded to
+        :func:`evaluate_pairwise_models`.
+
+    Returns
+    -------
+    EvaluationArtifact
+        The same bundled artifact returned by :func:`evaluate_pairwise_models`.
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> from skdr_eval import evaluate_external_policies
+    >>> sim_a = pd.DataFrame({"client_id": [...], "operator_id": [...]})
+    >>> sim_b = pd.DataFrame({"client_id": [...], "operator_id": [...]})
+    >>> artifact = evaluate_external_policies(  # doctest: +SKIP
+    ...     logs_df=logs_df,
+    ...     op_daily_df=op_daily_df,
+    ...     policies={"simulator_a": sim_a, "simulator_b": sim_b},
+    ...     metric_col="service_time",
+    ...     task_type="regression",
+    ...     direction="min",
+    ... )
+    """
+    for reserved in ("models", "external_policies", "fit_models", "policy_train"):
+        if reserved in eval_kwargs:
+            raise TypeError(
+                f"evaluate_external_policies() does not accept {reserved!r}; "
+                "external policies are evaluated directly without model fitting."
+            )
+    return evaluate_pairwise_models(
+        logs_df=logs_df,
+        op_daily_df=op_daily_df,
+        models={},
+        metric_col=metric_col,
+        task_type=task_type,
+        direction=direction,
+        external_policies=policies,
+        **eval_kwargs,
+    )
 
 
 def evaluate_propensity_diagnostics(
