@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Public dataset loaders** ([#70]). New `skdr_eval.datasets` package with
+  `load_obd` (Open Bandit Dataset), returning the canonical
+  `(logs, ops_all, ground_truth)` tuple so real benchmark data flows through
+  `evaluate_sklearn_models` unchanged. Downloads are cached under
+  `~/.skdr_eval/datasets` (override via `SKDR_EVAL_CACHE_DIR`) with a sha256
+  `manifest.json`; a local `base_url` enables offline use. `load_obd` accepts
+  `behavior_policy`/`campaign`/`max_rows` and fails loud with `DatasetError` on
+  network/disk/source errors. `load_criteo_counterfactual` and
+  `load_movielens_ope` are documented stubs tracked under #70. The opt-in
+  network test is gated on `SKDR_EVAL_DOWNLOAD_TESTS=1`.
+- **Non-sklearn model adapters** ([#71]). New `skdr_eval.adapters` adapters —
+  `XGBRegressorAdapter`, `LGBMRegressorAdapter`, `CatBoostRegressorAdapter`
+  (behind the new `[boosting]` extra), forwarding native fit kwargs
+  (early-stopping, categoricals, GPU flags), plus a backend-free
+  `CallableModelAdapter(predict_fn, predict_proba_fn=None, fit_fn=None)`. The
+  evaluators already accept any `fit`/`predict` object; these make GBDTs and
+  bare callables first-class. Missing backends raise `OptionalDependencyError`.
+- **Polars / PyArrow inputs** ([#72]). The public evaluators accept Polars
+  `DataFrame` and PyArrow `Table` inputs (converted once at the boundary;
+  results identical to the pandas path), and `EvaluationArtifact` gains
+  `to_polars()` / `to_arrow()` accessors for the headline report. Both require
+  the `[speed]` extra and raise `OptionalDependencyError` otherwise. New
+  shared exception `OptionalDependencyError`.
 - **External-policy evaluation for pairwise OPE** ([#56]). New
   `evaluate_external_policies(logs_df, op_daily_df, policies, ...)` (and an
   `external_policies=` parameter on `evaluate_pairwise_models`) scores policies
@@ -558,6 +581,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#33]: https://github.com/dgenio/skdr-eval/issues/33
 [#34]: https://github.com/dgenio/skdr-eval/issues/34
 [#56]: https://github.com/dgenio/skdr-eval/issues/56
+[#70]: https://github.com/dgenio/skdr-eval/issues/70
+[#71]: https://github.com/dgenio/skdr-eval/issues/71
+[#72]: https://github.com/dgenio/skdr-eval/issues/72
 [#67]: https://github.com/dgenio/skdr-eval/issues/67
 [#69]: https://github.com/dgenio/skdr-eval/issues/69
 [#77]: https://github.com/dgenio/skdr-eval/issues/77

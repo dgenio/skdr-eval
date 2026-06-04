@@ -35,6 +35,22 @@ exported from the top-level `skdr_eval` package.
 
 ::: skdr_eval.adapters.TraceAdapterResult
 
+## Model adapters
+
+::: skdr_eval.adapters.XGBRegressorAdapter
+
+::: skdr_eval.adapters.LGBMRegressorAdapter
+
+::: skdr_eval.adapters.CatBoostRegressorAdapter
+
+::: skdr_eval.adapters.CallableModelAdapter
+
+## Dataset loaders
+
+::: skdr_eval.datasets.load_obd
+
+::: skdr_eval.datasets.DatasetBundle
+
 ## Synthetic data
 
 ::: skdr_eval.make_synth_logs

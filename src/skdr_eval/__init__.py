@@ -3,6 +3,7 @@
 import importlib
 
 from . import adapters as adapters
+from . import datasets as datasets
 from . import estimators as estimators
 from . import slate as slate
 from ._simulation import CoverageResult, simulate_coverage
@@ -31,6 +32,12 @@ from .core import (
     fit_outcome_crossfit,
     fit_propensity_timecal,
     induce_policy_from_sklearn,
+)
+from .datasets import (
+    DatasetBundle,
+    load_criteo_counterfactual,
+    load_movielens_ope,
+    load_obd,
 )
 from .diagnostics import (
     PerActionDiagnostics,
@@ -61,11 +68,13 @@ from .exceptions import (
     BootstrapError,
     ConfigurationError,
     ConvergenceError,
+    DatasetError,
     DataValidationError,
     EstimationError,
     InsufficientDataError,
     MemoryError,
     ModelValidationError,
+    OptionalDependencyError,
     OutcomeModelError,
     PairwiseEvaluationError,
     PolicyInductionError,
@@ -182,6 +191,8 @@ __all__ = [
     "DRResult",
     "DRosShrinkTransform",
     "DataValidationError",
+    "DatasetBundle",
+    "DatasetError",
     "Design",
     "DiagnosticGate",
     "DiagnosticsBlock",
@@ -208,6 +219,7 @@ __all__ = [
     "ModelSelector",
     "ModelValidationError",
     "NullTracker",
+    "OptionalDependencyError",
     "OutcomeLoss",
     "OutcomeModelError",
     "PairwiseDesign",
@@ -263,6 +275,9 @@ __all__ = [
     "kolmogorov_smirnov_test",
     "load_artifact_json",
     "load_config_from_file",
+    "load_criteo_counterfactual",
+    "load_movielens_ope",
+    "load_obd",
     "make_pairwise_synth",
     "make_slate_synth",
     "make_synth_logs",
