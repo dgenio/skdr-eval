@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `~/.skdr_eval/datasets` (override via `SKDR_EVAL_CACHE_DIR`) with a sha256
   `manifest.json`; a local `base_url` enables offline use. `load_obd` accepts
   `behavior_policy`/`campaign`/`max_rows` and fails loud with `DatasetError` on
-  network/disk/source errors. `load_criteo_counterfactual` and
+  network/disk/source errors — including logged `item_id`s absent from the
+  `item_context` catalog, which would otherwise lack an eligibility column.
+  `load_criteo_counterfactual` and
   `load_movielens_ope` are documented stubs tracked under #70. The opt-in
   network test is gated on `SKDR_EVAL_DOWNLOAD_TESTS=1`.
 - **Non-sklearn model adapters** ([#71]). New `skdr_eval.adapters` adapters —

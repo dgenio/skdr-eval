@@ -264,6 +264,25 @@ class TestLoadObdBranches:
         assert list(ops_all) == ["item_0", "item_1"]
         skdr_eval.validate_logs(logs, y_col="click")
 
+    def test_logged_item_absent_from_catalog_raises(self, tmp_path: Path) -> None:
+        # item_context lists only item 0, but the log references items 1 and 2;
+        # those actions would have no matching ``*_elig`` column, so the loader
+        # must fail loud rather than silently drop them from eligibility.
+        base = _write_csvs(
+            tmp_path / "s",
+            pd.DataFrame(
+                {
+                    "timestamp": ["2020-01-01", "2020-01-02", "2020-01-03"],
+                    "item_id": [0, 1, 2],
+                    "click": [1, 0, 1],
+                    "user_feature_0": [2, 3, 2],
+                }
+            ),
+            pd.DataFrame({"item_id": [0]}),
+        )
+        with pytest.raises(DatasetError, match="absent from the item_context"):
+            load_obd("random", "all", cache_dir=tmp_path / "c", base_url=base)
+
 
 class TestCacheBranches:
     def test_insufficient_disk_space_raises(

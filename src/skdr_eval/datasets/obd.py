@@ -205,6 +205,18 @@ def load_obd(
     else:
         catalog = sorted(int(i) for i in raw["item_id"].unique())
 
+    # Fail loud if a logged action references an item missing from the catalog:
+    # eligibility columns are emitted per catalog item, so an out-of-catalog
+    # ``item_id`` would yield an ``action`` with no matching ``<action>_elig``
+    # column and be silently unrepresented downstream.
+    logged_items = {int(i) for i in raw["item_id"].unique()}
+    missing = sorted(logged_items - set(catalog))
+    if missing:
+        raise DatasetError(
+            "OBD log references item_ids absent from the item_context catalog",
+            details={"missing_item_ids": missing[:20], "n_missing": len(missing)},
+        )
+
     n = len(raw)
     out: dict[str, object] = {}
 

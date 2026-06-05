@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import time
 
 import pandas as pd
 import pytest
@@ -111,6 +112,52 @@ def test_pairwise_polars_inputs() -> None:
     )
     assert not art.report.empty
     assert "V_hat" in art.report.columns
+
+
+@requires_polars
+def test_polars_input_on_par_with_pandas() -> None:
+    """Microbenchmark for #72's "on par or faster" acceptance criterion.
+
+    Exercises the ``evaluate_sklearn_models`` path, where the Polars input is
+    proven equivalent to pandas (see ``TestPolarsInputEquivalence``): the frame
+    is converted once at the boundary and then shares the pandas pipeline, so
+    wall-clock should be on par. Asserts (1) the boundary conversion does not
+    perturb ``V_hat`` and (2) a generous wall-clock bound, so a pathological
+    per-row conversion regression is caught without CI timing flakiness. Run
+    with ``-s`` to see the reported timings.
+
+    NOTE: the *pairwise* path is intentionally not benchmarked here — its
+    list-valued ``elig_mask`` column does not round-trip faithfully through
+    Polars/PyArrow today (tracked by #158); use pandas for pairwise input.
+    """
+    import polars as pl  # noqa: PLC0415
+
+    logs, _, _ = skdr_eval.make_synth_logs(n=8000, n_ops=6, seed=11)
+
+    t0 = time.perf_counter()
+    art_pd = _evaluate(logs)
+    t_pandas = time.perf_counter() - t0
+
+    logs_pl = pl.from_pandas(logs)
+    t0 = time.perf_counter()
+    art_pl = _evaluate(logs_pl)
+    t_polars = time.perf_counter() - t0
+
+    # Correctness: the boundary conversion must not change the estimate.
+    pd.testing.assert_series_equal(
+        art_pd.report["V_hat"].reset_index(drop=True),
+        art_pl.report["V_hat"].reset_index(drop=True),
+    )
+
+    print(
+        f"\n[#72 bench] sklearn V_hat — pandas {t_pandas:.3f}s vs "
+        f"polars-input {t_polars:.3f}s (overhead {t_polars - t_pandas:+.3f}s)"
+    )
+
+    # "On par": the one-time boundary conversion is small next to evaluation.
+    # The bound is deliberately generous to stay non-flaky on shared CI runners
+    # while still catching a pathological (e.g. per-row) conversion regression.
+    assert t_polars < t_pandas * 5.0 + 2.0
 
 
 class TestArtifactAccessors:
