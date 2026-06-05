@@ -94,3 +94,56 @@ class VersionError(SkdrEvalError):
     """Raised when version compatibility issues are detected."""
 
     pass
+
+
+class OptionalDependencyError(SkdrEvalError):
+    """Raised when a feature needs an optional dependency that is not installed.
+
+    Used by the optional-extra surfaces (e.g. ``EvaluationArtifact.to_polars``,
+    the boosting adapters, the dataset loaders) so callers get a single,
+    actionable error type carrying the missing package and the ``pip install``
+    hint that would enable the feature.
+
+    Parameters
+    ----------
+    feature : str
+        Human-readable name of the feature that needs the dependency.
+    package : str
+        Importable module name that is missing (e.g. ``"polars"``).
+    extra : str, optional
+        The ``skdr-eval[<extra>]`` extra that installs ``package``. When
+        provided, the message includes the ``pip install`` hint.
+    """
+
+    def __init__(
+        self,
+        feature: str,
+        package: str,
+        extra: str | None = None,
+    ) -> None:
+        if extra is not None:
+            hint = f"pip install 'skdr-eval[{extra}]'"
+        else:
+            hint = f"pip install {package}"
+        message = (
+            f"{feature} requires the optional dependency '{package}', which is "
+            f"not installed. Install it with: {hint}"
+        )
+        super().__init__(
+            message,
+            details={"feature": feature, "package": package, "extra": extra},
+        )
+        self.feature = feature
+        self.package = package
+        self.extra = extra
+
+
+class DatasetError(SkdrEvalError):
+    """Raised when a public-dataset loader cannot produce a usable dataset.
+
+    Covers the fail-loud paths of :mod:`skdr_eval.datasets`: network
+    unavailable, insufficient disk space, a license that has not been
+    accepted, or a downloaded file that fails its integrity check.
+    """
+
+    pass

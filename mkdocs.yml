@@ -86,6 +86,7 @@ nav:
       - Logs → experiment-review card: recipes/logs-to-experiment-card.md
       - Good vs bad support: recipes/good-vs-bad-support.md
       - LLM-reranker OPE: recipes/llm-reranker-ope.md
+      - Datasets, inputs & adapters: datasets.md
   - Comparisons:
       - vs OBP / SCOPE-RL / d3rlpy: comparisons.md
       - Slate vs pairwise vs standard: slate-vs-pairwise-vs-standard.md

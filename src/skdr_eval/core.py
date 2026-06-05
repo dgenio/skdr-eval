@@ -23,6 +23,7 @@ from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 
+from ._frames import coerce_to_pandas
 from .choice import (
     SCIPY_AVAILABLE,
     fit_conditional_logit_with_sampling,
@@ -1852,6 +1853,8 @@ def evaluate_sklearn_models(
         ``max_kept_contributions`` evaluated decisions.
     """
     validate_models_dict(models)
+    # Accept polars / pyarrow logs at the boundary; convert once (#72).
+    logs = coerce_to_pandas(logs, name="logs")
 
     # Resolve policy_train sentinel: None means "pre_split" + emit warning.
     if policy_train is None:
@@ -2714,6 +2717,9 @@ def evaluate_pairwise_models(
     use_external = external_policies is not None
     if not use_external:
         validate_models_dict(models)
+    # Accept polars / pyarrow frames at the boundary; convert once (#72).
+    logs_df = coerce_to_pandas(logs_df, name="logs_df")
+    op_daily_df = coerce_to_pandas(op_daily_df, name="op_daily_df")
     if execution_mode not in ("auto", "standard", "large_data"):
         raise ValueError(
             f"Unknown execution_mode: {execution_mode}. "

@@ -46,7 +46,11 @@ from .diagnostics import (
     PropensityDiagnostics,
     comprehensive_propensity_diagnostics,
 )
-from .exceptions import ConfigurationError, DataValidationError
+from .exceptions import (
+    ConfigurationError,
+    DataValidationError,
+    OptionalDependencyError,
+)
 
 if TYPE_CHECKING:
     from .core import DRResult
@@ -1009,6 +1013,49 @@ class EvaluationArtifact:
         p.write_text(html, encoding="utf-8")
         logger.info("Wrote evaluation artifact HTML to %s", p)
         return p
+
+    # ------------------------------------------------------------------ #
+    # Polars / Arrow accessors (#72)                                     #
+    # ------------------------------------------------------------------ #
+
+    def to_polars(self) -> Any:
+        """Return the headline :attr:`report` as a Polars ``DataFrame``.
+
+        Convenience accessor for the ``[speed]`` extra. The underlying
+        :attr:`report` pandas frame is unchanged; this only converts the
+        public-facing table on demand so Polars-native pipelines avoid a
+        manual ``pl.from_pandas`` round-trip.
+
+        Raises
+        ------
+        OptionalDependencyError
+            If ``polars`` is not installed.
+        """
+        try:
+            import polars as pl  # noqa: PLC0415
+        except ImportError as exc:
+            raise OptionalDependencyError(
+                "EvaluationArtifact.to_polars", "polars", extra="speed"
+            ) from exc
+        return pl.from_pandas(self.report)
+
+    def to_arrow(self) -> Any:
+        """Return the headline :attr:`report` as a PyArrow ``Table``.
+
+        Convenience accessor for the ``[speed]`` extra; see :meth:`to_polars`.
+
+        Raises
+        ------
+        OptionalDependencyError
+            If ``pyarrow`` is not installed.
+        """
+        try:
+            import pyarrow as pa  # noqa: PLC0415
+        except ImportError as exc:
+            raise OptionalDependencyError(
+                "EvaluationArtifact.to_arrow", "pyarrow", extra="speed"
+            ) from exc
+        return pa.Table.from_pandas(self.report)
 
     # ------------------------------------------------------------------ #
     # Card                                                               #
