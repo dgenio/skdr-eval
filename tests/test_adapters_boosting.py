@@ -87,24 +87,31 @@ class TestLGBMAdapter:
 
 
 def test_boosting_adapter_missing_dependency(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A missing backend raises OptionalDependencyError with the extra hint."""
+    """A missing backend raises OptionalDependencyError with the extra hint.
+
+    The backend imports are faked as missing so this is deterministic whether
+    or not the optional ``[boosting]`` backends happen to be installed (e.g. in
+    the ``boosting-smoke`` CI job, where catboost *is* present).
+    """
     import importlib  # noqa: PLC0415
 
     real_import_module = importlib.import_module
+    faked_missing = {"xgboost", "catboost"}
 
     def fake_import_module(name: str, *args: object, **kwargs: object) -> object:
-        if name == "xgboost":
-            raise ImportError("no xgboost")
+        if name in faked_missing:
+            raise ImportError(f"no {name}")
         return real_import_module(name, *args, **kwargs)
 
     monkeypatch.setattr(importlib, "import_module", fake_import_module)
-    with pytest.raises(OptionalDependencyError) as exc:
+    with pytest.raises(OptionalDependencyError) as xgb_exc:
         XGBRegressorAdapter()
-    assert exc.value.package == "xgboost"
-    assert exc.value.extra == "boosting"
-    # CatBoost backend is genuinely absent in the test env → same error type.
-    with pytest.raises(OptionalDependencyError):
+    assert xgb_exc.value.package == "xgboost"
+    assert xgb_exc.value.extra == "boosting"
+    with pytest.raises(OptionalDependencyError) as cat_exc:
         CatBoostRegressorAdapter()
+    assert cat_exc.value.package == "catboost"
+    assert cat_exc.value.extra == "boosting"
 
 
 class TestCallableModelAdapter:
