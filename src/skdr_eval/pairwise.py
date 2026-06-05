@@ -45,7 +45,13 @@ def _normalize_elig_cell(value: Any) -> Any:
         try:
             return sorted(value)
         except TypeError:
-            return list(value)
+            # Mixed / unorderable element types cannot be sorted directly.
+            # Fall back to a deterministic order keyed on ``repr`` rather than
+            # ``list(value)`` (whose iteration order is arbitrary and can vary
+            # across runs / Python versions) so the stored design stays
+            # reproducible. Order does not affect eligibility — it is
+            # membership-based — but a stable order keeps results byte-stable.
+            return sorted(value, key=repr)
     if isinstance(value, tuple):
         return list(value)
     return value

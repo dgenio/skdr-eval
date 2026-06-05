@@ -57,6 +57,22 @@ def _evaluate_pairwise(
     )
 
 
+# Eligibility feeds the DR weights, so an unhonored mask perturbs the support
+# diagnostics (ESS / match_rate / SE), not just the point estimate. Asserting
+# the full set of eligibility-sensitive report columns makes the equivalence
+# regressions harder to satisfy while still being wrong on diagnostics.
+_ELIG_SENSITIVE_COLS = ["V_hat", "SE_if", "ESS", "match_rate"]
+
+
+def _assert_pairwise_report_equiv(
+    art_a: skdr_eval.EvaluationArtifact, art_b: skdr_eval.EvaluationArtifact
+) -> None:
+    pd.testing.assert_frame_equal(
+        art_a.report[_ELIG_SENSITIVE_COLS].reset_index(drop=True),
+        art_b.report[_ELIG_SENSITIVE_COLS].reset_index(drop=True),
+    )
+
+
 class TestCoerceToPandas:
     def test_pandas_passthrough_is_identity(self) -> None:
         df = pd.DataFrame({"a": [1, 2, 3]})
@@ -133,10 +149,7 @@ def test_pairwise_polars_inputs() -> None:
     )
     art_pd = _evaluate_pairwise(logs_df, op_daily_df)
     art_pl = _evaluate_pairwise(pl.from_pandas(logs_df), pl.from_pandas(op_daily_df))
-    pd.testing.assert_series_equal(
-        art_pd.report["V_hat"].reset_index(drop=True),
-        art_pl.report["V_hat"].reset_index(drop=True),
-    )
+    _assert_pairwise_report_equiv(art_pd, art_pl)
 
 
 def _with_set_masks(logs_df: pd.DataFrame) -> pd.DataFrame:
@@ -167,10 +180,7 @@ class TestPairwiseEligMaskTypeEquivalence:
         art_set = _evaluate_pairwise(
             _with_set_masks(logs_df), op_daily_df, execution_mode=execution_mode
         )
-        pd.testing.assert_series_equal(
-            art_list.report["V_hat"].reset_index(drop=True),
-            art_set.report["V_hat"].reset_index(drop=True),
-        )
+        _assert_pairwise_report_equiv(art_list, art_set)
 
     def test_restrictive_mask_is_actually_honored(self) -> None:
         # Guard against a silent "all eligible" fallback: dropping the mask
