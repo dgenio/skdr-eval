@@ -36,6 +36,7 @@ import os
 
 import numpy as np
 import pandas as pd
+import pytest
 from sklearn.base import BaseEstimator, RegressorMixin
 
 from skdr_eval import evaluate_pairwise_models
@@ -152,6 +153,7 @@ def _v_hat(logs_df: pd.DataFrame, op_daily_df: pd.DataFrame, seed: int) -> float
     return float(row["V_hat"].iloc[0])
 
 
+@pytest.mark.slow
 def test_elig_mask_recovers_constrained_value_across_value_types() -> None:
     """list/set/ndarray masks all recover the analytic constrained value V*.
 
