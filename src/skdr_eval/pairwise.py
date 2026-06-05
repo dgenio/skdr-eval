@@ -16,6 +16,47 @@ from .exceptions import DataValidationError
 logger = logging.getLogger("skdr_eval")
 
 
+def _normalize_elig_cell(value: Any) -> Any:
+    """Coerce an eligibility-mask cell to a canonical Python ``list``.
+
+    ``validate_pairwise_inputs`` blesses ``set`` masks (#155) and
+    ``coerce_to_pandas`` yields ``np.ndarray`` cells for Polars/PyArrow inputs
+    (#158), but every downstream eligibility consumer across ``core``/
+    ``pairwise`` only special-cases ``(list, tuple)`` (or
+    ``(list, tuple, np.ndarray)``) and silently treats anything else as "every
+    operator eligible". A validator-permitted ``set`` therefore produces
+    incorrect (less restrictive) eligibility, and an ``ndarray`` breaks the
+    pandas/Polars ``V_hat`` equivalence promised by #72. Normalizing every
+    container type to ``list`` once, here at ingestion, makes all consumers
+    correct without patching each site individually (a partial patch is worse
+    than none — it makes some paths honor the mask while others still do not).
+
+    ``ndarray`` is unpacked with ``.tolist()`` so its elements become native
+    Python scalars, matching a pandas-native list cell byte-for-byte; ``set``/
+    ``frozenset`` are sorted for a deterministic order (eligibility is
+    membership-based, so order does not affect ``V_hat``, but a stable order
+    keeps the stored design reproducible). Non-container cells (``NaN``,
+    ``None``, scalars) are returned unchanged so the existing
+    "missing mask ⇒ all eligible" fallback still applies.
+    """
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (set, frozenset)):
+        try:
+            return sorted(value)
+        except TypeError:
+            # Mixed / unorderable element types cannot be sorted directly.
+            # Fall back to a deterministic order keyed on ``repr`` rather than
+            # ``list(value)`` (whose iteration order is arbitrary and can vary
+            # across runs / Python versions) so the stored design stays
+            # reproducible. Order does not affect eligibility — it is
+            # membership-based — but a stable order keeps results byte-stable.
+            return sorted(value, key=repr)
+    if isinstance(value, tuple):
+        return list(value)
+    return value
+
+
 @dataclass
 class PairwiseDesign:
     """Design for pairwise (client, operator) evaluation.
@@ -72,6 +113,14 @@ class PairwiseDesign:
         # writes in estimate_propensity_pairwise would use label values as
         # positional offsets, silently corrupting data or raising IndexError.
         logs_df = logs_df.reset_index(drop=True)
+
+        # Normalize the eligibility-mask column to a canonical list once, so
+        # every downstream consumer (which already handles `list`) is correct
+        # regardless of whether the caller supplied list/tuple/set values or a
+        # frame whose object cells arrived as np.ndarray via coerce_to_pandas
+        # (Polars/PyArrow). See `_normalize_elig_cell` (#155, #158).
+        if elig_col is not None and elig_col in logs_df.columns:
+            logs_df[elig_col] = logs_df[elig_col].map(_normalize_elig_cell)
 
         # Extract feature columns
         cli_features = [col for col in logs_df.columns if col.startswith("cli_")]

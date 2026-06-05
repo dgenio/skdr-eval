@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import time
 
+import numpy as np
 import pandas as pd
 import pytest
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -12,6 +13,7 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 import skdr_eval
 from skdr_eval._frames import coerce_to_pandas
 from skdr_eval.exceptions import DataValidationError, OptionalDependencyError
+from skdr_eval.pairwise import _normalize_elig_cell
 
 _HAS_POLARS = importlib.util.find_spec("polars") is not None
 _HAS_PYARROW = importlib.util.find_spec("pyarrow") is not None
@@ -30,6 +32,96 @@ def _evaluate(logs: object) -> skdr_eval.EvaluationArtifact:
         random_state=0,
         policy_train="pre_split",
     )
+
+
+def _evaluate_pairwise(
+    logs_df: object,
+    op_daily_df: object,
+    *,
+    elig_col: str | None = "elig_mask",
+    execution_mode: str = "auto",
+) -> skdr_eval.EvaluationArtifact:
+    models = {"HGB": HistGradientBoostingRegressor(max_iter=20, random_state=0)}
+    return skdr_eval.evaluate_pairwise_models(
+        logs_df=logs_df,
+        op_daily_df=op_daily_df,
+        models=models,
+        metric_col="service_time",
+        task_type="regression",
+        direction="min",
+        n_splits=3,
+        fit_models=True,
+        policy_train="pre_split",
+        random_state=0,
+        elig_col=elig_col,
+        execution_mode=execution_mode,
+    )
+
+
+# Eligibility feeds the DR weights, so an unhonored mask perturbs the support
+# diagnostics (ESS / match_rate / SE), not just the point estimate. Asserting
+# the full set of eligibility-sensitive report columns makes the equivalence
+# regressions harder to satisfy while still being wrong on diagnostics.
+_ELIG_SENSITIVE_COLS = ["V_hat", "SE_if", "ESS", "match_rate"]
+
+
+def _assert_pairwise_report_equiv(
+    art_a: skdr_eval.EvaluationArtifact, art_b: skdr_eval.EvaluationArtifact
+) -> None:
+    pd.testing.assert_frame_equal(
+        art_a.report[_ELIG_SENSITIVE_COLS].reset_index(drop=True),
+        art_b.report[_ELIG_SENSITIVE_COLS].reset_index(drop=True),
+    )
+
+
+class TestNormalizeEligCell:
+    """`_normalize_elig_cell` canonicalizes every container type to `list`.
+
+    Unit-level coverage of each branch (the integration equivalence tests below
+    exercise the ndarray/set paths end-to-end, but the tuple branch and the
+    unorderable-set fallback are only reachable here).
+    """
+
+    def test_ndarray_becomes_list_of_python_scalars(self) -> None:
+        out = _normalize_elig_cell(np.array(["op_2", "op_5"]))
+        assert out == ["op_2", "op_5"]
+        assert isinstance(out, list)
+        assert all(isinstance(x, str) for x in out)  # tolist() → native str
+
+    def test_set_is_sorted_deterministically(self) -> None:
+        assert _normalize_elig_cell({"op_5", "op_2", "op_1"}) == [
+            "op_1",
+            "op_2",
+            "op_5",
+        ]
+
+    def test_frozenset_is_sorted_deterministically(self) -> None:
+        assert _normalize_elig_cell(frozenset({3, 1, 2})) == [1, 2, 3]
+
+    def test_unorderable_set_uses_repr_keyed_fallback(self) -> None:
+        # Mixed types are not mutually orderable (`int` vs `str` raise TypeError
+        # under `sorted`); the fallback must still be deterministic.
+        value = {1, "a", 2, "b"}
+        out = _normalize_elig_cell(value)
+        assert isinstance(out, list)
+        assert sorted(out, key=repr) == out  # deterministic, repr-keyed
+        assert set(out) == value  # no elements lost
+        # Stable across calls regardless of set construction order.
+        assert _normalize_elig_cell({"b", 2, "a", 1}) == out
+
+    def test_tuple_becomes_list(self) -> None:
+        out = _normalize_elig_cell(("op_0", "op_1"))
+        assert out == ["op_0", "op_1"]
+        assert isinstance(out, list)
+
+    def test_list_passthrough_unchanged(self) -> None:
+        value = ["op_0", "op_1"]
+        assert _normalize_elig_cell(value) is value
+
+    @pytest.mark.parametrize("value", [float("nan"), None, "scalar", 3])
+    def test_non_container_passthrough(self, value: object) -> None:
+        # Left untouched so the missing-mask "all eligible" fallback still fires.
+        assert _normalize_elig_cell(value) is value
 
 
 class TestCoerceToPandas:
@@ -92,26 +184,69 @@ class TestArrowInputEquivalence:
 
 @requires_polars
 def test_pairwise_polars_inputs() -> None:
+    """Polars pairwise input must match the pandas path V_hat exactly (#158).
+
+    ``coerce_to_pandas`` turns the list-valued ``elig_mask`` cells into
+    ``np.ndarray`` via ``.to_pandas()``; the pairwise eligibility consumers are
+    sensitive to ``list`` vs ``ndarray``, so without renormalization V_hat
+    diverged from a pandas-native input (contradicting #72's equivalence
+    claim). ``PairwiseDesign.from_dataframes`` now canonicalizes the cells back
+    to ``list`` at ingestion, restoring exact equivalence.
+    """
     import polars as pl  # noqa: PLC0415
 
     logs_df, op_daily_df = skdr_eval.make_pairwise_synth(
         n_days=3, n_clients_day=120, n_ops=4, seed=3
     )
-    models = {"HGB": HistGradientBoostingRegressor(max_iter=20, random_state=0)}
-    art = skdr_eval.evaluate_pairwise_models(
-        logs_df=pl.from_pandas(logs_df),
-        op_daily_df=pl.from_pandas(op_daily_df),
-        models=models,
-        metric_col="service_time",
-        task_type="regression",
-        direction="min",
-        n_splits=3,
-        fit_models=True,
-        policy_train="pre_split",
-        random_state=0,
-    )
-    assert not art.report.empty
-    assert "V_hat" in art.report.columns
+    art_pd = _evaluate_pairwise(logs_df, op_daily_df)
+    art_pl = _evaluate_pairwise(pl.from_pandas(logs_df), pl.from_pandas(op_daily_df))
+    _assert_pairwise_report_equiv(art_pd, art_pl)
+
+
+def _with_set_masks(logs_df: pd.DataFrame) -> pd.DataFrame:
+    """Re-express each list-valued ``elig_mask`` cell as an (unordered) set."""
+    out = logs_df.copy()
+    out["elig_mask"] = out["elig_mask"].map(set)
+    return out
+
+
+class TestPairwiseEligMaskTypeEquivalence:
+    """A set-valued elig_mask must be honored identically to a list (#155).
+
+    ``validate_pairwise_inputs`` blesses ``set`` masks, but most eligibility
+    consumers only special-case ``(list, tuple)`` and silently fell back to
+    "every operator eligible" for a ``set`` — producing incorrect, less
+    restrictive eligibility. Normalizing at ingestion makes a ``set`` mask
+    produce the same V_hat as the identical mask expressed as a ``list``.
+    """
+
+    @pytest.mark.parametrize("execution_mode", ["standard", "large_data"])
+    def test_set_mask_matches_list_mask(self, execution_mode: str) -> None:
+        logs_df, op_daily_df = skdr_eval.make_pairwise_synth(
+            n_days=3, n_clients_day=120, n_ops=5, seed=7
+        )
+        art_list = _evaluate_pairwise(
+            logs_df, op_daily_df, execution_mode=execution_mode
+        )
+        art_set = _evaluate_pairwise(
+            _with_set_masks(logs_df), op_daily_df, execution_mode=execution_mode
+        )
+        _assert_pairwise_report_equiv(art_list, art_set)
+
+    def test_restrictive_mask_is_actually_honored(self) -> None:
+        # Guard against a silent "all eligible" fallback: dropping the mask
+        # (elig_col=None ⇒ every operator eligible) must change V_hat, proving
+        # the restriction is honored rather than ignored. ~80% of operators are
+        # eligible per row in the synthetic data, so the masks are restrictive.
+        logs_df, op_daily_df = skdr_eval.make_pairwise_synth(
+            n_days=3, n_clients_day=120, n_ops=5, seed=7
+        )
+        art_restricted = _evaluate_pairwise(logs_df, op_daily_df)
+        art_all_elig = _evaluate_pairwise(logs_df, op_daily_df, elig_col=None)
+        assert not np.allclose(
+            art_restricted.report["V_hat"].to_numpy(),
+            art_all_elig.report["V_hat"].to_numpy(),
+        )
 
 
 @requires_polars
@@ -126,9 +261,9 @@ def test_polars_input_on_par_with_pandas() -> None:
     per-row conversion regression is caught without CI timing flakiness. Run
     with ``-s`` to see the reported timings.
 
-    NOTE: the *pairwise* path is intentionally not benchmarked here — its
-    list-valued ``elig_mask`` column does not round-trip faithfully through
-    Polars/PyArrow today (tracked by #158); use pandas for pairwise input.
+    NOTE: the *pairwise* path is not benchmarked here — its V_hat equivalence
+    across pandas/Polars input is covered by ``test_pairwise_polars_inputs``
+    (the list-valued ``elig_mask`` round-trip fixed in #158).
     """
     import polars as pl  # noqa: PLC0415
 

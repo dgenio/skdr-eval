@@ -169,6 +169,9 @@ addopts = [
     "--cov-report=html",
     "--cov-report=xml",
 ]
+markers = [
+    "slow: marks tests as slow to run (deselect with '-m \"not slow\"')",
+]
 
 [tool.coverage.run]
 source = ["src"]

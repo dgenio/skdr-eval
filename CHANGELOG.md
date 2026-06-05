@@ -61,6 +61,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `skdr_eval.pairwise.LARGE_DATA_ROW_THRESHOLD` rows.
 
 ### Fixed
+- **Pairwise `elig_mask` value type normalized at ingestion** ([#155], [#158]).
+  Every eligibility consumer across `core`/`pairwise` only special-cased
+  `(list, tuple)` and silently treated any other container as "every operator
+  eligible". Two real inputs hit that fallback: a `set` mask — which
+  `validate_pairwise_inputs` explicitly permits — produced incorrect, *less
+  restrictive* eligibility (shifting `V_hat`/`SE`/`ESS`/`match_rate`, ~7% off
+  in the audit) ([#155]); and the `np.ndarray` cells that `coerce_to_pandas`
+  yields for Polars/PyArrow inputs broke the pandas-equivalence promised by #72
+  on the pairwise path ([#158]). `PairwiseDesign.from_dataframes` now
+  canonicalizes each `elig_mask` cell to a Python `list` once at ingestion
+  (`ndarray` → `tolist()`, `set`/`frozenset` → sorted, `tuple` → `list`;
+  `NaN`/`None`/scalars left untouched so the missing-mask fallback still
+  applies), so every downstream consumer is correct without patching each site.
+  Regression tests assert a `set` mask matches the identical `list` mask
+  (`standard` and `large_data` modes) and that a restrictive mask actually
+  changes `V_hat` vs all-eligible, and `test_pairwise_polars_inputs` now asserts
+  exact pandas/Polars `V_hat` equivalence.
 - **DR/SNDR importance weight now includes the target policy** ([#106]). The
   estimator computed the importance weight as `1/e(A|x)` (inverse logging
   propensity) instead of the textbook doubly-robust ratio `π(A|x)/e(A|x)`.
@@ -586,6 +603,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#70]: https://github.com/dgenio/skdr-eval/issues/70
 [#71]: https://github.com/dgenio/skdr-eval/issues/71
 [#72]: https://github.com/dgenio/skdr-eval/issues/72
+[#155]: https://github.com/dgenio/skdr-eval/issues/155
+[#158]: https://github.com/dgenio/skdr-eval/issues/158
 [#67]: https://github.com/dgenio/skdr-eval/issues/67
 [#69]: https://github.com/dgenio/skdr-eval/issues/69
 [#77]: https://github.com/dgenio/skdr-eval/issues/77
