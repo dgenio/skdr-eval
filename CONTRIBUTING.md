@@ -114,6 +114,18 @@ We follow **GitHub Flow**: short-lived feature branches off `main`, merged back 
 - **Type hints**: All functions must have type annotations
 - **README**: Keep examples up-to-date
 - **CHANGELOG**: Document all changes
+- **Public API**: Any name added to `skdr_eval.__all__` must also be recorded
+  in [`docs/api-stability.md`](docs/api-stability.md) — a test enforces this.
+
+## 🧭 Paths to contribute
+
+- **Add an estimator** (the highest-value research contribution): start with
+  the [architecture tour](docs/architecture.md), then follow the
+  [write-your-own-estimator guide](docs/extending/add-an-estimator.md). A new
+  estimator needs a simulation proof under `tests/sim_studies/`.
+- **Improve docs / examples**: docs live in [`docs/`](docs/); runnable
+  examples in [`examples/`](examples/).
+- **Triage good-first-issues**: see the issue tracker labels.
 
 ## 🔍 Code Review Guidelines
 

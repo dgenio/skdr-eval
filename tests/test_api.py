@@ -1,7 +1,9 @@
 """Test API imports and basic functionality."""
 
 import logging
+import re
 import warnings
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -613,3 +615,66 @@ def test_evaluate_sklearn_models_new_public_symbols_importable() -> None:
     assert hasattr(skdr_eval, "gate_diagnostics")
     assert hasattr(skdr_eval, "simulate_coverage")
     assert hasattr(skdr_eval, "CoverageResult")
+
+
+# --------------------------------------------------------------------------- #
+# Public API inventory drift guard (#180)                                     #
+# --------------------------------------------------------------------------- #
+
+_API_DOC = Path(__file__).resolve().parents[1] / "docs" / "api-stability.md"
+_INVENTORY_RE = re.compile(
+    r"<!--\s*api-inventory:start\s*-->(.*?)<!--\s*api-inventory:end\s*-->",
+    re.DOTALL,
+)
+_NAME_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*)`")
+
+
+def _documented_public_names() -> set[str]:
+    """Extract the public-name inventory listed in ``docs/api-stability.md``."""
+    text = _API_DOC.read_text(encoding="utf-8")
+    match = _INVENTORY_RE.search(text)
+    assert match is not None, (
+        "docs/api-stability.md must contain an "
+        "<!-- api-inventory:start --> / <!-- api-inventory:end --> region."
+    )
+    return set(_NAME_RE.findall(match.group(1)))
+
+
+def test_public_api_inventory_documents_every_export() -> None:
+    """#180: every name in ``skdr_eval.__all__`` is listed in the stability doc.
+
+    This is the drift guard: adding a public name to ``skdr_eval.__all__``
+    without recording it in ``docs/api-stability.md`` fails this test, so the
+    documented stability contract cannot silently fall behind the namespace.
+    """
+    documented = _documented_public_names()
+    exported = {n for n in skdr_eval.__all__ if not n.startswith("__")}
+    undocumented = exported - documented
+    assert not undocumented, (
+        "These public names are exported from skdr_eval.__all__ but are not "
+        "listed in docs/api-stability.md (add them to the api-inventory "
+        f"region): {sorted(undocumented)}"
+    )
+
+
+def test_public_api_inventory_has_no_stale_entries() -> None:
+    """#180: every documented core name still exists on the package.
+
+    Visualization helpers are gated behind the optional ``[viz]`` extra, so
+    they may legitimately be documented but absent from ``__all__`` in a
+    minimal install; they are exempt from the staleness check.
+    """
+    documented = _documented_public_names()
+    viz_only = {
+        "create_dashboard",
+        "plot_calibration_curve",
+        "plot_diagnostics_summary",
+        "plot_dr_results",
+        "plot_propensity_distribution",
+        "plot_roc_curve",
+    }
+    stale = {name for name in documented - viz_only if not hasattr(skdr_eval, name)}
+    assert not stale, (
+        "These names are documented in docs/api-stability.md but are not "
+        f"importable from skdr_eval (remove or fix): {sorted(stale)}"
+    )

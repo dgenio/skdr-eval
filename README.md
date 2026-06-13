@@ -126,11 +126,16 @@ library actually gets used, and it does not require reading any theory first:
 - **Full documentation:** **[skdr-eval.readthedocs.io](https://skdr-eval.readthedocs.io/)** (built from [`docs/`](docs/) with MkDocs Material).
 - **Just want to see it work?** Click any "Open in Colab" badge above.
 - **First time here?** Follow [First 10 minutes](#first-10-minutes-understand-what-skdr-eval-does) above.
-- **Have logs already?** Skim [Quick Start](#quick-start) below; the standard / pairwise variants are both two screens long. The full workflow is the [logs → experiment-review card recipe](docs/recipes/logs-to-experiment-card.md).
+- **Have logs already?** Skim [Quick Start](#quick-start) below; the standard / pairwise variants are both two screens long. The full workflow is the [Daily Driver guide](docs/daily-driver.md) (and the [logs → experiment-review card recipe](docs/recipes/logs-to-experiment-card.md)).
 - **Not sure whether to trust an estimate?** Read the [report interpretation guide](docs/report-interpretation.md), the [metrics glossary](docs/metrics-glossary.md), and the [good-vs-bad support tutorial](docs/recipes/good-vs-bad-support.md).
-- **Comparing against another OPE library?** See [`docs/comparisons.md`](docs/comparisons.md) for OBP / SCOPE-RL / d3rlpy / banditml, and [`docs/methods.md`](docs/methods.md) for the methodological positioning.
+- **Which estimator should I run?** See the [estimator selection guide](docs/choosing-an-estimator.md).
+- **What does it actually claim?** Read [`CLAIMS.md`](CLAIMS.md) — receipts for every claim, plus the explicit non-claims.
+- **Going to production?** Work through the [production rollout checklist](docs/rollout-checklist.md) before any online test.
+- **Comparing against another OPE library?** See [`docs/comparisons.md`](docs/comparisons.md) for OBP / SCOPE-RL / d3rlpy / banditml, the [methodological positioning](docs/methods.md), and the runnable [coming-from-OBP interop guide](docs/recipes/obp-interop.md).
 - **Looking for end-to-end examples by domain?** Browse [`examples/use_cases/`](examples/use_cases/) for runnable scripts (e-commerce ranking, ad targeting, healthcare CATE, call routing, logs→card, agent routing).
-- **Evaluating an LLM reranker or an agent routing/tool-selection policy?** See [Evaluate LLM / agent policies offline](#evaluate-llm--agent-policies-offline) below.
+- **Evaluating an LLM reranker or an agent routing/tool-selection policy?** See the [agent routing & tool-selection guide](docs/agent-routing.md) and [Evaluate LLM / agent policies offline](#evaluate-llm--agent-policies-offline) below.
+- **Building a pipeline on the API?** Check the [public API, stability policy & road to 1.0](docs/api-stability.md).
+- **Want to add an estimator?** Start with the [architecture tour](docs/architecture.md) and the [write-your-own-estimator guide](docs/extending/add-an-estimator.md).
 
 > The `skdr-eval` CLI (`pip install 'skdr-eval[cli]'`) makes the same
 > evaluators reachable from a terminal — see [Command-line interface](#command-line-interface).
@@ -652,8 +657,10 @@ before an A/B test.
   print(artifact.report[["model", "estimator", "V_hat", "support_health"]])
   ```
 
-  See [`examples/use_cases/06_agent_routing_policy.py`](examples/use_cases/06_agent_routing_policy.py)
-  (healthy vs. `high_risk` support) and the
+  See the [agent routing & tool-selection guide](docs/agent-routing.md) for
+  the full conceptual walkthrough (actions, rewards, support, and when OPE is
+  the wrong tool), [`examples/use_cases/06_agent_routing_policy.py`](examples/use_cases/06_agent_routing_policy.py)
+  (healthy vs. `high_risk` support), and the
   [offline-evaluation companion guide](docs/weaver-stack.md).
 
 The trace adapter (`skdr_eval.adapters.from_records` / `from_jsonl_trace`) maps
