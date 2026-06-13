@@ -256,6 +256,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the reference implementation in `tests/test_slate_vectorization.py`);
   large-catalogue runs are dramatically faster.
 
+## [0.10.0] - 2026-05-29
+
+### Added
 - **Newcomer documentation & README onboarding sweep** ([#98], [#116], [#117],
   [#118], [#119], [#120], [#122], [#126]). One-PR pass over the
   adoption-facing docs:
@@ -453,9 +456,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   trip with ``card.to_yaml(path)`` / ``card.to_json(path)`` /
   ``EvaluationCard.from_yaml(...)`` / ``EvaluationCard.from_json(...)``.
   New constant ``CARD_SCHEMA_VERSION = "1.0.0"``. Block models
-  ``HeadlineBlock``, ``TrustBlock``, ``DiagnosticsBlock``,
-  ``SensitivityBlock``, ``ProvenanceBlock``, and ``CoverageSimBlock`` are
-  all exported. ``ConfigDict(extra="allow")`` keeps schemas forward-
+  ``HeadlineBlock``, ``TrustBlock``, ``DiagnosticsBlock``, ``SensitivityBlock`",
+  ``ProvenanceBlock``, and ``CoverageSimBlock`` are all exported. ``ConfigDict(extra="allow")`` keeps schemas forward-
   compatible: unknown fields are preserved on round-trip.
 
 - **`skdr_eval.doctor()`** ([#91]). New preflight diagnostic surface
@@ -527,10 +529,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     broaden `keywords`. ([#67], [#98])
   - **`examples/notebooks/`** (new) — five nbmake-tested Colab notebooks:
     `01_quickstart`, `02_pairwise_quickstart`, `03_ecommerce_ranking`,
-    `04_ad_targeting`, `05_healthcare_cate`. Each is < 12 cells, runs in
+    `04_ad_targeting`, `05_healthcare cate`. Each is < 12 cells, runs in
     under 60 s, opens directly in Colab via the README badge table. ([#69], [#90])
   - **`examples/use_cases/`** (new) — four runnable domain walk-throughs:
-    `01_ecommerce_ranking.py`, `02_ad_targeting.py`, `03_healthcare_cate.py`,
+    `01_ecommerce_ranking.py`, `02_ad_targeting.py`, `03_healthcare cate.py`,
     `04_call_routing.py`. Each reuses the existing synth generators with
     domain-flavored framing and stakeholder summaries. ([#78])
   - **CI** — new `notebooks-smoke` job runs
@@ -635,7 +637,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SNDR bootstrap CI fix** ([#58]). The moving-block bootstrap CI for the
   SNDR estimator now uses the correct normalised pseudo-outcome
   `q_pi + (n/Σw)·w·(Y−q̂)` instead of the DR pseudo-outcome
-  `q_pi + w·(Y−q̂)`. The old code produced a CI anchored to the DR point
+  `q_pi + w·(Y−q_hat)`). The old code produced a CI anchored to the DR point
   estimate, not to V̂_SNDR. This was a statistical correctness bug silently
   noted in test comments. Both evaluators (`evaluate_sklearn_models`,
   `evaluate_pairwise_models`) are fixed.
@@ -1046,5 +1048,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 74% test coverage
 - Follows modern Python packaging standards
 
-[0.9.0]: https://github.com/dgenio/skdr-eval/compare/v0.8.0...v0.9.0
-[0.1.0]: https://github.com/dandrsantos/skdr-eval/releases/tag/v0.1.0
+[Unreleased]: https://github.com/dgenio/skdr-eval/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/dgenio/skdr-eval/compare/v0.9.0...v0.10.0
