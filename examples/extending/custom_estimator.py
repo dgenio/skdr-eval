@@ -49,7 +49,7 @@ from skdr_eval.estimators import (
 if TYPE_CHECKING:
     # Imported for the type annotation only; the protocol is structural, so no
     # runtime import of TransformContext is needed to implement a transform.
-    from skdr_eval.estimators.protocols import TransformContext
+    from skdr_eval.estimators import TransformContext
 
 
 @dataclass(frozen=True)

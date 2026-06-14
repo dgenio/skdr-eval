@@ -33,7 +33,7 @@ with a smooth saturating transform `c · tanh(w / c)`:
 ```python
 from dataclasses import dataclass
 import numpy as np
-from skdr_eval.estimators.protocols import TransformContext
+from skdr_eval.estimators import TransformContext
 
 
 @dataclass(frozen=True)

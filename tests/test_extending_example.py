@@ -26,8 +26,16 @@ _EXAMPLE = (
 @pytest.fixture(scope="module")
 def custom_estimator_module():
     """Import the tutorial example script as a module."""
+    assert _EXAMPLE.exists(), (
+        f"Tutorial example not found at {_EXAMPLE}. The 'write your own "
+        "estimator' guide points here; if the file moved, update _EXAMPLE "
+        "and docs/extending/add-an-estimator.md together."
+    )
     spec = importlib.util.spec_from_file_location("custom_estimator", _EXAMPLE)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None and spec.loader is not None, (
+        f"Could not build an import spec for {_EXAMPLE}; it must be an "
+        "importable Python module."
+    )
     module = importlib.util.module_from_spec(spec)
     sys.modules["custom_estimator"] = module
     spec.loader.exec_module(module)

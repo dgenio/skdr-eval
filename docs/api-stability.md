@@ -141,7 +141,7 @@ extra is installed.
 
 ### Subpackages
 
-`estimators` `slate`
+`adapters` `datasets` `estimators` `slate`
 
 <!-- api-inventory:end -->
 
