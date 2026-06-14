@@ -60,7 +60,11 @@ plugins:
 markdown_extensions:
   - admonition
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.arithmatex:
@@ -79,20 +83,30 @@ nav:
   - Concepts:
       - Estimands & assumptions: concepts/estimands-and-assumptions.md
       - Methods (DR / SNDR): methods.md
+      - Choosing an estimator: choosing-an-estimator.md
       - Metrics glossary: metrics-glossary.md
       - Reading the report: report-interpretation.md
       - Statistical validation matrix: statistical-validation-matrix.md
+  - Guides:
+      - The Daily Driver workflow: daily-driver.md
+      - Production rollout checklist: rollout-checklist.md
   - Recipes:
       - Logs → experiment-review card: recipes/logs-to-experiment-card.md
       - Good vs bad support: recipes/good-vs-bad-support.md
       - LLM-reranker OPE: recipes/llm-reranker-ope.md
+      - Coming from Open Bandit Pipeline: recipes/obp-interop.md
       - Datasets, inputs & adapters: datasets.md
   - Comparisons:
       - vs OBP / SCOPE-RL / d3rlpy: comparisons.md
       - Slate vs pairwise vs standard: slate-vs-pairwise-vs-standard.md
   - Ecosystem:
       - Offline-evaluation companion: weaver-stack.md
+      - Agent routing & tool selection: agent-routing.md
+  - Contributing:
+      - Architecture tour: architecture.md
+      - Write your own estimator: extending/add-an-estimator.md
   - Project:
       - Launch readiness checklist: LAUNCH_CHECKLIST.md
+      - API stability & road to 1.0: api-stability.md
       - Citing & DOI: zenodo.md
   - API reference: api.md
