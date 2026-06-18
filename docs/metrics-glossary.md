@@ -69,6 +69,23 @@ diagnostic flags — one-line meanings and the action they imply:
 | `PER_ACTION_MISCAL` | Propensity calibration is poor for at least one specific action. | Inspect `diagnostics.per_action`; the worst action drives this. |
 | `RARE_ACTION_NO_SUPPORT` | A target-support action has too few logged samples to estimate. | The candidate relies on actions the logs barely contain; gather more data. |
 
+## Recommendation verdicts (`artifact.recommendation`)
+
+`recommendation(model, estimator=...).verdict` (also surfaced as the card's
+`trust.recommendation`) is the one-word decision. There are exactly four
+values:
+
+| Verdict | What it means | What to do |
+|---|---|---|
+| `deploy` | CI clears the baseline with no caution/high-risk flags. | Strong offline evidence; proceed to a confirmatory A/B test. |
+| `ab_test` | Promising but not clean — a caution flag is present, or the CI overlaps the baseline. | Treat as exploratory; design a guarded online experiment. |
+| `insufficient_evidence` | The logs can't decide yet — usually **no bootstrap CI** was computed. | Re-run with `ci_bootstrap=True` (CLI: `--ci-bootstrap`). |
+| `do_not_deploy` | A high-risk diagnostic fired (`POOR_OVERLAP`, `HIGH_PARETO_K`, `EXTREME_CLIP`). | Do not deploy; fix the data/overlap problem first. |
+
+The `skdr-eval` CLI maps these to stable exit codes for CI gates: `do_not_deploy`
+→ `3` (takes precedence), `insufficient_evidence` → `4`, and `deploy`/`ab_test`
+→ `0`. See [report interpretation](report-interpretation.md#deployment-verdicts).
+
 ## Sensitivity metrics (`artifact.sensitivity`)
 
 These summarize how the value moves as the clip threshold is swept across a

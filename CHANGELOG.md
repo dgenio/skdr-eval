@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`insufficient_evidence` is now a first-class, gated verdict** ([#197]). The
+  CLI exposes a new exit code `4` for runs where at least one estimator's
+  verdict is `insufficient_evidence` (and none is `do_not_deploy`) — an honest
+  "the logs can't decide yet" no longer passes a CI gate as green. The verdict
+  is documented in the [metrics glossary](docs/metrics-glossary.md) and the
+  [report-interpretation guide](docs/report-interpretation.md#deployment-verdicts),
+  and the README exit-code table lists it.
+- **Focused `skdr_eval.recommendation` module** ([#235]). The deployment
+  recommendation / diagnostic-gate engine (`Recommendation`, `RecommendationPolicy`,
+  `Reason`, `GateResult`, `DiagnosticGate`, `gate_diagnostics`) now lives in its
+  own module, extracted from `reporting.py`. All existing import paths
+  (`skdr_eval.*` and `skdr_eval.reporting.*`) continue to work unchanged; the
+  verdict/gate logic is identical (behaviour-preserving move).
 - **Public dataset loaders** ([#70]). New `skdr_eval.datasets` package with
   `load_obd` (Open Bandit Dataset), returning the canonical
   `(logs, ops_all, ground_truth)` tuple so real benchmark data flows through
@@ -61,6 +74,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `skdr_eval.pairwise.LARGE_DATA_ROW_THRESHOLD` rows.
 
 ### Fixed
+- **CLI deploy-gate now covers every estimator and no longer hides errors**
+  ([#196]). `_verdict_exit_code` previously inspected only `DR`/`SNDR` rows and
+  swallowed every recommendation error with a bare `except Exception: continue`,
+  so a `do_not_deploy` from MRDR / SWITCH-DR / DRos / MIPS produced a
+  false-green exit `0`. The gate now scans **all** estimators present in the
+  artifact and logs (rather than silently dropping) any recommendation error.
+  **Behaviour change for CI gates:** runs that previously passed because a
+  non-`DR`/`SNDR` `do_not_deploy` was ignored will now correctly fail with exit
+  `3`.
 - **Pairwise `elig_mask` value type normalized at ingestion** ([#155], [#158]).
   Every eligibility consumer across `core`/`pairwise` only special-cased
   `(list, tuple)` and silently treated any other container as "every operator
@@ -819,6 +841,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#27]: https://github.com/dgenio/skdr-eval/issues/27
 [#28]: https://github.com/dgenio/skdr-eval/issues/28
 [#30]: https://github.com/dgenio/skdr-eval/issues/30
+[#196]: https://github.com/dgenio/skdr-eval/issues/196
+[#197]: https://github.com/dgenio/skdr-eval/issues/197
+[#235]: https://github.com/dgenio/skdr-eval/issues/235
 
 ## [0.5.0] - 2026-04-08
 
