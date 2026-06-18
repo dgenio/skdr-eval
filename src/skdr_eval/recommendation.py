@@ -425,7 +425,6 @@ def gate_diagnostics(
         WARN_LOW_MATCH_RATE,
         WARN_POOR_OVERLAP,
         SupportHealthThresholds,
-        _coerce_optional_float,
     )
 
     thr = thresholds or SupportHealthThresholds()
@@ -454,13 +453,17 @@ def gate_diagnostics(
     n = int(artifact.metadata.get("n_samples", 1))
 
     # --- Overlap gate ---
-    # Coerce via the shared helper so non-finite values (NaN, ±inf) become
-    # "missing" — consistent with the recommendation/card paths. This is safe
-    # here because the overlap/match-rate checks only fire on the *finite-small*
-    # side, so a missing value never spuriously passes or fails.
+    min_ps = row.get("min_pscore")
+    match_rate = row.get("match_rate")
     overlap_threshold = 1.0 / max(n, 1)
-    min_ps_val = _coerce_optional_float(row.get("min_pscore"))
-    match_rate_val = _coerce_optional_float(row.get("match_rate"))
+    min_ps_val = (
+        float(min_ps) if min_ps is not None and not np.isnan(float(min_ps)) else None
+    )
+    match_rate_val = (
+        float(match_rate)
+        if match_rate is not None and not np.isnan(float(match_rate))
+        else None
+    )
 
     if min_ps_val is not None and min_ps_val <= overlap_threshold:
         overlap = GateResult(
@@ -491,9 +494,12 @@ def gate_diagnostics(
         )
 
     # --- ESS gate ---
-    # ESS failure is on the finite-small side too, so coercing non-finite to
-    # "missing" is safe (an unavailable ESS cannot trip the low-ESS check).
-    ess_val = _coerce_optional_float(row.get("ESS"))
+    ess_val_raw = row.get("ESS")
+    ess_val = (
+        float(ess_val_raw)
+        if ess_val_raw is not None and not np.isnan(float(ess_val_raw))
+        else None
+    )
     ess_frac = (ess_val / n) if ess_val is not None else None
     # low_ess_frac is a fraction (e.g. 0.10); absolute threshold = frac * n
     ess_abs_threshold = thr.low_ess_frac * n
@@ -520,10 +526,6 @@ def gate_diagnostics(
         )
 
     # --- Calibration gate: prefer Pareto-k ---
-    # Deliberately *not* routed through ``_coerce_optional_float``: unlike the
-    # other diagnostics, a non-finite (+inf) Pareto-k is the catastrophic-tail
-    # case and must remain a hard ``fail``. We only treat NaN ("not estimated")
-    # as missing; ±inf is kept so it still trips the high-Pareto-k check below.
     pareto_k_raw = row.get("pareto_k")
     pareto_k = (
         float(pareto_k_raw)
