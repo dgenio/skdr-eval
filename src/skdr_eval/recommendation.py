@@ -151,6 +151,7 @@ def _build_recommendation(
         WARN_LOW_MATCH_RATE,
         WARN_MISCAL_PROP,
         WARN_POOR_OVERLAP,
+        _coerce_optional_float,
     )
 
     if model_name not in artifact.detailed:
@@ -177,18 +178,11 @@ def _build_recommendation(
     row = rows.iloc[0]
     warn_str = str(row.get("diagnostic_warnings", "") or "")
     warn_codes = [c for c in warn_str.split(",") if c]
-    ci_lower = row.get("ci_lower")
-    ci_upper = row.get("ci_upper")
-    ci_lower = (
-        None
-        if ci_lower is None or (isinstance(ci_lower, float) and np.isnan(ci_lower))
-        else float(ci_lower)
-    )
-    ci_upper = (
-        None
-        if ci_upper is None or (isinstance(ci_upper, float) and np.isnan(ci_upper))
-        else float(ci_upper)
-    )
+    # Coerce both CI bounds via the shared helper so non-finite values
+    # (NumPy/Pandas NaN, ±inf) are treated as "missing" — consistent with
+    # the report/card rendering path in ``reporting.py``.
+    ci_lower = _coerce_optional_float(row.get("ci_lower"))
+    ci_upper = _coerce_optional_float(row.get("ci_upper"))
 
     reasons: list[Reason] = []
 
@@ -273,7 +267,8 @@ def _build_recommendation(
                 )
             )
     else:
-        # No CI available — can still give a verdict if V_hat is large
+        # No CI available — without a confidence interval the gate cannot make a
+        # deploy/don't-deploy call, so the verdict is always insufficient_evidence.
         primary_blocker = None
         verdict = "insufficient_evidence"
         confidence = "low"

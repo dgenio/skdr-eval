@@ -558,7 +558,8 @@ skdr-eval card ./run/artifact.json --model HGB --estimator DR \
     --out ./run/card.yaml --format yaml
 
 # Stable exit codes (good for CI gates):
-#   0 — success (every evaluated estimator is 'deploy' or 'ab_test')
+#   0 — success: no 'do_not_deploy' or 'insufficient_evidence' verdict was
+#       produced (an uncomputable recommendation is logged and does not flip this)
 #   1 — data / schema error
 #   2 — environment / import error
 #   3 — at least one evaluated estimator's verdict is 'do_not_deploy'

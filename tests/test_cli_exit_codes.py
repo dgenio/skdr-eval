@@ -19,6 +19,7 @@ import sys
 from typing import TYPE_CHECKING
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 import skdr_eval
@@ -90,9 +91,9 @@ def test_exit_2_on_missing_optional_dependency(
     monkeypatch.setitem(sys.modules, "joblib", None)
     model_path = tmp_path / "model.pkl"
     model_path.write_bytes(b"unused")
-    with pytest.raises(Exception) as excinfo:  # typer.Exit
+    with pytest.raises(typer.Exit) as excinfo:
         _load_model(model_path)
-    assert getattr(excinfo.value, "exit_code", None) == EXIT_ENV
+    assert excinfo.value.exit_code == EXIT_ENV
 
 
 class _Rec:

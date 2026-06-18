@@ -11,7 +11,9 @@ Subcommands
 
 Exit codes
 ----------
-* ``0`` — success (every evaluated estimator is ``deploy`` or ``ab_test``).
+* ``0`` — success: no ``do_not_deploy`` or ``insufficient_evidence`` verdict
+  was produced (a recommendation that could not be computed is logged at
+  WARNING and does not, by itself, change the exit code).
 * ``1`` — data / schema error (the doctor or a validator flagged ``fail``).
 * ``2`` — environment / import error (a required optional dep is missing).
 * ``3`` — at least one evaluated estimator's recommendation verdict was
@@ -250,6 +252,7 @@ def _verdict_exit_code(artifact: skdr_eval.EvaluationArtifact) -> int:
                     model_name,
                     estimator,
                     exc,
+                    exc_info=True,
                 )
                 continue
             if rec.verdict == "do_not_deploy":
