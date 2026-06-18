@@ -90,7 +90,8 @@ class Recommendation:
     reasons : list[Reason]
         Ordered reasons (most severe first).
     recommended_estimator : str
-        ``"DR"`` or ``"SNDR"`` — the estimator this recommendation is based on.
+        The estimator this recommendation is based on (e.g. ``"DR"``,
+        ``"SNDR"``, ``"MRDR"``, ``"SWITCH-DR"``, ``"DRos"``, ``"MIPS"``).
     model_name : str
         Name of the model.
     """
@@ -330,6 +331,7 @@ class GateResult:
     threshold: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize this single check result to a plain dict."""
         return {
             "check": self.check,
             "state": self.state,
@@ -366,6 +368,7 @@ class DiagnosticGate:
     overall: str
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the gate (all three checks plus ``overall``) to a dict."""
         return {
             "overlap": self.overlap.to_dict(),
             "ess": self.ess.to_dict(),
@@ -401,7 +404,8 @@ def gate_diagnostics(
     model_name : str
         Model name present in ``artifact.detailed``.
     estimator : str, default ``"DR"``
-        ``"DR"`` or ``"SNDR"``.
+        Any first-class estimator present in the artifact (e.g. ``"DR"``,
+        ``"SNDR"``, ``"MRDR"``, ``"SWITCH-DR"``, ``"DRos"``, ``"MIPS"``).
     thresholds : SupportHealthThresholds, optional
         Custom thresholds. Defaults to :class:`SupportHealthThresholds` defaults.
 
@@ -421,6 +425,7 @@ def gate_diagnostics(
         WARN_LOW_MATCH_RATE,
         WARN_POOR_OVERLAP,
         SupportHealthThresholds,
+        _coerce_optional_float,
     )
 
     thr = thresholds or SupportHealthThresholds()
@@ -449,17 +454,13 @@ def gate_diagnostics(
     n = int(artifact.metadata.get("n_samples", 1))
 
     # --- Overlap gate ---
-    min_ps = row.get("min_pscore")
-    match_rate = row.get("match_rate")
+    # Coerce via the shared helper so non-finite values (NaN, ±inf) become
+    # "missing" — consistent with the recommendation/card paths. This is safe
+    # here because the overlap/match-rate checks only fire on the *finite-small*
+    # side, so a missing value never spuriously passes or fails.
     overlap_threshold = 1.0 / max(n, 1)
-    min_ps_val = (
-        float(min_ps) if min_ps is not None and not np.isnan(float(min_ps)) else None
-    )
-    match_rate_val = (
-        float(match_rate)
-        if match_rate is not None and not np.isnan(float(match_rate))
-        else None
-    )
+    min_ps_val = _coerce_optional_float(row.get("min_pscore"))
+    match_rate_val = _coerce_optional_float(row.get("match_rate"))
 
     if min_ps_val is not None and min_ps_val <= overlap_threshold:
         overlap = GateResult(
@@ -490,12 +491,9 @@ def gate_diagnostics(
         )
 
     # --- ESS gate ---
-    ess_val_raw = row.get("ESS")
-    ess_val = (
-        float(ess_val_raw)
-        if ess_val_raw is not None and not np.isnan(float(ess_val_raw))
-        else None
-    )
+    # ESS failure is on the finite-small side too, so coercing non-finite to
+    # "missing" is safe (an unavailable ESS cannot trip the low-ESS check).
+    ess_val = _coerce_optional_float(row.get("ESS"))
     ess_frac = (ess_val / n) if ess_val is not None else None
     # low_ess_frac is a fraction (e.g. 0.10); absolute threshold = frac * n
     ess_abs_threshold = thr.low_ess_frac * n
@@ -522,6 +520,10 @@ def gate_diagnostics(
         )
 
     # --- Calibration gate: prefer Pareto-k ---
+    # Deliberately *not* routed through ``_coerce_optional_float``: unlike the
+    # other diagnostics, a non-finite (+inf) Pareto-k is the catastrophic-tail
+    # case and must remain a hard ``fail``. We only treat NaN ("not estimated")
+    # as missing; ±inf is kept so it still trips the high-Pareto-k check below.
     pareto_k_raw = row.get("pareto_k")
     pareto_k = (
         float(pareto_k_raw)
