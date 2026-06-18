@@ -15,6 +15,7 @@ import skdr_eval
 from skdr_eval.cli import (
     EXIT_DATA,
     EXIT_DO_NOT_DEPLOY,
+    EXIT_INSUFFICIENT_EVIDENCE,
     EXIT_OK,
     _load_model,
     _parse_model_specs,
@@ -380,8 +381,15 @@ class TestEvaluateEndToEnd:
         assert len(cards) >= 1
         assert len(paths) >= 4  # artifact.json + report.html + >=2 cards
 
-    def test_verdict_exit_code_ok(self, tmp_path: Path):
-        """_verdict_exit_code returns EXIT_OK for safe models."""
+    def test_verdict_exit_code_without_ci_is_insufficient_or_block(
+        self, tmp_path: Path
+    ):
+        """Without a bootstrap CI, the gate is non-zero (#197).
+
+        Every estimator falls into ``insufficient_evidence`` (no CI to clear the
+        baseline) unless a high-risk diagnostic forces ``do_not_deploy``. Either
+        way the gate must not report a false-green ``EXIT_OK``.
+        """
         logs, _, _ = skdr_eval.make_synth_logs(n=600, n_ops=3, seed=0)
         models = {"HGB": HistGradientBoostingRegressor(max_iter=20, random_state=0)}
         artifact = skdr_eval.evaluate_sklearn_models(
@@ -390,10 +398,11 @@ class TestEvaluateEndToEnd:
             fit_models=True,
             n_splits=3,
             random_state=0,
+            ci_bootstrap=False,
             policy_train="pre_split",
         )
         code = _verdict_exit_code(artifact)
-        assert code in (EXIT_OK, EXIT_DO_NOT_DEPLOY)
+        assert code in (EXIT_INSUFFICIENT_EVIDENCE, EXIT_DO_NOT_DEPLOY)
 
 
 class TestLoadDataframeEdgeCases:

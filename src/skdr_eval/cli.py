@@ -11,11 +11,23 @@ Subcommands
 
 Exit codes
 ----------
-* ``0`` — success.
+* ``0`` — success: no ``do_not_deploy`` or ``insufficient_evidence`` verdict
+  was produced (a recommendation that could not be computed is logged at
+  WARNING and does not, by itself, change the exit code).
 * ``1`` — data / schema error (the doctor or a validator flagged ``fail``).
 * ``2`` — environment / import error (a required optional dep is missing).
-* ``3`` — at least one card's recommendation verdict was ``do_not_deploy``;
-  use this exit code as a CI gate.
+* ``3`` — at least one evaluated estimator's recommendation verdict was
+  ``do_not_deploy``; use this exit code as a CI gate. Takes precedence over
+  exit code 4.
+* ``4`` — at least one evaluated estimator's verdict was
+  ``insufficient_evidence`` (and none was ``do_not_deploy``): the logs cannot
+  yet support a deploy/don't-deploy decision. Treated as non-deployable so an
+  honest "we can't tell" cannot pass a CI gate as green. See
+  ``docs/report-interpretation.md``.
+
+The verdict gate (#196, #197) inspects **every** estimator present in the
+artifact (``DR``, ``SNDR``, ``MRDR``, ``SWITCH-DR``, ``DRos``, ``MIPS``, …),
+not just ``DR``/``SNDR``.
 
 The CLI is gated behind the ``[cli]`` extra (``pip install
 'skdr-eval[cli]'``). Importing this module without ``typer`` installed
@@ -51,6 +63,7 @@ EXIT_OK = 0
 EXIT_DATA = 1
 EXIT_ENV = 2
 EXIT_DO_NOT_DEPLOY = 3
+EXIT_INSUFFICIENT_EVIDENCE = 4
 
 app = typer.Typer(
     name="skdr-eval",
@@ -210,18 +223,43 @@ def _write_artifact_outputs(
 
 
 def _verdict_exit_code(artifact: skdr_eval.EvaluationArtifact) -> int:
-    """Return ``EXIT_DO_NOT_DEPLOY`` if any model's recommendation is ``do_not_deploy``."""
+    """Map the artifact's recommendation verdicts to a CI-gate exit code.
+
+    Inspects **every** estimator present for each model (not just ``DR`` /
+    ``SNDR``), so a ``do_not_deploy`` from any first-class estimator
+    (MRDR / SWITCH-DR / DRos / MIPS, …) trips the gate (#196).
+
+    Returns
+    -------
+    int
+        * ``EXIT_DO_NOT_DEPLOY`` (3) if any verdict is ``do_not_deploy`` —
+          this takes precedence over everything else.
+        * ``EXIT_INSUFFICIENT_EVIDENCE`` (4) if any verdict is
+          ``insufficient_evidence`` and none is ``do_not_deploy`` (#197).
+        * ``EXIT_OK`` (0) otherwise.
+
+    Recommendation errors are logged at WARNING level rather than silently
+    swallowed, so a broken row cannot quietly turn a gate green (#196).
+    """
+    saw_insufficient = False
     for model_name in artifact.detailed:
-        for estimator in ("SNDR", "DR"):
-            if estimator not in artifact.detailed[model_name]:
-                continue
+        for estimator in artifact.detailed[model_name]:
             try:
                 rec = artifact.recommendation(model_name, estimator=estimator)
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "Could not compute recommendation for model=%r estimator=%r: %s",
+                    model_name,
+                    estimator,
+                    exc,
+                    exc_info=True,
+                )
                 continue
             if rec.verdict == "do_not_deploy":
                 return EXIT_DO_NOT_DEPLOY
-    return EXIT_OK
+            if rec.verdict == "insufficient_evidence":
+                saw_insufficient = True
+    return EXIT_INSUFFICIENT_EVIDENCE if saw_insufficient else EXIT_OK
 
 
 @app.command("version")

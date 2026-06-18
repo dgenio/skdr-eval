@@ -558,11 +558,21 @@ skdr-eval card ./run/artifact.json --model HGB --estimator DR \
     --out ./run/card.yaml --format yaml
 
 # Stable exit codes (good for CI gates):
-#   0 — success
+#   0 — success: no 'do_not_deploy' or 'insufficient_evidence' verdict was
+#       produced (an uncomputable recommendation is logged and does not flip this)
 #   1 — data / schema error
 #   2 — environment / import error
-#   3 — at least one model row's recommendation verdict is 'do_not_deploy'
+#   3 — at least one evaluated estimator's verdict is 'do_not_deploy'
+#       (checked across DR/SNDR/MRDR/SWITCH-DR/DRos/MIPS; takes precedence over 4)
+#   4 — at least one estimator's verdict is 'insufficient_evidence' and none is
+#       'do_not_deploy' — the logs can't yet support a deploy decision, so an
+#       honest "we can't tell" does not pass the gate as green
 ```
+
+> The verdict gate inspects **every** estimator present in the artifact, not
+> just `DR`/`SNDR`. `insufficient_evidence` (exit 4) usually means no bootstrap
+> CI was available — re-run with `--ci-bootstrap`. See
+> [`docs/report-interpretation.md`](docs/report-interpretation.md#deployment-verdicts).
 
 ## Preflight diagnostics: `skdr_eval.doctor`
 

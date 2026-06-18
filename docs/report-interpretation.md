@@ -100,6 +100,28 @@ calibration or low overlap undermines everything above it.
 The decision is never "the model with the highest `V_hat` wins". It is
 "is this estimate trustworthy enough to justify the cost of an experiment?".
 
+## Deployment verdicts
+
+`artifact.recommendation(model, estimator=...)` (and the card's `trust.recommendation`)
+condense the reading above into a single `verdict`. There are exactly four:
+
+| Verdict | Meaning | Typical trigger | CLI exit code |
+|---|---|---|---|
+| `deploy` | CI clears the baseline with no caution/high-risk flags. | clean diagnostics + a winning CI | `0` |
+| `ab_test` | Directionally promising, but confirm online. | CI clears baseline *with* a caution flag, or the CI overlaps the baseline | `0` |
+| `insufficient_evidence` | The logs can't answer the question yet — usually **no bootstrap CI** was computed. | run without `--ci-bootstrap` | `4` |
+| `do_not_deploy` | A high-risk diagnostic actively fired. | `POOR_OVERLAP`, `HIGH_PARETO_K`, or `EXTREME_CLIP` | `3` |
+
+The `skdr-eval evaluate` / `pairwise` commands surface this as a process exit
+code for CI gates. The gate inspects **every** estimator present in the
+artifact (`DR`, `SNDR`, `MRDR`, `SWITCH-DR`, `DRos`, `MIPS`, …): a single
+`do_not_deploy` returns exit `3` (it takes precedence), and an
+`insufficient_evidence` with no block returns exit `4`. Treating
+`insufficient_evidence` as a non-zero gate is deliberate — an honest "we can't
+tell" should not pass CI as green. Re-run with `--ci-bootstrap` to turn an
+`insufficient_evidence` into a real `deploy` / `ab_test` / `do_not_deploy`
+decision.
+
 ## 8. Stakeholder explanation template
 
 Paste-ready for a PR description, experiment-review doc, or product chat:
