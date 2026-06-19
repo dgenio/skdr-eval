@@ -277,6 +277,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of pure-Python nested loops. Outputs are unchanged (parity asserted
   against the reference implementation in `tests/test_slate_vectorization.py`);
   large-catalogue runs are dramatically faster.
+- **Conditional-logit RNG is now isolated from the global NumPy state**
+  ([#193]). `fit_conditional_logit`, `sample_negative_pairs`, and
+  `fit_conditional_logit_with_sampling` use a local `np.random.default_rng(...)`
+  instead of the process-global `np.random.seed(...)`, so fitting no longer
+  silently reseeds a caller's RNG or interferes with concurrent evaluations.
+  `random_state` now also accepts an `np.random.Generator` or `None` in
+  addition to an integer seed. Results remain deterministic for a given integer
+  `random_state`; only the exact initialization draw sequence shifts (a
+  numerical, not behavioural, change), so a previously pinned numeric snapshot
+  may move at the last digits.
 
 ## [0.10.0] - 2026-05-29
 
@@ -841,6 +851,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#27]: https://github.com/dgenio/skdr-eval/issues/27
 [#28]: https://github.com/dgenio/skdr-eval/issues/28
 [#30]: https://github.com/dgenio/skdr-eval/issues/30
+[#193]: https://github.com/dgenio/skdr-eval/issues/193
 [#196]: https://github.com/dgenio/skdr-eval/issues/196
 [#197]: https://github.com/dgenio/skdr-eval/issues/197
 [#235]: https://github.com/dgenio/skdr-eval/issues/235

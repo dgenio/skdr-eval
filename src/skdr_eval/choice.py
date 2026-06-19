@@ -1,10 +1,19 @@
 """Conditional logit model for propensity estimation."""
 
 import logging
+from typing import TypeAlias
 
 import numpy as np
 
 logger = logging.getLogger("skdr_eval")
+
+# Accepted seed types for the local ``numpy`` Generator. This is the subset of
+# what ``np.random.default_rng`` accepts that this API documents and tests: an
+# integer seed, an existing Generator (passed through unchanged), or ``None``
+# for non-deterministic seeding. ``default_rng`` also accepts other forms
+# (e.g. ``SeedSequence``, ``BitGenerator``, array-like seeds), which still work
+# at runtime but are outside this annotation.
+RandomStateLike: TypeAlias = int | np.random.Generator | None
 
 # Try to import scipy, but make it optional
 try:
@@ -24,7 +33,7 @@ def fit_conditional_logit(
     y: np.ndarray,
     l2: float = 1.0,
     maxiter: int = 200,
-    random_state: int = 0,
+    random_state: RandomStateLike = 0,
 ) -> tuple[np.ndarray, float, float]:
     """Fit conditional logit model using scipy optimization.
 
@@ -40,8 +49,10 @@ def fit_conditional_logit(
         L2 regularization strength
     maxiter : int
         Maximum optimization iterations
-    random_state : int
-        Random seed for initialization
+    random_state : int, np.random.Generator, or None
+        Seed for the local Generator used to initialize the optimizer. Using a
+        local Generator (instead of the global ``np.random`` state) keeps the
+        fit reproducible and isolated from any other RNG use in the process.
 
     Returns
     -------
@@ -57,11 +68,11 @@ def fit_conditional_logit(
             "SciPy is required for conditional logit. Install with: pip install skdr-eval[choice]"
         )
 
-    np.random.seed(random_state)
+    rng = np.random.default_rng(random_state)
     n_features = X.shape[1]
 
     # Initialize parameters
-    initial_params = np.random.normal(0, 0.01, n_features + 1)  # +1 for intercept
+    initial_params = rng.normal(0, 0.01, n_features + 1)  # +1 for intercept
 
     def objective(params: np.ndarray) -> float:
         coef = params[:-1]
@@ -234,7 +245,7 @@ def sample_negative_pairs(
     choice_ids: np.ndarray,
     y: np.ndarray,
     neg_per_pos: int = 5,
-    random_state: int = 0,
+    random_state: RandomStateLike = 0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Sample negative pairs to reduce computational cost.
 
@@ -248,8 +259,10 @@ def sample_negative_pairs(
         Binary outcomes
     neg_per_pos : int
         Number of negative samples per positive
-    random_state : int
-        Random seed
+    random_state : int, np.random.Generator, or None
+        Seed for the local Generator used to draw negative samples. Using a
+        local Generator keeps sampling reproducible and isolated from the
+        global ``np.random`` state.
 
     Returns
     -------
@@ -260,7 +273,7 @@ def sample_negative_pairs(
     y_sampled : np.ndarray
         Sampled outcomes
     """
-    np.random.seed(random_state)
+    rng = np.random.default_rng(random_state)
 
     sampled_indices = []
     unique_choice_ids = np.unique(choice_ids)
@@ -280,7 +293,7 @@ def sample_negative_pairs(
         # Sample negatives
         if len(neg_indices) > 0:
             n_neg_to_sample = min(len(neg_indices), len(pos_indices) * neg_per_pos)
-            sampled_neg = np.random.choice(neg_indices, n_neg_to_sample, replace=False)
+            sampled_neg = rng.choice(neg_indices, n_neg_to_sample, replace=False)
             sampled_indices.extend(sampled_neg)
 
     sampled_indices_array = np.array(sampled_indices)
@@ -299,7 +312,7 @@ def fit_conditional_logit_with_sampling(
     neg_per_pos: int = 5,
     l2: float = 1.0,
     maxiter: int = 200,
-    random_state: int = 0,
+    random_state: RandomStateLike = 0,
 ) -> tuple[np.ndarray, float, float]:
     """Fit conditional logit with negative sampling for efficiency.
 
@@ -317,8 +330,10 @@ def fit_conditional_logit_with_sampling(
         L2 regularization strength
     maxiter : int
         Maximum optimization iterations
-    random_state : int
-        Random seed
+    random_state : int, np.random.Generator, or None
+        Seed for the local Generators used for negative sampling and optimizer
+        initialization. Passing a Generator threads a single stream through both
+        steps; passing an integer seeds each step reproducibly.
 
     Returns
     -------
