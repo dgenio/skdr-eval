@@ -7,9 +7,12 @@ import numpy as np
 
 logger = logging.getLogger("skdr_eval")
 
-# Accepted seed types for the local ``numpy`` Generator. Mirrors what
-# ``np.random.default_rng`` accepts: an integer seed, an existing Generator
-# (passed through unchanged), or ``None`` for non-deterministic seeding.
+# Accepted seed types for the local ``numpy`` Generator. This is the subset of
+# what ``np.random.default_rng`` accepts that this API documents and tests: an
+# integer seed, an existing Generator (passed through unchanged), or ``None``
+# for non-deterministic seeding. ``default_rng`` also accepts other forms
+# (e.g. ``SeedSequence``, ``BitGenerator``, array-like seeds), which still work
+# at runtime but are outside this annotation.
 RandomStateLike: TypeAlias = int | np.random.Generator | None
 
 # Try to import scipy, but make it optional
