@@ -458,5 +458,44 @@ def test_fit_conditional_logit_recovers_ground_truth():
     np.testing.assert_allclose(coef, beta, atol=0.2)
 
 
+def test_fit_conditional_logit_with_sampling_threads_generator():
+    """A ``Generator`` is threaded as one stream through sampling + init.
+
+    ``fit_conditional_logit_with_sampling`` passes ``random_state`` to both
+    ``sample_negative_pairs`` and ``fit_conditional_logit``. The docstring
+    promises that passing a ``Generator`` threads a single stream through both
+    steps (it is advanced, not reset/reused). This verifies that contract:
+    two fresh ``default_rng(k)`` instances reproduce the same fit, and the
+    Generator's state advances across the call.
+    """
+    if fit_conditional_logit_with_sampling is None or not SCIPY_AVAILABLE:
+        pytest.skip("SciPy/choice module not available")
+
+    x, choice_ids, y = _make_condlogit_data(
+        n_sets=300, k_alts=4, beta=[1.0, -0.5], rng=np.random.default_rng(11)
+    )
+
+    # Two independent Generators seeded identically thread the same single
+    # stream through negative sampling and optimizer init -> identical fit.
+    coef_a, int_a, _ = fit_conditional_logit_with_sampling(
+        x, choice_ids, y, neg_per_pos=3, random_state=np.random.default_rng(7)
+    )
+    coef_b, int_b, _ = fit_conditional_logit_with_sampling(
+        x, choice_ids, y, neg_per_pos=3, random_state=np.random.default_rng(7)
+    )
+    np.testing.assert_allclose(coef_a, coef_b, rtol=0, atol=1e-12)
+    np.testing.assert_allclose(int_a, int_b, rtol=0, atol=1e-12)
+
+    # The Generator is consumed (threaded), not reset: a draw taken afterwards
+    # does not match a fresh stream's first draw.
+    gen = np.random.default_rng(7)
+    fit_conditional_logit_with_sampling(
+        x, choice_ids, y, neg_per_pos=3, random_state=gen
+    )
+    assert not np.array_equal(
+        gen.normal(size=3), np.random.default_rng(7).normal(size=3)
+    )
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
