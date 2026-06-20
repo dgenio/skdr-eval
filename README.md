@@ -536,9 +536,19 @@ evaluation surface to teams that don't want to write Python.
 ```bash
 pip install 'skdr-eval[cli]'
 
+# Zero-to-card in one command (synth logs → doctor → evaluate → explain).
+# Great first run; always exits 0 (it's a demo, not a CI gate).
+skdr-eval quickstart --out ./quickstart
+
+# See which optional extras are installed and what each one unlocks.
+skdr-eval capabilities
+skdr-eval capabilities --json | jq .
+
 # Quick environment + schema probe before evaluation.
 skdr-eval doctor logs.parquet
 skdr-eval doctor logs.parquet --json | jq .
+# Emit a copy-paste, data-free reproduction snippet for a bug report.
+skdr-eval doctor logs.parquet --repro
 
 # Validate logs against the schema (exit code 1 on failure — useful in CI).
 skdr-eval validate-schema logs.parquet --strict
@@ -556,6 +566,10 @@ skdr-eval evaluate logs.parquet \
 # Re-render a card directly from a saved artifact.json.
 skdr-eval card ./run/artifact.json --model HGB --estimator DR \
     --out ./run/card.yaml --format yaml
+
+# Narrate *why* a saved artifact got its verdict (no re-evaluation).
+skdr-eval explain ./run/artifact.json --model HGB --estimator SNDR
+skdr-eval explain ./run/artifact.json --model HGB --json | jq .
 
 # Stable exit codes (good for CI gates):
 #   0 — success: no 'do_not_deploy' or 'insufficient_evidence' verdict was
@@ -586,10 +600,28 @@ import skdr_eval
 
 logs, _, _ = skdr_eval.make_synth_logs(n=5000, n_ops=3, seed=0)
 report = skdr_eval.doctor(logs)
-report.print()            # text table with status glyphs
+report.print()            # text table with status glyphs + capability matrix
 report.to_markdown()      # copy-pasteable Markdown
-report.to_dict()          # JSON-serializable
+report.to_dict()          # JSON-serializable (checks + capabilities + profile)
+report.to_repro()         # data-free minimal reproduction snippet for bug reports
 assert report.ok          # True iff no Check has status='fail'
+```
+
+Checks cover environment, schema, duplicates, **time ordering** (time-aware CV
+assumes chronological logs), **column missingness**, finite outcomes,
+positivity, and sample size. The report also carries a full **optional-extra
+capability matrix** — the same data behind `skdr_eval.get_capability_matrix()`
+and `skdr-eval capabilities` — and a privacy-safe `DataProfile` (column
+names/dtypes/shape only) used by `to_repro()`.
+
+You can also narrate a verdict programmatically:
+
+```python
+artifact = skdr_eval.evaluate_sklearn_models(logs=logs, models=models)
+print(artifact.explain("HGB", estimator="SNDR").to_text())
+# Or, from a saved artifact.json, without re-running the evaluation:
+schema = skdr_eval.load_artifact_json("run/artifact.json")
+skdr_eval.explain_artifact_schema(schema, "HGB", estimator="SNDR").to_dict()
 ```
 
 ## Machine-readable cards: `EvaluationCard`

@@ -8,7 +8,14 @@ import numpy as np
 import pandas as pd
 
 import skdr_eval
-from skdr_eval.doctor import Check, DoctorReport, _check_environment, doctor
+from skdr_eval.doctor import (
+    Check,
+    DoctorReport,
+    _check_environment,
+    _check_missingness,
+    _check_time_ordering,
+    doctor,
+)
 
 
 def _good_logs(n: int = 800):
@@ -184,6 +191,98 @@ class TestDoctorBadKwargs:
         assert any(
             "kind" in c.name.lower() or "bogus" in c.message for c in report.checks
         )
+
+
+class TestTimeOrdering:
+    """#164: chronological-order check for time-aware CV."""
+
+    def test_sorted_arrival_ts_passes(self):
+        check = _check_time_ordering(_good_logs(), time_col="arrival_ts")
+        assert check.status == "pass"
+
+    def test_unsorted_arrival_ts_warns(self):
+        logs = _good_logs().sort_values("arrival_ts").reset_index(drop=True)
+        shuffled = logs.iloc[::-1].reset_index(drop=True)
+        check = _check_time_ordering(shuffled, time_col="arrival_ts")
+        assert check.status == "warn"
+        assert "out-of-order" in check.message
+        assert "sort_values" in check.fix_hint
+
+    def test_missing_time_column_warns(self):
+        check = _check_time_ordering(
+            pd.DataFrame({"x": [1, 2, 3]}), time_col="arrival_ts"
+        )
+        assert check.status == "warn"
+
+    def test_numeric_time_column_supported(self):
+        df = pd.DataFrame({"arrival_day": [0, 1, 1, 2, 5]})
+        assert _check_time_ordering(df, time_col="arrival_day").status == "pass"
+        df_bad = pd.DataFrame({"arrival_day": [5, 1, 0]})
+        assert _check_time_ordering(df_bad, time_col="arrival_day").status == "warn"
+
+
+class TestMissingness:
+    """#164: high-missingness column detection."""
+
+    def test_clean_frame_passes(self):
+        check = _check_missingness(_good_logs())
+        assert check.status == "pass"
+
+    def test_high_missingness_warns(self):
+        df = pd.DataFrame({"a": [1.0, None, None, None, None], "b": [1, 2, 3, 4, 5]})
+        check = _check_missingness(df, threshold=0.2)
+        assert check.status == "warn"
+        assert "a=80.0%" in check.message
+        assert "b" not in check.message.split(":")[-1]
+
+    def test_empty_frame_warns(self):
+        check = _check_missingness(pd.DataFrame())
+        assert check.status == "warn"
+
+
+class TestCapabilityMatrixAndProfile:
+    """#215 + #246: doctor surfaces the capability matrix, profile, repro."""
+
+    def test_report_carries_capabilities_and_profile(self):
+        report = doctor(_good_logs(n=600))
+        assert report.capabilities  # non-empty matrix
+        assert {c.extra for c in report.capabilities} >= {"viz", "cli", "boosting"}
+        assert report.profile is not None
+        assert report.profile.kind == "standard"
+        assert report.profile.n_rows == 600
+        assert report.profile.metric_col == "service_time"
+
+    def test_to_dict_includes_capabilities_and_profile(self):
+        d = doctor(_good_logs(n=600)).to_dict()
+        assert "capabilities" in d
+        assert "profile" in d
+        assert d["profile"]["n_rows"] == 600
+        assert all("installed" in c for c in d["capabilities"])
+
+    def test_to_text_renders_capability_matrix(self):
+        text = doctor(_good_logs(n=600)).to_text()
+        assert "capability matrix" in text.lower()
+
+    def test_to_repro_is_runnable_and_data_free(self):
+        logs = _good_logs(n=600)
+        report = doctor(logs)
+        repro = report.to_repro()
+        # No real values: every observed service_time / cli_* value must be absent.
+        sample_values = [repr(v) for v in logs["service_time"].head(5).tolist()]
+        for val in sample_values:
+            assert val not in repro
+        # Carries the schema (column names + dtypes + shape only).
+        assert "service_time" in repro
+        assert "n = 600" in repro
+        # Runs and yields a DoctorReport without touching the original data.
+        namespace: dict = {}
+        exec(repro.replace("print(report.to_text())", ""), namespace)
+        assert isinstance(namespace["report"], DoctorReport)
+
+    def test_to_repro_without_profile_is_safe(self):
+        report = doctor("not a dataframe")  # type: ignore[arg-type]
+        assert report.profile is None
+        assert "No reproduction available" in report.to_repro()
 
 
 def test_environment_check_fails_below_minimum(monkeypatch) -> None:
