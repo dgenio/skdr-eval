@@ -284,6 +284,30 @@ class TestCapabilityMatrixAndProfile:
         assert report.profile is None
         assert "No reproduction available" in report.to_repro()
 
+    def test_to_repro_runs_with_extension_dtypes(self):
+        # Pandas extension / annotated dtypes must normalize to a
+        # NumPy-constructible placeholder so the snippet still runs.
+        df = pd.DataFrame(
+            {
+                "nullable_int": pd.array([1, 2, 3], dtype="Int64"),
+                "nullable_float": pd.array([1.0, 2.0, 3.0], dtype="Float64"),
+                "nullable_bool": pd.array([True, False, True], dtype="boolean"),
+                "string_col": pd.array(["a", "b", "c"], dtype="string"),
+                "cat_col": pd.Series(["x", "y", "x"], dtype="category"),
+                "service_time": [1.0, 2.0, 3.0],
+            }
+        )
+        repro = doctor(df).to_repro()
+        # The generated snippet must execute without raising.
+        namespace: dict = {}
+        exec(repro.replace("print(report.to_text())", ""), namespace)
+        assert isinstance(namespace["report"], DoctorReport)
+        # The executable generator expressions use normalized NumPy dtype names
+        # (the original extension dtype is preserved only in a trailing comment).
+        assert 'np.zeros(n, dtype="int64")' in repro
+        assert 'np.zeros(n, dtype="float64")' in repro
+        assert 'dtype="Int64"' not in repro
+
 
 def test_environment_check_fails_below_minimum(monkeypatch) -> None:
     """The environment check fails when the running Python is below the

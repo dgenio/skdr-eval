@@ -108,13 +108,23 @@ def _profile_dataframe(df: pd.DataFrame, *, kind: str, metric_col: str) -> DataP
 
 
 def _repro_column_expr(dtype: str) -> str:
-    """Map a dtype string to a data-free column generator expression."""
-    if dtype.startswith("datetime"):
+    """Map a dtype string to a runnable, data-free column generator expression.
+
+    Best-effort: pandas extension/annotated dtypes (e.g. ``Int64``, ``Float64``,
+    ``int64[pyarrow]``, ``boolean``, ``string``, ``category``) are normalized to
+    a NumPy-constructible placeholder so the generated snippet always runs. The
+    column's broad dtype family is preserved, not necessarily the exact
+    extension dtype.
+    """
+    # Drop any storage annotation (e.g. ``int64[pyarrow]`` → ``int64``) and
+    # case-fold so nullable dtypes (``Int64`` → ``int64``) map to a NumPy name.
+    base = dtype.split("[", 1)[0].strip().lower()
+    if base.startswith("datetime"):
         return 'pd.date_range("2024-01-01", periods=n, freq="s")'
-    if dtype.startswith("bool"):
+    if base in {"bool", "boolean"}:
         return "np.zeros(n, dtype=bool)"
-    if dtype.startswith(("int", "uint", "float")):
-        return f'np.zeros(n, dtype="{dtype}")'
+    if base.startswith(("int", "uint", "float")):
+        return f'np.zeros(n, dtype="{base}")'
     # object / string / category / everything else: data-free placeholder.
     return '[""] * n'
 
@@ -191,10 +201,13 @@ class DoctorReport:
         """Generate a copy-paste, **data-free** minimal reproduction (#246).
 
         Emits a runnable Python snippet that rebuilds a synthetic frame with the
-        *same column names, dtypes and row count* as the inspected logs (filled
-        with placeholder zeros/empties — never any real values) and re-runs
-        :func:`doctor`. Paste it into a bug report so maintainers can reproduce a
-        schema/setup issue without access to your data.
+        *same column names and row count* as the inspected logs, and best-effort
+        dtypes (pandas extension/categorical dtypes are normalized to a
+        NumPy-constructible placeholder, so the snippet always runs even if it
+        does not reproduce the exact extension dtype). Columns are filled with
+        placeholder zeros/empties — never any real values — and the snippet
+        re-runs :func:`doctor`. Paste it into a bug report so maintainers can
+        reproduce a schema/setup issue without access to your data.
 
         Returns
         -------
