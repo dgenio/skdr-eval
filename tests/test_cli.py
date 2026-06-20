@@ -674,6 +674,19 @@ class TestQuickstartSubcommand:
         assert (out / "artifact.json").is_file()
         assert "Verdict:" in result.stdout
 
+    def test_quickstart_evaluation_error_exits_data(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """A SkdrEvalError during evaluation surfaces as EXIT_DATA, not a crash."""
+
+        def _boom(*_args: object, **_kwargs: object) -> None:
+            raise skdr_eval.SkdrEvalError("synthetic evaluation failure")
+
+        monkeypatch.setattr(skdr_eval, "evaluate_sklearn_models", _boom)
+        out = tmp_path / "qs_err"
+        result = runner.invoke(app, ["quickstart", "--out", str(out), "--n", "800"])
+        assert result.exit_code == EXIT_DATA, result.stdout + result.stderr
+
     def test_help_lists_new_subcommands(self):
         result = runner.invoke(app, ["--help"])
         for sub in ("explain", "capabilities", "quickstart"):

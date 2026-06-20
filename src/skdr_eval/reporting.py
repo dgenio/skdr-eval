@@ -1329,9 +1329,25 @@ class EvaluationArtifact:
             If ``model_name`` or ``estimator`` is not found in the artifact.
         """
         rec = self.recommendation(model_name, estimator=estimator, baseline=baseline)
+        # The gate is best-effort context: model/estimator membership was already
+        # validated by ``recommendation`` above, so the only expected failures here
+        # are missing diagnostic columns / metadata in a thinly reconstructed
+        # artifact. Catch those narrowly (not bare ``Exception``) so a genuine bug
+        # in ``gate_diagnostics`` still surfaces, and record why the gate was dropped.
         try:
             gate: DiagnosticGate | None = gate_diagnostics(self, model_name, estimator)
-        except Exception:  # pragma: no cover - gate is best-effort context
+        except (
+            DataValidationError,
+            KeyError,
+            ValueError,
+            TypeError,
+        ) as exc:  # pragma: no cover - gate is best-effort context
+            logger.debug(
+                "explain: gate omitted for %s/%s (best-effort): %s",
+                model_name,
+                estimator,
+                exc,
+            )
             gate = None
 
         row_mask = (self.report["model"] == model_name) & (
