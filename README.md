@@ -925,7 +925,7 @@ If you use this software in your research, please cite:
   author  = {Santos, Diogo},
   year    = {2026},
   url     = {https://github.com/dgenio/skdr-eval},
-  version = {0.11.0},
+  version = {0.12.0},
   license = {MIT}
 }
 ```

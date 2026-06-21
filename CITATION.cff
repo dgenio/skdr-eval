@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
 title: "skdr-eval: Offline Policy Evaluation for sklearn-Compatible Models with Time-Aware Doubly Robust Estimators"
-version: "0.11.0"
-date-released: "2026-06-13"
+version: "0.12.0"
+date-released: "2026-06-21"
 url: "https://github.com/dgenio/skdr-eval"
 repository-code: "https://github.com/dgenio/skdr-eval"
 license: MIT
@@ -52,7 +52,7 @@ preferred-citation:
     - family-names: "Santos"
       given-names: "Diogo"
       email: "diogofcul@gmail.com"
-  version: "0.11.0"
+  version: "0.12.0"
   year: 2026
   url: "https://github.com/dgenio/skdr-eval"
 # Foundational methods the library builds on. These mirror the citations in
