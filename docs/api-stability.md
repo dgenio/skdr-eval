@@ -94,9 +94,10 @@ extra is installed.
 `dr_value_with_strategy` `embedding_sufficiency_diagnostic`
 `evaluate_external_policies` `evaluate_pairwise_models`
 `evaluate_propensity_diagnostics` `evaluate_sklearn_models`
-`evaluate_slate_models` `export_results` `fit_outcome_crossfit`
-`fit_propensity_timecal` `gate_diagnostics` `get_capabilities`
-`get_default_config` `get_model_recommendations` `induce_policy_from_sklearn`
+`evaluate_slate_models` `explain_artifact_schema` `export_results`
+`fit_outcome_crossfit` `fit_propensity_timecal` `gate_diagnostics`
+`get_capabilities` `get_capability_matrix` `get_default_config`
+`get_model_recommendations` `induce_policy_from_sklearn`
 `kolmogorov_smirnov_test` `load_artifact_json` `load_config_from_file`
 `load_criteo_counterfactual` `load_movielens_ope` `load_obd`
 `make_pairwise_synth` `make_slate_synth` `make_synth_logs`
@@ -112,11 +113,12 @@ extra is installed.
 
 ### Classes and dataclasses
 
-`ArtifactSchema` `BaselineBlock` `Check` `ClipTransform` `ConfigManager`
-`CoverageResult` `CoverageSimBlock` `DRResult` `DRosShrinkTransform`
-`DatasetBundle` `Design` `DiagnosticGate` `DiagnosticsBlock` `DoctorReport`
-`EmbeddingSufficiencyReport` `EstimandBlock` `EstimatorStrategy`
-`EvaluationArtifact` `EvaluationCard` `EvaluationConfig` `FileTracker`
+`ArtifactSchema` `BaselineBlock` `Capability` `Check` `ClipTransform`
+`ConfigManager` `CoverageResult` `CoverageSimBlock` `DRResult`
+`DRosShrinkTransform` `DataProfile` `DatasetBundle` `Design` `DiagnosticGate`
+`DiagnosticsBlock` `DoctorReport` `EmbeddingSufficiencyReport` `EstimandBlock`
+`EstimatorStrategy` `EvaluationArtifact` `EvaluationCard` `EvaluationConfig`
+`Explanation` `FileTracker`
 `GateResult` `HeadlineBlock` `IdentityTransform` `MIPSTransform`
 `MRDRWeightedLoss` `MSEOutcomeLoss` `ModelConfig` `ModelEvaluator`
 `ModelFactory` `ModelSelector` `NullTracker` `OutcomeLoss` `PairwiseDesign`

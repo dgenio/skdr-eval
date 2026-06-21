@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **CLI-first diagnostics & verdict explainability** ([#164], [#201], [#207],
+  [#215], [#246]). A coherent expansion of the command-line / `doctor` surface:
+  - `skdr-eval explain artifact.json --model M [--estimator SNDR] [--json]`
+    narrates *why* a saved artifact got its verdict — each gating reason with
+    its measured value and threshold — by reading the saved `artifact.json`
+    without re-running the evaluation. Backed by the new
+    `EvaluationArtifact.explain()` method, the
+    `skdr_eval.explain_artifact_schema()` helper, and the `Explanation` object
+    (a pure presentation layer over the existing recommendation/gate logic, so
+    the narrative cannot drift from the card/report) ([#201]).
+  - `skdr-eval quickstart` runs the full value loop — synthetic logs → `doctor`
+    → `evaluate` → card → `explain` — in one command, no Python required. It is
+    an onboarding demo and always exits `0` on success ([#207]).
+  - `skdr-eval capabilities` (and `skdr_eval.get_capability_matrix()`) report
+    which optional extras (`viz`/`speed`/`cli`/`boosting`/`mlflow`/`wandb`/`aim`)
+    are installed and what each unlocks, with a `pip install` hint. The matrix
+    is also rendered by `doctor` ([#215]).
+  - `doctor` gained **time-ordering** and **column-missingness** checks, and now
+    carries a privacy-safe `DataProfile` (column names/dtypes/shape only — never
+    cell values) ([#164]).
+  - `DoctorReport.to_repro()` / `skdr-eval doctor --repro` emit a copy-paste,
+    **data-free** minimal-reproduction snippet (same schema/shape, placeholder
+    values) to attach to bug reports ([#246]).
 - **`insufficient_evidence` is now a first-class, gated verdict** ([#197]). The
   CLI exposes a new exit code `4` for runs where at least one estimator's
   verdict is `insufficient_evidence` (and none is `do_not_deploy`) — an honest
@@ -851,10 +874,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#27]: https://github.com/dgenio/skdr-eval/issues/27
 [#28]: https://github.com/dgenio/skdr-eval/issues/28
 [#30]: https://github.com/dgenio/skdr-eval/issues/30
+[#164]: https://github.com/dgenio/skdr-eval/issues/164
 [#193]: https://github.com/dgenio/skdr-eval/issues/193
 [#196]: https://github.com/dgenio/skdr-eval/issues/196
 [#197]: https://github.com/dgenio/skdr-eval/issues/197
+[#201]: https://github.com/dgenio/skdr-eval/issues/201
+[#207]: https://github.com/dgenio/skdr-eval/issues/207
+[#215]: https://github.com/dgenio/skdr-eval/issues/215
 [#235]: https://github.com/dgenio/skdr-eval/issues/235
+[#246]: https://github.com/dgenio/skdr-eval/issues/246
 
 ## [0.5.0] - 2026-04-08
 

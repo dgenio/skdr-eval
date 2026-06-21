@@ -7,7 +7,7 @@ from . import datasets as datasets
 from . import estimators as estimators
 from . import slate as slate
 from ._simulation import CoverageResult, simulate_coverage
-from .capabilities import get_capabilities
+from .capabilities import Capability, get_capabilities, get_capability_matrix
 from .config import (
     ConfigManager,
     EvaluationConfig,
@@ -44,7 +44,7 @@ from .diagnostics import (
     PropensityDiagnostics,
     per_action_propensity_diagnostics,
 )
-from .doctor import Check, DoctorReport, doctor
+from .doctor import Check, DataProfile, DoctorReport, doctor
 from .estimators import (
     ClipTransform,
     DRosShrinkTransform,
@@ -104,6 +104,7 @@ from .reporting import (
     EstimandBlock,
     EvaluationArtifact,
     EvaluationCard,
+    Explanation,
     GateResult,
     HeadlineBlock,
     ProvenanceBlock,
@@ -115,6 +116,7 @@ from .reporting import (
     TrustBlock,
     attach_warnings,
     build_evaluation_artifact,
+    explain_artifact_schema,
     export_results,
     gate_diagnostics,
     load_artifact_json,
@@ -181,6 +183,7 @@ __all__ = [
     "ArtifactSchema",
     "BaselineBlock",
     "BootstrapError",
+    "Capability",
     "Check",
     "ClipTransform",
     "ConfigManager",
@@ -190,6 +193,7 @@ __all__ = [
     "CoverageSimBlock",
     "DRResult",
     "DRosShrinkTransform",
+    "DataProfile",
     "DataValidationError",
     "DatasetBundle",
     "DatasetError",
@@ -204,6 +208,7 @@ __all__ = [
     "EvaluationArtifact",
     "EvaluationCard",
     "EvaluationConfig",
+    "Explanation",
     "FileTracker",
     "GateResult",
     "HeadlineBlock",
@@ -264,11 +269,13 @@ __all__ = [
     "evaluate_propensity_diagnostics",
     "evaluate_sklearn_models",
     "evaluate_slate_models",
+    "explain_artifact_schema",
     "export_results",
     "fit_outcome_crossfit",
     "fit_propensity_timecal",
     "gate_diagnostics",
     "get_capabilities",
+    "get_capability_matrix",
     "get_default_config",
     "get_model_recommendations",
     "induce_policy_from_sklearn",

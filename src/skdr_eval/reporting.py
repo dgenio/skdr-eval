@@ -1294,6 +1294,85 @@ class EvaluationArtifact:
             _policy = RecommendationPolicy(baseline=0.0)
         return _build_recommendation(self, model_name, estimator, _policy)
 
+    def explain(
+        self,
+        model_name: str,
+        *,
+        estimator: str = "SNDR",
+        baseline: float | None = None,
+    ) -> Explanation:
+        """Narrate *why* one (model, estimator) row received its verdict (#201).
+
+        Combines the structured :class:`Recommendation` (verdict, confidence,
+        reasons) with the :func:`gate_diagnostics` pass/warn/fail gate and the
+        headline estimate/CI into a single :class:`Explanation`. This is a pure
+        presentation layer over already-computed fields — it never recomputes
+        the evaluation, so the narrative cannot drift from the card/report.
+
+        Parameters
+        ----------
+        model_name : str
+            Model present in :attr:`detailed`.
+        estimator : str, default ``"SNDR"``
+            Estimator row to explain (any first-class estimator in the artifact).
+        baseline : float or None, default None
+            Baseline the CI is compared against; defaults to ``0.0``.
+
+        Returns
+        -------
+        Explanation
+            Structured, renderable narrative.
+
+        Raises
+        ------
+        DataValidationError
+            If ``model_name`` or ``estimator`` is not found in the artifact.
+        """
+        rec = self.recommendation(model_name, estimator=estimator, baseline=baseline)
+        # The gate is best-effort context: model/estimator membership was already
+        # validated by ``recommendation`` above, so the only expected failures here
+        # are missing diagnostic columns / metadata in a thinly reconstructed
+        # artifact. Catch those narrowly (not bare ``Exception``) so a genuine bug
+        # in ``gate_diagnostics`` still surfaces, and record why the gate was dropped.
+        try:
+            gate: DiagnosticGate | None = gate_diagnostics(self, model_name, estimator)
+        except (
+            DataValidationError,
+            KeyError,
+            ValueError,
+            TypeError,
+        ) as exc:  # pragma: no cover - gate is best-effort context
+            logger.debug(
+                "explain: gate omitted for %s/%s (best-effort): %s",
+                model_name,
+                estimator,
+                exc,
+            )
+            gate = None
+
+        row_mask = (self.report["model"] == model_name) & (
+            self.report["estimator"] == estimator
+        )
+        rows = self.report[row_mask]
+        row = rows.iloc[0] if not rows.empty else None
+        return Explanation(
+            model_name=model_name,
+            estimator=estimator,
+            verdict=rec.verdict,
+            confidence=rec.confidence,
+            primary_blocker=rec.primary_blocker,
+            V_hat=_coerce_optional_float(row.get("V_hat")) if row is not None else None,
+            ci_lower=(
+                _coerce_optional_float(row.get("ci_lower")) if row is not None else None
+            ),
+            ci_upper=(
+                _coerce_optional_float(row.get("ci_upper")) if row is not None else None
+            ),
+            baseline=baseline if baseline is not None else 0.0,
+            reasons=rec.reasons,
+            gate=gate,
+        )
+
     # ------------------------------------------------------------------ #
     # Card schema (#88)                                                   #
     # ------------------------------------------------------------------ #
@@ -1583,7 +1662,8 @@ def _build_interpretation(
 # and ``EvaluationArtifact`` methods can reference these names as module
 # globals. The verdict/gate logic is unchanged by the move.
 from .recommendation import (  # noqa: E402 - re-export after artifact definitions
-    DiagnosticGate,  # noqa: F401 - re-exported for skdr_eval.reporting compatibility
+    DiagnosticGate,
+    Explanation,
     GateResult,  # noqa: F401 - re-exported for skdr_eval.reporting compatibility
     Reason,  # noqa: F401 - re-exported for skdr_eval.reporting compatibility
     Recommendation,
@@ -2221,6 +2301,55 @@ def load_artifact_json(path: str | Path) -> ArtifactSchema:
     data = json.loads(p.read_text(encoding="utf-8"))
     schema: ArtifactSchema = ArtifactSchema.model_validate(data)
     return schema
+
+
+def _thin_artifact_from_schema(schema: ArtifactSchema) -> EvaluationArtifact:
+    """Reconstruct a minimal :class:`EvaluationArtifact` from a saved schema.
+
+    The verdict (:meth:`EvaluationArtifact.recommendation`) and gate
+    (:func:`gate_diagnostics`) read **only** the report DataFrame, the
+    ``(model, estimator)`` membership of ``detailed``, and ``metadata`` —
+    none of which require the original ``DRResult`` objects. So an explanation
+    can be rebuilt faithfully from a saved ``artifact.json`` without
+    re-running the evaluation (#201). The ``detailed`` map therefore carries
+    ``None`` sentinels: it is sufficient for membership checks but must not be
+    used for anything that dereferences a ``DRResult``.
+    """
+    report_df = pd.DataFrame([row.model_dump() for row in schema.report])
+    detailed: dict[str, dict[str, Any]] = {}
+    for row in schema.report:
+        detailed.setdefault(row.model, {})[row.estimator] = None
+    return EvaluationArtifact(
+        report=report_df,
+        detailed=detailed,  # sentinels only; see docstring
+        warnings=pd.DataFrame(),
+        sensitivity=pd.DataFrame(),
+        diagnostics={},
+        metadata=dict(schema.metadata),
+    )
+
+
+def explain_artifact_schema(
+    schema: ArtifactSchema,
+    model_name: str,
+    *,
+    estimator: str = "SNDR",
+    baseline: float | None = None,
+) -> Explanation:
+    """Explain a verdict from a saved :class:`ArtifactSchema` (#201).
+
+    Companion to :meth:`EvaluationArtifact.explain` for the common case where
+    only a saved ``artifact.json`` (loaded via :func:`load_artifact_json`) is
+    available — e.g. the ``skdr-eval explain`` CLI command. Reuses the existing
+    recommendation/gate logic, so the narrative matches the live artifact.
+
+    Raises
+    ------
+    DataValidationError
+        If ``model_name`` or ``estimator`` is not present in the schema.
+    """
+    artifact = _thin_artifact_from_schema(schema)
+    return artifact.explain(model_name, estimator=estimator, baseline=baseline)
 
 
 def export_results(

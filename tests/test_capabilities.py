@@ -93,3 +93,53 @@ def test_find_spec_value_error_treated_as_missing(monkeypatch):
     caps = cap_module.get_capabilities()
     assert caps["viz"] is False
     assert caps["missing_extras"] == sorted(["speed", "viz"])
+
+
+class TestCapabilityMatrix:
+    """#215: the full optional-dependency capability matrix."""
+
+    def test_matrix_covers_every_declared_extra(self):
+        pyproject = tomllib.loads(
+            (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        declared = set(pyproject["project"]["optional-dependencies"])
+        # The matrix intentionally omits dev-only / docs / notebooks extras,
+        # but must cover every *runtime feature* extra.
+        feature_extras = {
+            "viz",
+            "speed",
+            "cli",
+            "boosting",
+            "mlflow",
+            "wandb",
+            "aim",
+        }
+        assert feature_extras <= declared, (
+            "matrix references extras not declared in pyproject.toml"
+        )
+        matrix = skdr_eval.get_capability_matrix()
+        assert {c.extra for c in matrix} == feature_extras
+
+    def test_matrix_entries_are_well_formed(self):
+        for cap in skdr_eval.get_capability_matrix():
+            assert isinstance(cap.installed, bool)
+            assert cap.feature
+            assert cap.install_hint == f"pip install 'skdr-eval[{cap.extra}]'"
+            assert cap.modules
+            assert cap.to_dict()["extra"] == cap.extra
+
+    def test_installed_reflects_module_presence(self, monkeypatch):
+        # Simulate an environment where only matplotlib (viz) is importable.
+        def only_matplotlib(name):
+            class _Spec:
+                pass
+
+            return _Spec() if name == "matplotlib" else None
+
+        monkeypatch.setattr(cap_module.importlib.util, "find_spec", only_matplotlib)
+        by_extra = {c.extra: c for c in cap_module.get_capability_matrix()}
+        assert by_extra["viz"].installed is True
+        # boosting needs all three of xgboost/lightgbm/catboost → absent.
+        assert by_extra["boosting"].installed is False
+        # speed needs pyarrow AND polars → absent.
+        assert by_extra["speed"].installed is False

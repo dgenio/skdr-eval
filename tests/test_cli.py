@@ -579,6 +579,120 @@ class TestPairwiseSubcommand:
         assert result.exit_code == EXIT_DATA
 
 
+def _artifact_json(tmp_path: Path) -> Path:
+    """Evaluate a small model and checkpoint the artifact JSON."""
+    logs, _, _ = skdr_eval.make_synth_logs(n=600, n_ops=3, seed=0)
+    models = {"HGB": HistGradientBoostingRegressor(max_iter=20, random_state=0)}
+    artifact = skdr_eval.evaluate_sklearn_models(
+        logs=logs,
+        models=models,
+        fit_models=True,
+        n_splits=3,
+        random_state=0,
+        policy_train="pre_split",
+    )
+    path = tmp_path / "artifact.json"
+    path.write_text(artifact.to_schema().model_dump_json(indent=2))
+    return path
+
+
+class TestExplainSubcommand:
+    """#201: ``skdr-eval explain``."""
+
+    def test_explain_text_output(self, tmp_path: Path):
+        artifact_json = _artifact_json(tmp_path)
+        result = runner.invoke(
+            app, ["explain", str(artifact_json), "--model", "HGB", "--estimator", "DR"]
+        )
+        assert result.exit_code == EXIT_OK, result.stdout
+        assert "HGB / DR" in result.stdout
+        assert "Verdict:" in result.stdout
+
+    def test_explain_json_output(self, tmp_path: Path):
+        artifact_json = _artifact_json(tmp_path)
+        result = runner.invoke(
+            app,
+            ["explain", str(artifact_json), "--model", "HGB", "--json"],
+        )
+        assert result.exit_code == EXIT_OK, result.stdout
+        payload = json.loads(result.stdout)
+        assert payload["model_name"] == "HGB"
+        assert "verdict" in payload
+        assert isinstance(payload["reasons"], list)
+
+    def test_explain_unknown_model_exits_data(self, tmp_path: Path):
+        artifact_json = _artifact_json(tmp_path)
+        result = runner.invoke(app, ["explain", str(artifact_json), "--model", "Nope"])
+        assert result.exit_code == EXIT_DATA
+
+
+class TestCapabilitiesSubcommand:
+    """#215: ``skdr-eval capabilities``."""
+
+    def test_capabilities_text(self):
+        result = runner.invoke(app, ["capabilities"])
+        assert result.exit_code == EXIT_OK, result.stdout
+        assert "capabilities" in result.stdout.lower()
+        for extra in ("viz", "cli", "boosting", "mlflow"):
+            assert extra in result.stdout
+
+    def test_capabilities_json(self):
+        result = runner.invoke(app, ["capabilities", "--json"])
+        assert result.exit_code == EXIT_OK
+        payload = json.loads(result.stdout)
+        extras = {row["extra"] for row in payload}
+        assert {"viz", "speed", "cli", "boosting", "mlflow", "wandb", "aim"} == extras
+        assert all(isinstance(row["installed"], bool) for row in payload)
+
+
+class TestDoctorRepro:
+    """#246: ``skdr-eval doctor --repro``."""
+
+    def test_repro_text_appended(self, synth_logs_parquet: Path):
+        result = runner.invoke(app, ["doctor", str(synth_logs_parquet), "--repro"])
+        assert "skdr_eval.doctor" in result.stdout
+        assert "import pandas as pd" in result.stdout
+
+    def test_repro_in_json(self, synth_logs_parquet: Path):
+        result = runner.invoke(
+            app, ["doctor", str(synth_logs_parquet), "--json", "--repro"]
+        )
+        payload = json.loads(result.stdout)
+        assert "repro" in payload
+        assert "skdr_eval.doctor" in payload["repro"]
+
+
+class TestQuickstartSubcommand:
+    """#207: ``skdr-eval quickstart`` golden path."""
+
+    def test_quickstart_writes_card_and_explains(self, tmp_path: Path):
+        out = tmp_path / "qs"
+        result = runner.invoke(app, ["quickstart", "--out", str(out), "--n", "800"])
+        # Onboarding demo always exits 0 on success (not a CI gate).
+        assert result.exit_code == EXIT_OK, result.stdout + result.stderr
+        assert (out / "report.html").is_file()
+        assert (out / "artifact.json").is_file()
+        assert "Verdict:" in result.stdout
+
+    def test_quickstart_evaluation_error_exits_data(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """A SkdrEvalError during evaluation surfaces as EXIT_DATA, not a crash."""
+
+        def _boom(*_args: object, **_kwargs: object) -> None:
+            raise skdr_eval.SkdrEvalError("synthetic evaluation failure")
+
+        monkeypatch.setattr(skdr_eval, "evaluate_sklearn_models", _boom)
+        out = tmp_path / "qs_err"
+        result = runner.invoke(app, ["quickstart", "--out", str(out), "--n", "800"])
+        assert result.exit_code == EXIT_DATA, result.stdout + result.stderr
+
+    def test_help_lists_new_subcommands(self):
+        result = runner.invoke(app, ["--help"])
+        for sub in ("explain", "capabilities", "quickstart"):
+            assert sub in result.stdout
+
+
 class TestLoadModelDirect:
     """Direct unit tests for _load_model to ensure coverage of guard paths."""
 

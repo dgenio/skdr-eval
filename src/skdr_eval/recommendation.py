@@ -138,6 +138,96 @@ class Recommendation:
         )
 
 
+@dataclass
+class Explanation:
+    """Plain-language narrative of *why* a (model, estimator) row got its verdict.
+
+    Built by :meth:`skdr_eval.EvaluationArtifact.explain` and surfaced by the
+    ``skdr-eval explain`` CLI command (#201). It is a thin presentation layer
+    over the already-computed :class:`Recommendation` and
+    :class:`DiagnosticGate` — it never recomputes the evaluation, so the
+    narrative cannot drift from the card/report verdict.
+
+    Attributes
+    ----------
+    model_name, estimator : str
+        Which row this explanation describes.
+    verdict : str
+        ``"deploy"`` | ``"ab_test"`` | ``"do_not_deploy"`` |
+        ``"insufficient_evidence"`` (mirrors :attr:`Recommendation.verdict`).
+    confidence : str
+        ``"high"`` | ``"medium"`` | ``"low"``.
+    primary_blocker : str or None
+        Warning code that single-handedly blocks deployment, if any.
+    V_hat, ci_lower, ci_upper, baseline : float or None
+        Headline estimate, CI bounds, and the baseline the CI was compared
+        against.
+    reasons : list[Reason]
+        Ordered reasons (most severe first), from the recommendation.
+    gate : DiagnosticGate or None
+        The pass/warn/fail diagnostic gate, when it could be computed.
+    """
+
+    model_name: str
+    estimator: str
+    verdict: str
+    confidence: str
+    primary_blocker: str | None
+    V_hat: float | None
+    ci_lower: float | None
+    ci_upper: float | None
+    baseline: float | None
+    reasons: list[Reason]
+    gate: DiagnosticGate | None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain, JSON-ready dict."""
+        return {
+            "model_name": self.model_name,
+            "estimator": self.estimator,
+            "verdict": self.verdict,
+            "confidence": self.confidence,
+            "primary_blocker": self.primary_blocker,
+            "V_hat": self.V_hat,
+            "ci_lower": self.ci_lower,
+            "ci_upper": self.ci_upper,
+            "baseline": self.baseline,
+            "reasons": [
+                {"code": r.code, "message": r.message, "severity": r.severity}
+                for r in self.reasons
+            ],
+            "gate": self.gate.to_dict() if self.gate is not None else None,
+        }
+
+    def to_text(self) -> str:
+        """Render a concise, terminal-friendly narrative."""
+        ci = (
+            f"[{self.ci_lower:.4g}, {self.ci_upper:.4g}]"
+            if self.ci_lower is not None and self.ci_upper is not None
+            else "not available (run with ci_bootstrap=True)"
+        )
+        v_hat = f"{self.V_hat:.4g}" if self.V_hat is not None else "—"
+        baseline = f"{self.baseline:.4g}" if self.baseline is not None else "0"
+        lines = [
+            f"skdr-eval explain — {self.model_name} / {self.estimator}",
+            "─" * 48,
+            f"Verdict: {self.verdict.upper()} (confidence: {self.confidence})",
+            f"Estimate V_hat={v_hat}; CI {ci}; baseline {baseline}.",
+        ]
+        if self.primary_blocker:
+            lines.append(f"Primary blocker: {self.primary_blocker}")
+        lines.append("")
+        lines.append("Why:")
+        _sev_glyph = {"high_risk": "✗", "caution": "⚠", "info": "•"}
+        for r in self.reasons:
+            glyph = _sev_glyph.get(r.severity, "•")
+            lines.append(f"  {glyph} [{r.code}] {r.message}")
+        if self.gate is not None:
+            lines.append("")
+            lines.append(self.gate.to_text())
+        return "\n".join(lines)
+
+
 def _build_recommendation(
     artifact: EvaluationArtifact,
     model_name: str,

@@ -54,7 +54,9 @@ except ImportError as exc:  # pragma: no cover - exercised via tests for the mes
 import pandas as pd
 
 import skdr_eval
+from skdr_eval.capabilities import get_capability_matrix
 from skdr_eval.doctor import doctor as doctor_fn
+from skdr_eval.reporting import explain_artifact_schema
 from skdr_eval.trackers import FileTracker
 
 logger = logging.getLogger("skdr_eval.cli")
@@ -287,6 +289,11 @@ def doctor_cmd(
     json_out: bool = typer.Option(
         False, "--json", help="Emit JSON instead of a text table."
     ),
+    repro: bool = typer.Option(
+        False,
+        "--repro",
+        help="Also emit a copy-paste, data-free minimal reproduction snippet.",
+    ),
 ) -> None:
     """Run preflight diagnostics on input data + environment."""
     if kind not in {"standard", "pairwise"}:
@@ -307,9 +314,15 @@ def doctor_cmd(
         strict=strict,
     )
     if json_out:
-        typer.echo(json.dumps(report.to_dict(), indent=2))
+        payload = report.to_dict()
+        if repro:
+            payload["repro"] = report.to_repro()
+        typer.echo(json.dumps(payload, indent=2))
     else:
         report.print(color=sys.stdout.isatty())
+        if repro:
+            typer.echo("")
+            typer.echo(report.to_repro())
     if not report.ok:
         raise typer.Exit(code=EXIT_DATA)
 
@@ -637,6 +650,127 @@ def _card_from_artifact_schema(
         diagnostics=diagnostics_block,
         sensitivity=sensitivity_block,
         provenance=provenance,
+    )
+
+
+@app.command("explain")
+def explain_cmd(
+    artifact_json: Path = typer.Argument(
+        ..., exists=True, readable=True, help="Path to artifact.json."
+    ),
+    model_name: str = typer.Option(..., "--model", help="Model name."),
+    estimator: str = typer.Option(
+        "SNDR", "--estimator", help="Estimator row to explain (e.g. DR, SNDR)."
+    ),
+    baseline: float | None = typer.Option(
+        None, "--baseline", help="Baseline the CI is compared against (default 0)."
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="Emit JSON instead of a text narrative."
+    ),
+) -> None:
+    """Narrate *why* a saved artifact row got its verdict, without re-running (#201).
+
+    Reads a saved ``artifact.json`` and explains which diagnostics gated the
+    chosen ``(model, estimator)`` — each reason with its measured value and the
+    threshold it was compared against.
+    """
+    schema = skdr_eval.load_artifact_json(artifact_json)
+    try:
+        explanation = explain_artifact_schema(
+            schema, model_name, estimator=estimator, baseline=baseline
+        )
+    except skdr_eval.DataValidationError as exc:
+        typer.secho(f"explain: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=EXIT_DATA) from exc
+    if json_out:
+        typer.echo(json.dumps(explanation.to_dict(), indent=2))
+    else:
+        typer.echo(explanation.to_text())
+
+
+@app.command("capabilities")
+def capabilities_cmd(
+    json_out: bool = typer.Option(
+        False, "--json", help="Emit JSON instead of a text table."
+    ),
+) -> None:
+    """Show which optional extras are installed and what each one unlocks (#215)."""
+    matrix = get_capability_matrix()
+    if json_out:
+        typer.echo(json.dumps([c.to_dict() for c in matrix], indent=2))
+        return
+    use_color = sys.stdout.isatty()
+    typer.echo("skdr-eval capabilities")
+    typer.echo("─" * 48)
+    for cap in matrix:
+        if cap.installed:
+            mark = typer.style("✓", fg=typer.colors.GREEN) if use_color else "yes"
+        else:
+            mark = typer.style("✗", fg=typer.colors.YELLOW) if use_color else "no "
+        typer.echo(f"[{mark}] {cap.extra}: {cap.feature}")
+        if not cap.installed:
+            typer.echo(f"      {cap.install_hint}")
+
+
+@app.command("quickstart")
+def quickstart_cmd(
+    out: Path = typer.Option(
+        Path("./skdr_eval_quickstart"),
+        "--out",
+        help="Output directory for the report + cards.",
+    ),
+    n: int = typer.Option(
+        2000, "--n", min=1, help="Number of synthetic log rows to generate."
+    ),
+    seed: int = typer.Option(
+        0, "--seed", help="Random seed for the synthetic logs + model."
+    ),
+    ci_bootstrap: bool = typer.Option(
+        False,
+        "--ci-bootstrap/--no-ci-bootstrap",
+        help="Compute bootstrap CIs (slower; enables a deploy/don't-deploy verdict).",
+    ),
+) -> None:
+    """Guided first run: synth logs → doctor → evaluate → card → explain (#207).
+
+    Generates synthetic logs, runs the doctor, evaluates a default model, writes
+    the HTML report + cards, and narrates the verdict — the full value loop in a
+    single command, no Python required. Always exits ``0`` on success; it is an
+    onboarding demo, not a CI gate (use ``evaluate`` for gating).
+    """
+    from sklearn.ensemble import HistGradientBoostingRegressor  # noqa: PLC0415
+
+    typer.secho("[1/4] Generating synthetic logs…", fg=typer.colors.CYAN)
+    logs_df, _, _ = skdr_eval.make_synth_logs(n=n, n_ops=3, seed=seed)
+
+    typer.secho("[2/4] Running doctor…", fg=typer.colors.CYAN)
+    report = doctor_fn(logs_df, kind="standard")
+    report.print(color=sys.stdout.isatty())
+
+    typer.secho("[3/4] Evaluating a default model…", fg=typer.colors.CYAN)
+    models = {"hgb": HistGradientBoostingRegressor(max_iter=30, random_state=seed)}
+    try:
+        artifact = skdr_eval.evaluate_sklearn_models(
+            logs=logs_df,
+            models=models,
+            fit_models=True,
+            n_splits=3,
+            random_state=seed,
+            ci_bootstrap=ci_bootstrap,
+            policy_train="pre_split",
+        )
+    except skdr_eval.SkdrEvalError as exc:
+        typer.secho(f"Evaluation error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=EXIT_DATA) from exc
+    paths = _write_artifact_outputs(artifact, out)
+
+    typer.secho("[4/4] Explaining the verdict…", fg=typer.colors.CYAN)
+    typer.echo(artifact.explain("hgb", estimator="SNDR").to_text())
+    typer.echo("")
+    typer.echo(
+        f"Wrote {len(paths)} files to {out} "
+        f"(open {out / 'report.html'} for the full card)."
     )
 
 
