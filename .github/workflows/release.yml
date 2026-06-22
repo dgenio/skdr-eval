@@ -1,12 +1,19 @@
 name: Release
 
 on:
+  # Publish on the version tag only (#191). The job's final step creates the
+  # GitHub Release from that tag, so a `release: published` trigger here would
+  # fire a SECOND run that re-attempts the PyPI upload and fails with
+  # "File already exists". Tag-push is the single source of truth for a release.
   push:
     tags:
       - 'v*'  # Trigger on any version tag (v1.0.0, v2.1.3, etc.)
-  release:
-    types: [published]
   workflow_dispatch:  # Allow manual triggering
+
+# Never run two publishes for the same ref concurrently.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-and-publish:
