@@ -24,7 +24,8 @@ This is the primary routing and canonical guidance file for AI/coding agents int
 
 ## 5. Preferred Workflows & Commands
 - The `Makefile` is the absolute authority for workflows. Do not run ad-hoc tool commands.
-- Run `make validate` before finalizing any PR.
+- `make check` is the fast inner loop; run `make ci-local` (the CI-faithful pass) before finalizing any PR. `make validate` runs the contribution validator and prints which CI jobs stay CI-only.
+- Record changes as a fragment under `changelog.d/` (`<issue>.<type>.md`) — never edit `CHANGELOG.md` directly.
 - See [`docs/agent-context/workflows.md`](docs/agent-context/workflows.md).
 
 ## 6. Definition of Done

@@ -1,123 +1,46 @@
-# Pull Request
+<!--
+Focused checklist for skdr-eval (a pure-Python statistics library). Delete the
+sections that don't apply; keep the boxes you check honest.
+-->
 
-## 📋 Description
+## What & why
 
-<!-- Provide a clear and concise description of what this PR does -->
+<!-- One or two sentences: what this changes and the motivation. -->
 
-### Type of Change
-<!-- Mark the relevant option with an "x" -->
-- [ ] 🐛 Bug fix (non-breaking change which fixes an issue)
-- [ ] ✨ New feature (non-breaking change which adds functionality)
-- [ ] 💥 Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] 📚 Documentation update
-- [ ] 🧹 Code refactoring (no functional changes)
-- [ ] ⚡ Performance improvement
-- [ ] 🧪 Test improvements
-- [ ] 🔧 Build/CI improvements
+Fixes #<!-- issue number, or "Related to #" / remove if none -->
 
-## 🔗 Related Issues
+**Type:** <!-- bug fix · feature · refactor · docs · tests · build/CI -->
 
-<!-- Link to related issues using "Fixes #123" or "Closes #123" -->
-- Fixes #
-- Related to #
+## How verified
 
-## 🧪 Testing
+<!-- The exact commands you ran. `make ci-local` is the CI-faithful pass;
+`make check` is the fast inner loop. -->
 
-### Test Coverage
-- [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] New and existing unit tests pass locally with my changes
-- [ ] I have added integration tests if applicable
-
-### Manual Testing
-<!-- Describe how you tested your changes -->
-- [ ] Tested locally with `make check`
-- [ ] Tested with example scripts
-- [ ] Tested edge cases
-
-**Test commands run:**
 ```bash
-# List the commands you used to test
-make check
-python examples/quickstart.py
+make ci-local   # or: make check  +  the targeted tests for this change
 ```
 
-## 📝 Changes Made
+## Checklist
 
-### Code Changes
-<!-- List the main changes made -->
--
--
--
+- [ ] Tests added/updated and passing locally (new behaviour is covered).
+- [ ] `ruff check`, `ruff format`, and `mypy src/skdr_eval/` are clean
+      (`make check`).
+- [ ] Added a changelog fragment under `changelog.d/` (`<issue>.<type>.md`) —
+      do **not** edit `CHANGELOG.md` directly (see `changelog.d/README.md`).
+- [ ] Public API change? Recorded the name in `docs/api-stability.md`
+      (a test enforces this) — or N/A.
+- [ ] Docs/examples updated to match behaviour — or N/A.
 
-### API Changes
-<!-- If applicable, describe any API changes -->
-- [ ] No API changes
-- [ ] Backward compatible API additions
-- [ ] Breaking API changes (requires major version bump)
+## Statistical change? (delete if not)
 
-**API changes:**
--
+A change to evaluation/estimator/gating logic (or a default flip on a
+statistical entry point) must clear the bar in
+[`docs/agent-context/review-checklist.md`](../docs/agent-context/review-checklist.md):
 
-## 📚 Documentation
-
-- [ ] I have updated the documentation accordingly
-- [ ] I have updated docstrings for new/modified functions
-- [ ] I have added examples if applicable
-- [ ] I have updated the CHANGELOG.md
-
-## ✅ Checklist
-
-### Code Quality
-- [ ] My code follows the project's style guidelines
-- [ ] I have performed a self-review of my own code
-- [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] My changes generate no new warnings
-- [ ] I have run `ruff check` and `ruff format`
-- [ ] I have run `mypy` type checking
-
-### Testing & CI
-- [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] New and existing unit tests pass locally with my changes
-- [ ] All CI checks pass
-- [ ] Code coverage is maintained or improved
-
-### Documentation & Communication
-- [ ] I have made corresponding changes to the documentation
-- [ ] My commit messages follow the conventional commit format
-- [ ] I have updated the CHANGELOG.md if applicable
-
-## 🔍 Review Notes
-
-<!-- Any specific areas you'd like reviewers to focus on -->
-
-### Focus Areas
--
--
-
-### Questions for Reviewers
--
--
-
-## 📸 Screenshots/Examples
-
-<!-- If applicable, add screenshots or example outputs -->
-
-```python
-# Example usage of new feature
-import skdr_eval
-
-# Your example here
-```
-
-## 🚀 Deployment Notes
-
-<!-- Any special considerations for deployment -->
-- [ ] No special deployment considerations
-- [ ] Requires database migrations
-- [ ] Requires environment variable changes
-- [ ] Requires dependency updates
-
----
-
-**Additional Context:**
-<!-- Add any other context about the pull request here -->
+- [ ] **Simulation proof**: a test under `tests/sim_studies/` recovers a known
+      ground-truth parameter (template in `CONTRIBUTING.md`).
+- [ ] **Default flip**: any changed default on a statistical entry point has a
+      `changed` changelog fragment calling it out.
+- [ ] **Invariants**: re-checked the rules in
+      [`docs/agent-context/invariants.md`](../docs/agent-context/invariants.md)
+      (treatment vs policy, no math simplified without proof).
