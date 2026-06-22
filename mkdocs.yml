@@ -109,4 +109,5 @@ nav:
       - Launch readiness checklist: LAUNCH_CHECKLIST.md
       - API stability & road to 1.0: api-stability.md
       - Citing & DOI: zenodo.md
+  - Python API & theory: python-api.md
   - API reference: api.md
