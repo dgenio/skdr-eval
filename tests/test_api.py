@@ -1,5 +1,6 @@
 """Test API imports and basic functionality."""
 
+import ast
 import logging
 import re
 import warnings
@@ -678,3 +679,62 @@ def test_public_api_inventory_has_no_stale_entries() -> None:
         "These names are documented in docs/api-stability.md but are not "
         f"importable from skdr_eval (remove or fix): {sorted(stale)}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# __all__ ordering guard (#255)                                               #
+# --------------------------------------------------------------------------- #
+
+_INIT_SRC = Path(__file__).resolve().parents[1] / "src" / "skdr_eval" / "__init__.py"
+_SCREAMING_CASE = re.compile(r"^[A-Z0-9_]+$")
+
+
+def _all_ordering_key(name: str) -> tuple[int, str]:
+    """Deterministic ``__all__`` order: SCREAMING_CASE constants first, then
+    the rest, each group alphabetical.
+
+    This mirrors the order the list is already maintained in. Keeping it
+    deterministic and one-entry-per-line makes additions append/insert-friendly
+    so concurrent branches stop colliding on ``__init__.py`` (#255).
+    """
+    return (0 if _SCREAMING_CASE.match(name) else 1, name)
+
+
+def _source_all_entries() -> list[str]:
+    """Extract the literal ``__all__`` list from the package source via AST.
+
+    Reading the *source* literal (rather than ``skdr_eval.__all__`` at runtime)
+    avoids the conditionally-appended ``[viz]`` helpers, so the guard checks the
+    hand-maintained block that PRs actually edit.
+    """
+    tree = ast.parse(_INIT_SRC.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets
+        ):
+            return [e.value for e in node.value.elts if isinstance(e, ast.Constant)]
+    raise AssertionError("Could not find an __all__ = [...] assignment in __init__.py")
+
+
+def test_dunder_all_is_deterministically_sorted() -> None:
+    """#255: the literal ``__all__`` block stays in its canonical sorted order.
+
+    A stable, one-entry-per-line order means two branches adding a new export
+    insert at predictable, usually different, lines instead of both appending to
+    the same spot — removing ``__init__.py`` as a recurring merge-conflict
+    hotspot.
+    """
+    names = _source_all_entries()
+    expected = sorted(names, key=_all_ordering_key)
+    assert names == expected, (
+        "skdr_eval.__all__ is out of order. Re-sort it with SCREAMING_CASE "
+        "constants first then the rest, each group alphabetical. Expected:\n"
+        + "\n".join(f"    {n!r}," for n in expected)
+    )
+
+
+def test_dunder_all_has_no_duplicates() -> None:
+    """#255: a duplicated export is almost always a bad merge resolution."""
+    names = _source_all_entries()
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    assert not dupes, f"Duplicate names in skdr_eval.__all__: {dupes}"

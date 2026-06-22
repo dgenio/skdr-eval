@@ -11,15 +11,19 @@ repos:
       - id: check-toml
       - id: check-json
 
+  # ruff / mypy revs are pinned to the SAME versions as the ``dev`` extra in
+  # pyproject.toml so pre-commit, ``pip install -e .[dev]`` and CI all run the
+  # identical binary (#254). Bump both in lockstep (here and in pyproject) in a
+  # single deliberate PR.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
+    rev: v0.15.18
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
         exclude: "src/skdr_eval/_version.py"
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.11.2
+    rev: v2.1.0
     hooks:
       - id: mypy
         additional_dependencies: [
