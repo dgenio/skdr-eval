@@ -8,6 +8,7 @@ standalone script happens to be invoked.
 """
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -57,3 +58,44 @@ def test_checker_detects_version_drift(tmp_path: Path) -> None:
 
     errors = checker.check(tmp_path)
     assert any("Version mismatch" in e for e in errors), errors
+
+
+def _copy_sources(tmp_path: Path) -> None:
+    for name in ("CITATION.cff", "CITATION.bib", ".zenodo.json", "README.md"):
+        (tmp_path / name).write_text(
+            (_REPO_ROOT / name).read_text(encoding="utf-8"), encoding="utf-8"
+        )
+
+
+def test_checker_flags_missing_readme_version(tmp_path: Path) -> None:
+    """A README citation block with no version is an error, not silently OK (#242)."""
+    checker = _load_checker()
+    _copy_sources(tmp_path)
+    current = str(
+        yaml.safe_load((tmp_path / "CITATION.cff").read_text(encoding="utf-8"))[
+            "version"
+        ]
+    )
+    readme = tmp_path / "README.md"
+    original = readme.read_text(encoding="utf-8")
+    stripped = original.replace(f"  version = {{{current}}},\n", "", 1)
+    assert stripped != original, "expected a README @software version line to drop"
+    readme.write_text(stripped, encoding="utf-8")
+
+    errors = checker.check(tmp_path)
+    assert any("README.md citation block has no 'version" in e for e in errors), errors
+
+
+def test_checker_flags_missing_bib_doi(tmp_path: Path) -> None:
+    """If CITATION.cff declares a DOI, a bib @software without one is an error (#242)."""
+    checker = _load_checker()
+    _copy_sources(tmp_path)
+    bib = tmp_path / "CITATION.bib"
+    original = bib.read_text(encoding="utf-8")
+    # Drop the DOI line from the @software entry only (it is the first doi = ...).
+    stripped = re.sub(r"\n\s*doi\s*=\s*\{[^}]*\},", "", original, count=1)
+    assert stripped != original, "expected a bib doi line to drop"
+    bib.write_text(stripped, encoding="utf-8")
+
+    errors = checker.check(tmp_path)
+    assert any("missing the DOI declared in" in e for e in errors), errors

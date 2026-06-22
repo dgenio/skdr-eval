@@ -705,14 +705,27 @@ def _source_all_entries() -> list[str]:
 
     Reading the *source* literal (rather than ``skdr_eval.__all__`` at runtime)
     avoids the conditionally-appended ``[viz]`` helpers, so the guard checks the
-    hand-maintained block that PRs actually edit.
+    hand-maintained block that PRs actually edit. The block must be a list
+    literal of plain string constants; anything else fails loudly here rather
+    than producing a confusingly-typed result downstream.
     """
     tree = ast.parse(_INIT_SRC.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets
         ):
-            return [e.value for e in node.value.elts if isinstance(e, ast.Constant)]
+            assert isinstance(node.value, ast.List), (
+                "__all__ must be assigned a list literal so the ordering guard "
+                f"can read it statically, got {type(node.value).__name__}."
+            )
+            names: list[str] = []
+            for elt in node.value.elts:
+                assert isinstance(elt, ast.Constant) and isinstance(elt.value, str), (
+                    "Every __all__ entry must be a plain string literal; found "
+                    f"{ast.dump(elt)}."
+                )
+                names.append(elt.value)
+            return names
     raise AssertionError("Could not find an __all__ = [...] assignment in __init__.py")
 
 

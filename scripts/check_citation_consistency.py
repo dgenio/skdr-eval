@@ -97,20 +97,33 @@ def check(repo_root: Path = REPO_ROOT) -> list[str]:
 
     if not cff_version:
         errors.append("CITATION.cff is missing a top-level 'version'.")
-    # Every BibTeX 'version = {...}' (the @software entry carries one) must match
-    # the CFF version. Foundational-reference entries have no version field, so
-    # an empty set here only means the @software entry is missing its version.
-    for label, versions in (
-        ("CITATION.bib", bib_versions),
-        ("README.md", readme_versions),
-    ):
-        if cff_version and versions and versions != {cff_version}:
+
+    # The @software BibTeX entry and the README citation block must each carry a
+    # version that matches the CFF version. A *missing* version there is an error
+    # too (not silently OK), or the guard would pass while a source has drifted
+    # out of having any version at all. Foundational-reference entries have no
+    # version field — that is why we only look inside the @software entry above.
+    if not bib_versions:
+        errors.append("CITATION.bib @software entry has no 'version = {...}'.")
+    elif cff_version and bib_versions != {cff_version}:
+        errors.append(
+            f"Version mismatch: CITATION.cff has {cff_version!r} but "
+            f"CITATION.bib has {sorted(bib_versions)!r}."
+        )
+
+    # readme_match is None only when the citation block itself is missing, which
+    # is already reported above; otherwise the block must carry a version.
+    if readme_match is not None:
+        if not readme_versions:
+            errors.append(
+                "README.md citation block has no 'version = {...}' to check "
+                "against CITATION.cff."
+            )
+        elif cff_version and readme_versions != {cff_version}:
             errors.append(
                 f"Version mismatch: CITATION.cff has {cff_version!r} but "
-                f"{label} has {sorted(versions)!r}."
+                f"README.md has {sorted(readme_versions)!r}."
             )
-        if not versions and label == "CITATION.bib":
-            errors.append("CITATION.bib @software entry has no 'version = {...}'.")
 
     # --- DOI agreement: CITATION.cff vs CITATION.bib ------------------------- #
     cff_dois = {
@@ -119,7 +132,12 @@ def check(repo_root: Path = REPO_ROOT) -> list[str]:
         if idf.get("type") == "doi"
     }
     bib_dois = {d.strip() for d in _BIB_DOI_RE.findall(bib_software)}
-    if cff_dois and bib_dois and cff_dois != bib_dois:
+    if cff_dois and not bib_dois:
+        errors.append(
+            "CITATION.bib @software entry is missing the DOI declared in "
+            f"CITATION.cff ({sorted(cff_dois)!r})."
+        )
+    elif cff_dois and bib_dois and cff_dois != bib_dois:
         errors.append(
             f"DOI mismatch: CITATION.cff has {sorted(cff_dois)!r} but "
             f"CITATION.bib has {sorted(bib_dois)!r}."

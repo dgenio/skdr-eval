@@ -173,9 +173,13 @@ ci-local:
 		python -c "import skdr_eval; logs,_,_=skdr_eval.make_synth_logs(n=800,n_ops=3,seed=0); logs.to_parquet('logs.parquet')"; \
 		python -m skdr_eval.cli doctor logs.parquet --json; \
 		python -m skdr_eval.cli validate-schema logs.parquet; \
+		rm -f logs.parquet; \
 	} || echo "SKIP cli-smoke ([cli] not installed: pip install -e .[cli])"
 	@echo "==> [viz-extra-smoke]"
-	@python -c "import matplotlib" 2>/dev/null && python examples/preflight.py || echo "SKIP viz-extra-smoke ([viz] not installed)"
+	@python -c "import matplotlib" 2>/dev/null && { \
+		python -c "import skdr_eval; caps=skdr_eval.get_capabilities(); assert caps['viz'], caps; print('viz capability:', caps['viz'])"; \
+		python examples/preflight.py; \
+	} || echo "SKIP viz-extra-smoke ([viz] not installed)"
 	@echo "==> [use-cases-smoke]"
 	$(MAKE) use-cases
 	@echo "==> [notebooks-smoke]"
