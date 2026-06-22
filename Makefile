@@ -1,6 +1,6 @@
 # Makefile for skdr-eval development
 
-.PHONY: help install install-dev clean lint format typecheck test test-cov build docs docs-serve check validate smoke coverage-sim notebooks use-cases known-failures all
+.PHONY: help install install-dev clean lint format typecheck test test-cov build docs docs-serve check ci-local validate citation-check changelog changelog-draft smoke cli-smoke coverage-sim notebooks use-cases known-failures all
 
 # Default target
 help:
@@ -16,8 +16,12 @@ help:
 	@echo "  build        Build package for distribution"
 	@echo "  docs         Build the MkDocs site (--strict; needs [docs] extra)"
 	@echo "  docs-serve   Serve the docs site locally with live reload"
-	@echo "  check        Run all quality checks (lint + typecheck + test)"
-	@echo "  validate     Run comprehensive contribution validation (AI agent friendly)"
+	@echo "  check        Fast inner-loop checks (lint + typecheck + test + smoke)"
+	@echo "  ci-local     CI-faithful full run: everything ci.yml runs on one interpreter (#253)"
+	@echo "  validate     Comprehensive contribution validation (AI agent friendly)"
+	@echo "  citation-check Check version/DOI consistency across citation metadata (#242)"
+	@echo "  changelog    Compile changelog.d/ fragments into CHANGELOG.md (release-time, #255)"
+	@echo "  changelog-draft Preview the pending changelog without writing (#255)"
 	@echo "  coverage-sim Run moving-block bootstrap coverage simulation (issues #81 #62)"
 	@echo "  smoke        Run examples/preflight.py and examples/quickstart.py"
 	@echo "  notebooks    Execute examples/notebooks/ via nbmake (needs [dev] extra)"
@@ -75,6 +79,22 @@ docs-serve:
 validate:
 	python scripts/validate_contribution.py
 
+# Citation/version consistency (#242): assert the version and DOI agree across
+# CITATION.cff, CITATION.bib, .zenodo.json and the README citation block. Also
+# enforced as a pytest test so it runs on the full CI matrix.
+citation-check:
+	python scripts/check_citation_consistency.py
+
+# Conflict-resistant changelog (#255). Contributors add fragments under
+# changelog.d/; these targets preview / compile them via towncrier.
+changelog-draft:
+	python -m towncrier build --draft --version $${VERSION:-$$(python -m setuptools_scm 2>/dev/null || echo 0.0.0)}
+
+# Release-time: render fragments into CHANGELOG.md and delete them. Pass the
+# release version explicitly, e.g. `make changelog VERSION=0.13.0`.
+changelog:
+	python -m towncrier build --yes --version $${VERSION:?set VERSION=X.Y.Z}
+
 # Coverage simulation for moving-block bootstrap calibration (#81 #62)
 # Uses n_reps=50 for speed in CI; increase to 500 for thorough local checks.
 coverage-sim:
@@ -125,6 +145,49 @@ known-failures:
 
 # Composite targets
 check: lint typecheck test smoke
+
+# CI-faithful full local run (#253). Mirrors every .github/workflows/ci.yml job
+# that runs on a single interpreter, in CI order. Optional-extra jobs degrade to
+# a clear SKIP (the same posture scripts/validate_contribution.py uses for docs)
+# so a minimal dev install still gets maximum signal instead of a hard failure.
+#
+# Reserve this for the pre-PR check; `make check` stays the fast inner loop.
+# NOT reproducible locally (CI-only by nature): the Python 3.10-3.14 matrix, the
+# `floor-deps` minimum-version job, and the codecov upload.
+ci-local:
+	@echo "==> [test] lint + format"
+	ruff check src/ tests/ examples/
+	ruff format --check src/ tests/ examples/
+	@echo "==> [test] typecheck"
+	mypy src/skdr_eval/
+	@echo "==> [test] tests + coverage"
+	pytest -q --cov=skdr_eval --cov-report=term-missing
+	@echo "==> [test] citation consistency (#242)"
+	python scripts/check_citation_consistency.py
+	@echo "==> [examples-smoke] preflight + quickstart"
+	python examples/preflight.py
+	python examples/quickstart.py
+	@echo "==> [cli-smoke] version + doctor + validate-schema"
+	@python -c "import typer, pyarrow" 2>/dev/null && { \
+		python -m skdr_eval.cli version; \
+		python -c "import skdr_eval; logs,_,_=skdr_eval.make_synth_logs(n=800,n_ops=3,seed=0); logs.to_parquet('logs.parquet')"; \
+		python -m skdr_eval.cli doctor logs.parquet --json; \
+		python -m skdr_eval.cli validate-schema logs.parquet; \
+	} || echo "SKIP cli-smoke ([cli] not installed: pip install -e .[cli])"
+	@echo "==> [viz-extra-smoke]"
+	@python -c "import matplotlib" 2>/dev/null && python examples/preflight.py || echo "SKIP viz-extra-smoke ([viz] not installed)"
+	@echo "==> [use-cases-smoke]"
+	$(MAKE) use-cases
+	@echo "==> [notebooks-smoke]"
+	@python -c "import nbmake" 2>/dev/null && $(MAKE) notebooks || echo "SKIP notebooks-smoke ([dev]/nbmake not installed)"
+	@echo "==> [boosting-smoke]"
+	@python -c "import xgboost, lightgbm, catboost" 2>/dev/null && pytest tests/test_adapters_boosting.py -q --override-ini="addopts=" -p no:cacheprovider || echo "SKIP boosting-smoke ([boosting] not installed)"
+	@echo "==> [docs] mkdocs build --strict"
+	@python -c "import mkdocs" 2>/dev/null && mkdocs build --strict || echo "SKIP docs ([docs] not installed)"
+	@echo "==> [build] python -m build + twine check"
+	python -m build
+	twine check dist/*
+	@echo "ci-local: every runnable CI job passed (matrix / floor-deps / codecov are CI-only)."
 
 all: clean check build
 
