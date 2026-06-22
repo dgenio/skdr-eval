@@ -34,6 +34,12 @@ jobs:
         ruff format --check src/ tests/ examples/
 
     - name: Type check with mypy
+      # mypy results are config-driven (python_version = 3.10), not interpreter
+      # dependent, so we type-check once on the oldest supported Python. This is
+      # also the only matrix entry where numpy stays < 2.5: numpy >= 2.5 dropped
+      # 3.10 and ships PEP 695 `type` stubs that mypy cannot parse under a 3.10
+      # target, so running mypy on 3.11+ would fail on numpy's own stub file.
+      if: matrix.python-version == '3.10'
       run: |
         mypy src/skdr_eval/
 
