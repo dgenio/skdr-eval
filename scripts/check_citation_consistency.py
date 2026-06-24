@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """Citation/version consistency check (#242).
 
-Verify that the version, DOI and repository slug agree across every place the
-project advertises its citation metadata:
+Verify that the citation metadata agrees across every place the project
+advertises it:
 
 * ``CITATION.cff``      — machine-readable citation (CFF)
 * ``CITATION.bib``      — BibTeX companion
 * ``.zenodo.json``      — Zenodo archive metadata
 * the ``## Citation`` BibTeX block in ``README.md``
+
+Coverage is per-field, matching where each value actually lives today: the
+**version** is compared across CITATION.cff, CITATION.bib and the README block;
+the **DOI** across CITATION.cff and CITATION.bib (the README/`.zenodo.json`
+intentionally omit it until the first Zenodo release mints the real value); and
+the **repository slug** across all four sources. A missing version/DOI in a
+source that is expected to carry one is reported, not silently skipped.
 
 A release that bumps the version (or mints a DOI) in one file but not the others
 produces the stale-citation drift seen in #110 (wrong repo owner) and #111
