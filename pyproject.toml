@@ -95,14 +95,18 @@ dev = [
     "pytest",
     "pytest-cov",
     "coverage",
-    "mypy",
+    # ruff / mypy are EXACT-pinned (==) and kept in lockstep with the
+    # .pre-commit-config.yaml revs (#254) so pre-commit, `pip install -e .[dev]`
+    # and CI all run the identical binary — no more "green locally, red on CI"
+    # lint/type drift. Bump both deliberately in one PR (here + pre-commit).
+    "ruff==0.15.18",
+    "mypy==2.1.0",
     "types-PyYAML",
     "tomli; python_version < '3.11'",
-    "ruff",
-    "black",
     "build",
     "twine",
     "pre-commit",
+    "towncrier>=24.8",
     "matplotlib",
     "typer>=0.12",
     "joblib>=1.3",
@@ -192,24 +196,6 @@ exclude_lines = [
     "@(abc\\.)?abstractmethod",
 ]
 
-[tool.black]
-line-length = 88
-target-version = ["py310"]
-include = '\.pyi?$'
-extend-exclude = '''
-/(
-  # directories
-  \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | build
-  | dist
-)/
-'''
-
 [tool.mypy]
 python_version = "3.10"
 warn_return_any = true
@@ -257,3 +243,48 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["skdr_eval.cli"]
 disable_error_code = ["untyped-decorator"]
+
+# Conflict-resistant changelog (#255). Each PR drops a small fragment under
+# changelog.d/ (e.g. ``123.fixed.md``) instead of editing a shared "Unreleased"
+# section, so concurrent branches stop colliding on CHANGELOG.md. The fragments
+# are compiled into a dated section at release time with ``make changelog``.
+[tool.towncrier]
+package = "skdr_eval"
+directory = "changelog.d"
+filename = "CHANGELOG.md"
+start_string = "<!-- towncrier release notes start -->\n"
+title_format = "## [{version}] - {project_date}"
+issue_format = "[#{issue}](https://github.com/dgenio/skdr-eval/issues/{issue})"
+underlines = ["", "", ""]
+# Non-fragment files kept in changelog.d/ for humans, not for compilation.
+ignore = ["README.md", ".gitkeep"]
+
+[[tool.towncrier.type]]
+directory = "added"
+name = "Added"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "changed"
+name = "Changed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "deprecated"
+name = "Deprecated"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "removed"
+name = "Removed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "fixed"
+name = "Fixed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "security"
+name = "Security"
+showcontent = true

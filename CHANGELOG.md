@@ -5,9 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+Unreleased changes live as individual fragments under
+[`changelog.d/`](changelog.d/) and are compiled into a dated section here at
+release time with `make changelog` (towncrier). Run `make changelog-draft` to
+preview the pending notes. See [`changelog.d/README.md`](changelog.d/README.md).
 
-(nothing yet)
+<!-- towncrier release notes start -->
 
 ## [0.12.0] - 2026-06-21
 

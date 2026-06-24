@@ -13,57 +13,55 @@ Thank you for your interest in contributing to skdr-eval! This document outlines
 
 ## 🌟 Development Workflow
 
-We follow **GitHub Flow**: short-lived feature branches off `main`, merged back via PR.
+Every change lands on `main` through a pull request. `main` is the only
+long-lived branch; all work happens on short-lived topic branches that are
+deleted after merge.
 
 ### Branch Structure
-- **`main`**: Production-ready code, always deployable, protected branch
-- **`feature/*`**: Short-lived feature development branches
-- **`hotfix/*`**: Critical fixes for production
-- **`release/*`**: Optional release preparation branches (cut from `main`)
+- **`main`**: the only long-lived branch — always releasable, protected, no
+  direct pushes.
+- **Topic branches**: short-lived, branched from `main` and merged back via PR.
+  Most work here is done by coding agents, so branches are usually namespaced by
+  tool — `claude/*`, `copilot/*`, `cursor/*` — but any short descriptive branch
+  off `main` is fine for human contributors.
+
+> Earlier revisions of this guide described a `develop` branch and
+> `feature/*`/`hotfix/*`/`release/*` conventions. The repo no longer uses those:
+> branch off `main` and open a PR.
 
 ### Workflow Steps
 
-1. **Create Feature Branch**
+1. **Create a topic branch off `main`**
    ```bash
    git checkout main
    git pull origin main
-   git checkout -b feature/your-feature-name
+   git checkout -b your-topic-branch   # e.g. fix-elig-mask-coercion
    ```
 
-2. **Development**
-   - Write code following our style guidelines
-   - Add tests for new functionality
-   - Update documentation as needed
-   - Ensure all checks pass locally
+2. **Develop**
+   - Write code following our style guidelines and add tests for new behaviour.
+   - When behaviour changes, update `examples/` first, then docs (see AGENTS.md).
+   - Add a **changelog fragment** under `changelog.d/` (`<issue>.<type>.md`) —
+     do not edit `CHANGELOG.md` directly (see
+     [`changelog.d/README.md`](changelog.d/README.md)).
 
-3. **Pre-commit Checks**
+3. **Run the checks locally**
    ```bash
-   # Run linting
-   ruff check src/ tests/ examples/
-   ruff format src/ tests/ examples/
-
-   # Run type checking
-   mypy src/skdr_eval/
-
-   # Run tests
-   pytest -v --cov=skdr_eval
+   make check       # fast inner loop: lint + typecheck + test + smoke
+   make ci-local    # CI-faithful pre-PR pass: everything ci.yml runs on one
+                    # interpreter, and it prints what stays CI-only
    ```
+   `ruff` and `mypy` are version-pinned (`pyproject.toml` /
+   `.pre-commit-config.yaml`) so local lint/type results match CI exactly.
 
-4. **Submit Pull Request**
-   - Push feature branch to origin
-   - Create PR against `main` branch
-   - Fill out PR template completely
-   - Wait for CI checks and code review
+4. **Submit the pull request**
+   - Push the branch and open a PR against `main`; fill out the template.
+   - CI must pass and review threads must be resolved before a maintainer merges.
 
-5. **Code Review**
-   - Address reviewer feedback
-   - Ensure CI passes
-   - Squash commits if requested
-
-6. **Merge**
-   - PR merged into `main` by maintainer
-   - Feature branch deleted
-   - Tagged releases cut from `main`
+### Review
+PRs are reviewed before merge — frequently with GitHub Copilot's automated
+review in addition to a maintainer. Address the threads, keep CI green, and a
+maintainer merges. No self-merges to `main`.
 
 ## 🔒 Branch Protection & CI Requirements
 
@@ -75,11 +73,12 @@ We follow **GitHub Flow**: short-lived feature branches off `main`, merged back 
   - Formatting (ruff format --check)
   - Type checking (mypy)
   - Tests (pytest with ≥80% coverage)
-  - Multi-Python version compatibility (3.11-3.14)
+  - Multi-Python version compatibility (3.10-3.14)
+  - Minimum-dependency floors (`floor-deps` job) and a strict docs build
 
 - ✅ **Required Approvals**:
-  - `main` branch: **1 maintainer approval** required
-  - No self-approvals allowed
+  - `main` branch: review before merge (maintainer and/or Copilot)
+  - No self-merges
 
 - ✅ **Branch Status**:
   - Branch must be up-to-date with target branch
@@ -113,9 +112,12 @@ We follow **GitHub Flow**: short-lived feature branches off `main`, merged back 
 - **Docstrings**: Google-style docstrings for all public APIs
 - **Type hints**: All functions must have type annotations
 - **README**: Keep examples up-to-date
-- **CHANGELOG**: Document all changes
+- **CHANGELOG**: Don't edit `CHANGELOG.md` directly — add a fragment under
+  `changelog.d/` (`<issue>.<type>.md`); it is compiled at release time.
 - **Public API**: Any name added to `skdr_eval.__all__` must also be recorded
   in [`docs/api-stability.md`](docs/api-stability.md) — a test enforces this.
+  Keep `__all__` in its sorted order (constants first, then the rest); a test
+  enforces that too.
 
 ## 🧭 Paths to contribute
 
@@ -126,6 +128,55 @@ We follow **GitHub Flow**: short-lived feature branches off `main`, merged back 
 - **Improve docs / examples**: docs live in [`docs/`](docs/); runnable
   examples in [`examples/`](examples/).
 - **Triage good-first-issues**: see the issue tracker labels.
+
+## 🔬 Statistical changes (extra bar)
+
+`skdr-eval`'s value is statistical correctness, so changes to evaluation,
+estimator, or gating logic clear a higher bar than ordinary code. This encodes
+the rules from [`docs/agent-context/review-checklist.md`](docs/agent-context/review-checklist.md)
+and [`invariants.md`](docs/agent-context/invariants.md) at the point of
+contribution. If your PR touches that logic:
+
+- [ ] **Simulation proof** — add/extend a test under `tests/sim_studies/` that
+      recovers a known ground-truth parameter (template below). A change to the
+      math without a recovery proof will not be merged.
+- [ ] **Default flips** — any changed default on a statistical entry point gets
+      a `changed` changelog fragment that names the old and new behaviour.
+- [ ] **Invariants** — re-check the `treatment` vs `policy` vocabulary and the
+      documented invariants; do not "simplify" math without a proof.
+
+### Simulation-proof template
+
+Copy this into a `tests/sim_studies/test_<thing>_recovery.py` and adapt the DGP.
+The shape is always: **define a data-generating process with a known target →
+run the estimator → assert it recovers the target within Monte-Carlo error.**
+
+```python
+"""Simulation proof: <estimator/quantity> recovers its known ground truth."""
+
+import numpy as np
+
+
+def test_<thing>_recovers_known_value() -> None:
+    rng = np.random.default_rng(0)  # fixed seed → deterministic CI
+
+    # 1. Data-generating process with an ANALYTICALLY KNOWN target.
+    #    Build logs where the true target-policy value is computable in closed
+    #    form (or by a large-sample oracle), independent of the estimator.
+    true_value = ...          # the ground truth you will recover
+    logs = ...                # synthetic logs for this DGP
+
+    # 2. Run the estimator under test on the logs.
+    estimate = ...            # e.g. a DR/SNDR V_hat from the public API
+
+    # 3. Recovery assertion: the estimate must match the truth within a tight,
+    #    justified tolerance (Monte-Carlo SE), NOT a loose "close enough".
+    assert abs(estimate - true_value) < tol, (estimate, true_value)
+```
+
+See `tests/sim_studies/test_policy_value_recovery.py` and the others in that
+directory for worked examples, and `make coverage-sim` for the bootstrap
+coverage simulations.
 
 ## 🔍 Code Review Guidelines
 
@@ -149,16 +200,22 @@ We follow [Semantic Versioning](https://semver.org/):
 - **MINOR**: New features (backward compatible)
 - **PATCH**: Bug fixes (backward compatible)
 
+The version is derived from the Git tag by `setuptools_scm` — there is no
+version string to bump by hand.
+
 ### Release Steps
-1. Create `release/vX.Y.Z` branch from `main`
-2. Update version numbers and CHANGELOG
-3. Create PR: `release/vX.Y.Z` → `main`
-4. After merge: Tag release and publish to PyPI
+1. From an up-to-date `main`, compile the changelog fragments:
+   `make changelog VERSION=X.Y.Z` (renders `changelog.d/` into `CHANGELOG.md`
+   and deletes the fragments). Commit the result via a PR.
+2. Update the citation metadata version (`CITATION.cff`, `CITATION.bib`, README
+   citation block); `make citation-check` must pass.
+3. After merge, tag `vX.Y.Z` on `main`. The tag push triggers `release.yml`,
+   which builds, publishes to PyPI, and creates the GitHub Release.
 
 ## 🛠️ Development Setup
 
 ### Prerequisites
-- Python 3.11+
+- Python 3.10+ (CI tests 3.10–3.14)
 - Git
 - GitHub account
 

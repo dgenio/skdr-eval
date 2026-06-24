@@ -425,6 +425,20 @@ class ContributionValidator:
 
         print(f"Passed: {self.success_count}/{self.total_checks} checks")
 
+        # Be explicit about the CI jobs this validator does NOT cover, so the
+        # gap with CI is visible rather than silent (#253). `make ci-local`
+        # additionally runs the viz / boosting / notebooks / use-cases smokes
+        # and the package build on the current interpreter.
+        print(
+            "\nNote: this validator does not run every CI job. Still CI-only:\n"
+            "   • the Python 3.10-3.14 matrix and the floor-deps "
+            "(minimum-version) job\n"
+            "   • viz / boosting / notebooks / use-cases smokes and the "
+            "build+twine job\n"
+            "     (run `make ci-local` for a CI-faithful local pass), and the "
+            "codecov upload."
+        )
+
         if self.warnings:
             print(f"\nWarnings ({len(self.warnings)}):")
             for warning in self.warnings:

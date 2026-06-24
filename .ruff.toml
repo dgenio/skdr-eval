@@ -20,7 +20,7 @@ select = [
     "RUF", # ruff-specific rules
 ]
 ignore = [
-    "E501",  # line too long, handled by black
+    "E501",  # line too long, handled by the ruff formatter
     "B008",  # do not perform function calls in argument defaults
     "C901",  # too complex
     "PLR0913", # too many arguments
