@@ -1,4 +1,4 @@
-"""Input-frame coercion for the public evaluators (#72).
+"""Input-frame coercion for the public evaluators (#72, #236).
 
 The public API is pandas-first, but the ``[speed]`` extra ships ``polars``
 and ``pyarrow`` and many callers already hold their logs in one of those
@@ -7,6 +7,13 @@ boundary, :func:`coerce_to_pandas` accepts a Polars ``DataFrame`` or a PyArrow
 ``Table`` (in addition to a pandas ``DataFrame``) and converts it once at
 ingestion, so every downstream consumer — which already speaks pandas — is
 unchanged.
+
+This module is the **single canonical conversion seam** (#236): every public
+evaluator (``evaluate_sklearn_models``, ``evaluate_pairwise_models`` and its
+external-policy tables, ``evaluate_external_policies``, and
+``simulate_autoscaling_scenario``) routes its user-supplied frames through
+``coerce_to_pandas`` exactly once at the boundary, so the NumPy design-matrix
+code paths never branch on input backend.
 
 Detection is by class identity, *not* by importing ``polars`` / ``pyarrow``
 at module load: the conversion only imports the relevant package when an

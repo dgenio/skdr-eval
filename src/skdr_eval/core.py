@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 import numpy as np
 import pandas as pd
+from joblib import Parallel, delayed
 from scipy.stats import norm
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import (
@@ -38,6 +39,7 @@ from .exceptions import (
     ConvergenceError,
     DataValidationError,
     InsufficientDataError,
+    InsufficientOverlapError,
     ModelValidationError,
     OutcomeModelError,
     PolicyInductionError,
@@ -452,6 +454,7 @@ def fit_propensity_timecal(
     gap: int = 1,
     test_size: int | None = None,
     max_train_size: int | None = None,
+    n_jobs: int = 1,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Fit propensity model with time-aware cross-validation and calibration.
 
@@ -478,6 +481,10 @@ def fit_propensity_timecal(
     max_train_size : int, optional
         Cap the training-fold size in samples (sliding-window CV). ``None``
         (default) uses an expanding window.
+    n_jobs : int, default=1
+        Number of joblib workers for the cross-validation folds (#178). Folds
+        are independent fits writing disjoint test indices, so the result is
+        identical to the serial path for any ``n_jobs``. ``-1`` uses all cores.
 
     Returns
     -------
@@ -550,10 +557,11 @@ def fit_propensity_timecal(
         propensities = np.zeros((n_samples, n_actions))
         fold_indices = np.full(n_samples, -1)
 
-        for fold, (train_idx, test_idx) in enumerate(tscv.split(X_phi_sorted)):
+        def _fit_one_fold(
+            fold: int, train_idx: np.ndarray, test_idx: np.ndarray
+        ) -> tuple[np.ndarray, np.ndarray, int]:
             # Map sorted indices back to original order for fold assignment
             original_test_idx = time_order[test_idx]
-            fold_indices[original_test_idx] = fold
 
             X_train, X_test = X_phi_sorted[train_idx], X_phi_sorted[test_idx]
             A_train, _A_test = A_sorted[train_idx], A_sorted[test_idx]
@@ -633,7 +641,20 @@ def fit_propensity_timecal(
             pred_proba = pred_proba + epsilon
             pred_proba = pred_proba / pred_proba.sum(axis=1, keepdims=True)
 
+            return original_test_idx, pred_proba, fold
+
+        folds = list(enumerate(tscv.split(X_phi_sorted)))
+        # Folds are independent fits writing disjoint test indices, so threading
+        # is bit-identical to the serial loop (#178).
+        if n_jobs == 1:
+            fold_results = [_fit_one_fold(f, tr, te) for f, (tr, te) in folds]
+        else:
+            fold_results = Parallel(n_jobs=n_jobs, prefer="threads")(
+                delayed(_fit_one_fold)(f, tr, te) for f, (tr, te) in folds
+            )
+        for original_test_idx, pred_proba, fold in fold_results:
             propensities[original_test_idx] = pred_proba
+            fold_indices[original_test_idx] = fold
 
         # Handle samples not assigned to any fold (shouldn't happen with TimeSeriesSplit but be safe)
         unassigned_mask = fold_indices == -1
@@ -674,6 +695,7 @@ def fit_outcome_crossfit(
     test_size: int | None = None,
     max_train_size: int | None = None,
     sample_weight: np.ndarray | None = None,
+    n_jobs: int = 1,
 ) -> tuple[np.ndarray, list[tuple[Any, np.ndarray, np.ndarray]]]:
     """Fit outcome model with cross-fitting.
 
@@ -701,6 +723,10 @@ def fit_outcome_crossfit(
         estimator's ``fit(..., sample_weight=...)``. Required by MRDR (#86)
         to recover the variance-minimising outcome model under DR. ``None``
         (default) means unweighted MSE.
+    n_jobs : int, default=1
+        Number of joblib workers for the cross-fitting folds (#178). Folds are
+        independent fits writing disjoint test indices, so the result is
+        identical to the serial path for any ``n_jobs``. ``-1`` uses all cores.
 
     Returns
     -------
@@ -780,7 +806,9 @@ def fit_outcome_crossfit(
                     "sample_weight must be non-negative; received negatives"
                 )
 
-        for fold_idx, (train_idx, test_idx) in enumerate(tscv.split(X_obs)):
+        def _fit_one_fold(
+            fold_idx: int, train_idx: np.ndarray, test_idx: np.ndarray
+        ) -> tuple[Any, np.ndarray, np.ndarray, np.ndarray]:
             try:
                 X_train, X_test = X_obs[train_idx], X_obs[test_idx]
                 Y_train = Y[train_idx]
@@ -808,11 +836,23 @@ def fit_outcome_crossfit(
                 # Predict
                 pred = model.predict(X_test)
                 validate_finite_values(pred, f"predictions_fold_{fold_idx}")
-                predictions[test_idx] = pred
-                models_info.append((model, train_idx, test_idx))
-
             except Exception as e:
                 raise OutcomeModelError(f"Error in fold {fold_idx}: {e!s}") from e
+            return model, train_idx, test_idx, pred
+
+        folds = list(enumerate(tscv.split(X_obs)))
+        # Folds are independent fits writing disjoint test indices, so threading
+        # is bit-identical to the serial loop (#178). Reassemble in fold order
+        # to keep ``models_info`` deterministic.
+        if n_jobs == 1:
+            fold_results = [_fit_one_fold(fi, tr, te) for fi, (tr, te) in folds]
+        else:
+            fold_results = Parallel(n_jobs=n_jobs, prefer="threads")(
+                delayed(_fit_one_fold)(fi, tr, te) for fi, (tr, te) in folds
+            )
+        for model, train_idx, test_idx, pred in fold_results:
+            predictions[test_idx] = pred
+            models_info.append((model, train_idx, test_idx))
 
         # Validate output
         validate_finite_values(predictions, "predictions")
@@ -838,12 +878,20 @@ def induce_policy_from_sklearn(
     X_base: np.ndarray,
     ops_all: list[str],
     elig: np.ndarray,
+    chunk_size: int | None = None,
 ) -> np.ndarray:
     """Induce policy from sklearn model by predicting service times.
 
     Vectorized: builds a single stacked ``(sum_i n_elig_i, n_features + n_ops)``
     feature matrix and issues **one** ``model.predict`` call instead of the
     per-(sample, eligible-op) python loop (closes #46).
+
+    When ``chunk_size`` is set, the stacked feature matrix — the dominant
+    transient allocation on large logs — is built and predicted in row-blocks
+    of at most ``chunk_size`` eligible (sample, op) pairs, bounding peak memory
+    without changing the result (predictions are row-independent, so the output
+    is bit-identical to the single-shot path; this backs ``execution_mode=
+    "large_data"`` in :func:`evaluate_sklearn_models`, #210).
 
     Parameters
     ----------
@@ -905,14 +953,36 @@ def induce_policy_from_sklearn(
         policy_probs = np.zeros((n_samples, n_ops), dtype=np.float64)
 
         if sample_idx_flat.size > 0:
-            # Build [X_base[sample] | one_hot(op)] in a single allocation.
-            X_repeated = X_base[sample_idx_flat]
-            onehot = np.zeros((sample_idx_flat.size, n_ops), dtype=X_base.dtype)
-            onehot[np.arange(sample_idx_flat.size), op_idx_flat] = 1
-            X_stacked = np.concatenate([X_repeated, onehot], axis=1)
+            n_pairs = sample_idx_flat.size
 
-            # ONE predict call covers every eligible (sample, op) pair.
-            preds = np.asarray(model.predict(X_stacked))
+            if chunk_size is not None and chunk_size <= 0:
+                raise DataValidationError(
+                    f"chunk_size must be positive, got {chunk_size}"
+                )
+
+            def _stack_and_predict(s_idx: np.ndarray, o_idx: np.ndarray) -> np.ndarray:
+                # Build [X_base[sample] | one_hot(op)] for this block of pairs.
+                X_repeated = X_base[s_idx]
+                onehot = np.zeros((s_idx.size, n_ops), dtype=X_base.dtype)
+                onehot[np.arange(s_idx.size), o_idx] = 1
+                X_stacked = np.concatenate([X_repeated, onehot], axis=1)
+                return np.asarray(model.predict(X_stacked))
+
+            if chunk_size is None or chunk_size >= n_pairs:
+                # Single stacked allocation — the unchanged fast path.
+                preds = _stack_and_predict(sample_idx_flat, op_idx_flat)
+            else:
+                # Memory-bounded path (#210): predict in row-blocks and scatter
+                # into a preallocated vector. Pairs are processed in the same
+                # row-major order, so ``preds`` is identical to the single-shot
+                # array and all downstream handling below is unchanged.
+                preds = np.empty(n_pairs, dtype=np.float64)
+                for start in range(0, n_pairs, chunk_size):
+                    stop = min(start + chunk_size, n_pairs)
+                    preds[start:stop] = _stack_and_predict(
+                        sample_idx_flat[start:stop], op_idx_flat[start:stop]
+                    )
+
             if not np.all(np.isfinite(preds)):
                 bad = int(np.argmax(~np.isfinite(preds)))
                 raise PolicyInductionError(
@@ -1650,6 +1720,7 @@ def block_bootstrap_ci(
     block_len: int | None = None,
     alpha: float = 0.05,
     random_state: int = 0,
+    n_jobs: int = 1,
 ) -> tuple[float, float]:
     """Compute confidence interval using moving-block bootstrap.
 
@@ -1669,6 +1740,13 @@ def block_bootstrap_ci(
         Significance level (1-alpha confidence).
     random_state : int, default=0
         Random seed.
+    n_jobs : int, default=1
+        Number of joblib workers for the bootstrap replicates (#178). Each
+        replicate draws from an **independent** child of
+        ``np.random.SeedSequence(random_state)``, so the returned interval is
+        deterministic for a given ``random_state`` *regardless* of ``n_jobs``
+        — running serial (``n_jobs=1``) and parallel produces bit-identical
+        CIs. ``-1`` uses all available cores.
 
     Returns
     -------
@@ -1692,7 +1770,6 @@ def block_bootstrap_ci(
     if n_boot <= 0:
         raise ValueError(f"n_boot must be positive, got {n_boot}")
 
-    rng = np.random.RandomState(random_state)
     n = len(values_num)
 
     if block_len is None:
@@ -1700,37 +1777,117 @@ def block_bootstrap_ci(
 
     # Ensure block_len doesn't exceed data length
     block_len = min(block_len, n)
+    n_blocks = int(np.ceil(n / block_len))
 
-    bootstrap_stats_list: list[float] = []
+    # One independent, order-stable RNG per replicate. Spawning from a single
+    # SeedSequence decouples the result from execution order, so parallel and
+    # serial runs agree exactly and the CI stays reproducible under any
+    # ``n_jobs`` (#178).
+    seeds = np.random.SeedSequence(random_state).spawn(n_boot)
 
-    for _ in range(n_boot):
-        # Generate block bootstrap sample
-        n_blocks = int(np.ceil(n / block_len))
-        boot_indices: list[int] = []
+    def _replicate(seed: "np.random.SeedSequence") -> float:
+        rng = np.random.default_rng(seed)
+        # Moving-block resample: n_blocks blocks, each a contiguous run of up to
+        # block_len rows starting at a random offset, concatenated and trimmed
+        # to the original length.
+        starts = rng.integers(0, n - block_len + 1, size=n_blocks)
+        boot_indices = np.concatenate(
+            [np.arange(s, min(s + block_len, n)) for s in starts]
+        )[:n]
 
-        for _ in range(n_blocks):
-            start_idx = rng.randint(0, n - block_len + 1)
-            boot_indices.extend(range(start_idx, min(start_idx + block_len, n)))
-
-        boot_indices = boot_indices[:n]  # Trim to original length
-
-        # Compute bootstrap statistic
         boot_num = values_num[boot_indices]
         if values_den is not None:
             boot_den = values_den[boot_indices]
-            boot_stat = boot_num.sum() / boot_den.sum() if boot_den.sum() > 0 else 0.0
-        else:
-            boot_stat = boot_num.mean()
+            den_sum = boot_den.sum()
+            return float(boot_num.sum() / den_sum) if den_sum > 0 else 0.0
+        return float(boot_num.mean())
 
-        bootstrap_stats_list.append(boot_stat)
-
-    bootstrap_stats = np.array(bootstrap_stats_list)
+    if n_jobs == 1:
+        bootstrap_stats = np.array([_replicate(s) for s in seeds])
+    else:
+        # Threads: the per-replicate work is numpy indexing / reductions that
+        # release the GIL, so we avoid pickling the (shared, read-only) value
+        # arrays to worker processes.
+        bootstrap_stats = np.array(
+            Parallel(n_jobs=n_jobs, prefer="threads")(
+                delayed(_replicate)(s) for s in seeds
+            )
+        )
 
     # Compute percentile confidence interval
     ci_lower = np.percentile(bootstrap_stats, 100 * alpha / 2)
     ci_upper = np.percentile(bootstrap_stats, 100 * (1 - alpha / 2))
 
     return float(ci_lower), float(ci_upper)
+
+
+def _requires_overlap_precheck(
+    design: "Design",
+    *,
+    random_state: int,
+    overlap_floor: float,
+    min_match_rate: float,
+) -> None:
+    """Cheap positivity/overlap gate run *before* the expensive nuisance fit.
+
+    Estimates a coarse propensity with a single (un-cross-fitted, uncalibrated)
+    :class:`~sklearn.linear_model.LogisticRegression` and inspects the logged
+    data's own support: the eligibility match rate and the smallest estimated
+    probability of an observed action. When either is below its floor the logs
+    cannot support *any* candidate policy, so we raise
+    :class:`InsufficientOverlapError` immediately instead of paying for
+    cross-fitting and the per-model bootstrap (#206).
+
+    This is a fast-fail guard, not the authoritative diagnostic — the full
+    ``support_health`` / ``gate_diagnostics`` path on the returned artifact
+    remains the source of truth for borderline cases.
+    """
+    A = design.A.astype(int)
+    elig = design.elig
+    n = len(A)
+
+    # Match rate: fraction of rows whose observed action is eligible — the
+    # overlap set the DR estimator can actually use.
+    matched = elig[np.arange(n), A] == 1
+    match_rate = float(matched.mean()) if n else 0.0
+    if match_rate < min_match_rate:
+        raise InsufficientOverlapError(
+            f"Overlap precheck failed: only {match_rate:.1%} of rows have their "
+            f"observed action marked eligible (min_match_rate={min_match_rate:.1%}). "
+            "The logged data does not overlap the candidate policies enough for "
+            "off-policy evaluation. Fix eligibility/action encoding or supply "
+            "logs with adequate support."
+        )
+
+    # Coarse, single-shot propensity: skip when there is only one observed
+    # action (the downstream estimator raises a clearer 'need >=2 actions').
+    if len(np.unique(A)) < 2:  # noqa: PLR2004
+        return
+    try:
+        clf = LogisticRegression(random_state=random_state, max_iter=1000)
+        clf.fit(design.X_phi, A)
+        proba = clf.predict_proba(design.X_phi)
+        class_to_col = {int(c): i for i, c in enumerate(clf.classes_)}
+        obs_cols = np.array([class_to_col.get(int(a), -1) for a in A])
+        seen = obs_cols >= 0
+        if not seen.any():
+            return
+        pi_obs = proba[np.arange(n)[seen], obs_cols[seen]]
+        min_pscore = float(pi_obs.min())
+    except (ValueError, RuntimeError):
+        # A failed coarse fit is not itself evidence of no overlap; defer to the
+        # full path rather than raising a misleading precheck error.
+        return
+
+    if min_pscore < overlap_floor:
+        raise InsufficientOverlapError(
+            f"Overlap precheck failed: smallest estimated propensity of an "
+            f"observed action is {min_pscore:.2e} (overlap_floor={overlap_floor:.2e}). "
+            "Some logged actions are taken in regions where they are essentially "
+            "never chosen, so importance weights would be unbounded and no OPE "
+            "method can rescue the estimate. Trim those rows or collect logs with "
+            "better positivity."
+        )
 
 
 def evaluate_sklearn_models(
@@ -1761,6 +1918,12 @@ def evaluate_sklearn_models(
     mips_kernel: "str | Callable[[np.ndarray], np.ndarray]" = "rbf",
     tracker: "Tracker | None" = None,
     baseline: float | str | None = None,
+    n_jobs: int = 1,
+    execution_mode: Literal["auto", "standard", "large_data"] = "auto",
+    chunk_size: int = 100_000,
+    requires_overlap: bool = False,
+    overlap_floor: float = 1e-3,
+    min_match_rate: float = 0.05,
 ) -> "EvaluationArtifact":
     """Evaluate sklearn models using DR and SNDR estimators.
 
@@ -1836,6 +1999,37 @@ def evaluate_sklearn_models(
     mips_bandwidth : float, default=1.0
         Gaussian-kernel bandwidth for the MIPS embedding marginal. Used only
         for ``"MIPS"``.
+    n_jobs : int, default=1
+        Number of parallel workers (#178). Applies to three independent axes:
+        the candidate-model loop, the cross-fitting folds of the propensity and
+        outcome nuisances, and the bootstrap replicates when ``ci_bootstrap=
+        True``. Results are deterministic and **independent of ``n_jobs``** (the
+        bootstrap reseeds per replicate), so a parallel run reproduces the
+        serial numbers exactly. ``1`` (default) runs serially; ``-1`` uses all
+        cores. joblib's thread backend is used, so candidate models are still
+        fit in place.
+    execution_mode : {"auto", "standard", "large_data"}, default="auto"
+        Memory profile of policy induction (#210). ``"large_data"`` builds and
+        predicts the stacked induction feature matrix in ``chunk_size`` blocks,
+        bounding peak memory on large logs; it is **numerically identical** to
+        ``"standard"`` (parity-tested to <1e-10). ``"auto"`` selects
+        ``"large_data"`` once ``len(logs)`` reaches
+        :data:`skdr_eval.pairwise.LARGE_DATA_ROW_THRESHOLD`, else ``"standard"``.
+    chunk_size : int, default=100_000
+        Maximum number of eligible (sample, operator) pairs materialised at once
+        during chunked induction (``execution_mode="large_data"``). Ignored in
+        ``"standard"`` mode.
+    requires_overlap : bool, default=False
+        When True, run a cheap positivity/overlap precheck on the evaluation
+        slice *before* the expensive cross-fitting and bootstrap, raising
+        :class:`InsufficientOverlapError` if the logs cannot support OPE at all
+        (#206). Off by default so existing callers are unaffected.
+    overlap_floor : float, default=1e-3
+        Smallest coarse propensity of an observed action tolerated by the
+        precheck. Only consulted when ``requires_overlap=True``.
+    min_match_rate : float, default=0.05
+        Smallest eligibility match rate tolerated by the precheck. Only
+        consulted when ``requires_overlap=True``.
 
     Returns
     -------
@@ -1874,8 +2068,29 @@ def evaluate_sklearn_models(
             f"Unknown policy_train: {policy_train!r}. Must be 'all' or 'pre_split'"
         )
 
+    if n_jobs == 0:
+        raise ValueError("n_jobs must be non-zero (1 = serial, -1 = all cores)")
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be positive, got {chunk_size}")
+    if execution_mode not in ("auto", "standard", "large_data"):
+        raise ValueError(
+            f"Unknown execution_mode: {execution_mode!r}. "
+            "Must be 'auto', 'standard', or 'large_data'."
+        )
+
     # Build design
     design = build_design(logs, y_col=y_col)
+
+    # Resolve execution_mode (#210). "auto" switches to the memory-bounded
+    # chunked induction once the log is large; "large_data" forces it. The
+    # chunked path is numerically identical, so induction_chunk_size is the only
+    # thing that changes downstream.
+    resolved_execution_mode = execution_mode
+    if execution_mode == "auto":
+        resolved_execution_mode = (
+            "large_data" if len(logs) >= LARGE_DATA_ROW_THRESHOLD else "standard"
+        )
+    induction_chunk_size = chunk_size if resolved_execution_mode == "large_data" else None
 
     # Resolve a column-name embedding to an action-level array up front (#136),
     # using the full design so every action's embedding is covered.
@@ -1929,6 +2144,18 @@ def evaluate_sklearn_models(
             f"disable keep_contributions.",
         )
 
+    # Fast-fail overlap precheck (#206): run the cheap positivity gate before
+    # the expensive cross-fitting + bootstrap so hopeless logs abort in
+    # ~one logistic fit instead of the full pipeline. Opt-in via
+    # requires_overlap=True.
+    if requires_overlap:
+        _requires_overlap_precheck(
+            eval_design,
+            random_state=random_state,
+            overlap_floor=overlap_floor,
+            min_match_rate=min_match_rate,
+        )
+
     # Fit propensity + outcome models on the evaluation slice. When
     # policy_train="pre_split", the slice is only (1 - policy_train_frac) of
     # the input, so a too-small-data failure reports the post-split count and
@@ -1944,6 +2171,7 @@ def evaluate_sklearn_models(
             gap=gap,
             test_size=test_size,
             max_train_size=max_train_size,
+            n_jobs=n_jobs,
         )
 
         # Fit outcome model
@@ -1956,6 +2184,7 @@ def evaluate_sklearn_models(
             gap=gap,
             test_size=test_size,
             max_train_size=max_train_size,
+            n_jobs=n_jobs,
         )
     except InsufficientDataError as exc:
         if policy_train == "pre_split":
@@ -1968,21 +2197,31 @@ def evaluate_sklearn_models(
             ) from exc
         raise
 
-    # Evaluate each model
-    report_rows = []
-    detailed_results = {}
+    # Evaluate each model. The per-model work (induction → DR/SNDR → strategy
+    # estimators → optional bootstrap) is independent across models, so it can
+    # run in parallel (#178). To avoid nested oversubscription we hand n_jobs to
+    # whichever axis dominates: the model loop when there are several models, or
+    # the inner bootstrap when there is a single model.
+    model_n_jobs = n_jobs if len(models) > 1 else 1
+    bootstrap_n_jobs = n_jobs if len(models) == 1 else 1
 
-    for model_name, model in models.items():
+    def _evaluate_one_model(
+        model_name: str, model: Any
+    ) -> tuple[str, dict[str, "DRResult"], list[dict[str, Any]]]:
+        rows: list[dict[str, Any]] = []
         if fit_models:
             # Fit model on training data
             model.fit(train_design.X_obs, train_design.Y)
 
-        # Induce policy
+        # Induce policy. ``induction_chunk_size`` is None in standard mode and
+        # the configured chunk in large_data mode (#210) — both give the same
+        # policy_probs.
         policy_probs = induce_policy_from_sklearn(
             model,
             eval_design.X_base,
             eval_design.ops_all,
             eval_design.elig,
+            chunk_size=induction_chunk_size,
         )
 
         # Compute DR/SNDR values
@@ -2024,8 +2263,6 @@ def evaluate_sklearn_models(
             max_train_size=max_train_size,
         )
         results.update(extras)
-
-        detailed_results[model_name] = results
 
         # Attach per-decision contributions (#92). Opt-in only; does not
         # interact with the ci_bootstrap path, which uses its own local
@@ -2083,7 +2320,7 @@ def evaluate_sklearn_models(
                     )
                     row["ci_lower"] = ci_lower
                     row["ci_upper"] = ci_upper
-                    report_rows.append(row)
+                    rows.append(row)
                     continue
                 # Use proper block bootstrap for time-series data
                 try:
@@ -2121,6 +2358,7 @@ def evaluate_sklearn_models(
                             n_boot=400,
                             alpha=alpha,
                             random_state=random_state,
+                            n_jobs=bootstrap_n_jobs,
                         )
                     else:
                         # Fallback if no matched samples
@@ -2139,7 +2377,25 @@ def evaluate_sklearn_models(
                 row["ci_lower"] = ci_lower
                 row["ci_upper"] = ci_upper
 
-            report_rows.append(row)
+            rows.append(row)
+
+        return model_name, results, rows
+
+    # Run the per-model evaluations (serial or threaded) and reassemble in the
+    # caller's model order so the report is deterministic regardless of n_jobs.
+    model_items = list(models.items())
+    if model_n_jobs == 1:
+        computed = [_evaluate_one_model(name, mdl) for name, mdl in model_items]
+    else:
+        computed = Parallel(n_jobs=model_n_jobs, prefer="threads")(
+            delayed(_evaluate_one_model)(name, mdl) for name, mdl in model_items
+        )
+
+    report_rows = []
+    detailed_results = {}
+    for model_name, results, rows in computed:
+        detailed_results[model_name] = results
+        report_rows.extend(rows)
 
     report = pd.DataFrame(report_rows)
 
@@ -2164,6 +2420,9 @@ def evaluate_sklearn_models(
             "clip_grid": [None if not np.isfinite(c) else float(c) for c in clip_grid],
             "ci_bootstrap": bool(ci_bootstrap),
             "estimators": list(estimators),
+            "n_jobs": int(n_jobs),
+            "execution_mode": resolved_execution_mode,
+            "requires_overlap": bool(requires_overlap),
         },
         baseline_kind=baseline_kind,
         baseline_value=baseline_value,
@@ -2717,9 +2976,17 @@ def evaluate_pairwise_models(
     use_external = external_policies is not None
     if not use_external:
         validate_models_dict(models)
-    # Accept polars / pyarrow frames at the boundary; convert once (#72).
+    # Accept polars / pyarrow frames at the boundary; convert once (#72, #236).
+    # Every user-supplied frame on the pairwise path — including the external
+    # policy tables — flows through the single ``coerce_to_pandas`` seam so the
+    # downstream NumPy code only ever sees pandas.
     logs_df = coerce_to_pandas(logs_df, name="logs_df")
     op_daily_df = coerce_to_pandas(op_daily_df, name="op_daily_df")
+    if external_policies is not None:
+        external_policies = {
+            name: coerce_to_pandas(frame, name=f"external_policies[{name!r}]")
+            for name, frame in external_policies.items()
+        }
     if execution_mode not in ("auto", "standard", "large_data"):
         raise ValueError(
             f"Unknown execution_mode: {execution_mode}. "
