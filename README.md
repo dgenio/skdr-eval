@@ -5,6 +5,7 @@
 [![CI](https://github.com/dgenio/skdr-eval/workflows/CI/badge.svg)](https://github.com/dgenio/skdr-eval/actions)
 [![Coverage](https://codecov.io/gh/dgenio/skdr-eval/branch/main/graph/badge.svg)](https://codecov.io/gh/dgenio/skdr-eval)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Read the Weaver Stack overview on Towards AI](https://img.shields.io/badge/Read_the_overview-Towards_AI-black?logo=medium&logoColor=white)](https://pub.towardsai.net/the-weaver-stack-one-contract-layer-for-safe-llm-agents-7f733cad5eac)
 
 **You trained a better recommender, routing model, treatment rule, or targeting
 policy. Offline metrics look good — but deploying it directly is risky.**
