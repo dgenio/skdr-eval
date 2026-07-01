@@ -132,7 +132,14 @@ def simulate_autoscaling_scenario(
     """
     # Imported here to avoid a circular import (core imports reporting which is
     # heavy); scenarios is a thin layer over core.
+    from ._frames import coerce_to_pandas  # noqa: PLC0415
     from .core import evaluate_pairwise_models  # noqa: PLC0415
+
+    # Route user frames through the single conversion seam (#236) so the
+    # scenario rewrites below — and the eventual evaluate_pairwise_models call —
+    # uniformly accept polars / pyarrow inputs.
+    logs_df = coerce_to_pandas(logs_df, name="logs_df")
+    op_daily_df = coerce_to_pandas(op_daily_df, name="op_daily_df")
 
     unknown = set(scenario) - _SUPPORTED_KNOBS
     if unknown:
