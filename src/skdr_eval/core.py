@@ -444,6 +444,17 @@ def build_design(
         raise DataValidationError(f"Error building design: {e!s}") from e
 
 
+def _check_n_jobs(n_jobs: int) -> None:
+    """Validate a joblib ``n_jobs`` before it reaches :class:`joblib.Parallel`.
+
+    joblib rejects ``0`` with an opaque error; skdr-eval fails loudly with a
+    clear message instead (#178 review). ``1`` is serial, ``-1`` uses all
+    cores, and other negatives follow joblib's ``n_cpus + 1 + n_jobs`` rule.
+    """
+    if n_jobs == 0:
+        raise ValueError("n_jobs must be non-zero (1 = serial, -1 = all cores)")
+
+
 def fit_propensity_timecal(
     X_phi: np.ndarray,
     A: np.ndarray,
@@ -502,6 +513,9 @@ def fit_propensity_timecal(
     ConvergenceError
         If optimization fails to converge
     """
+    # Validate n_jobs outside the try so the message isn't rewrapped as a
+    # PropensityScoreError (#178 review).
+    _check_n_jobs(n_jobs)
     try:
         # Validate inputs
         validate_numpy_array(X_phi, "X_phi", min_size=1)
@@ -744,6 +758,9 @@ def fit_outcome_crossfit(
     ModelValidationError
         If estimator is invalid
     """
+    # Validate n_jobs outside the try so the message isn't rewrapped as an
+    # OutcomeModelError (#178 review).
+    _check_n_jobs(n_jobs)
     try:
         # Validate inputs
         validate_numpy_array(X_obs, "X_obs", min_size=1)
@@ -1770,6 +1787,8 @@ def block_bootstrap_ci(
     if n_boot <= 0:
         raise ValueError(f"n_boot must be positive, got {n_boot}")
 
+    _check_n_jobs(n_jobs)
+
     n = len(values_num)
 
     if block_len is None:
@@ -2068,8 +2087,7 @@ def evaluate_sklearn_models(
             f"Unknown policy_train: {policy_train!r}. Must be 'all' or 'pre_split'"
         )
 
-    if n_jobs == 0:
-        raise ValueError("n_jobs must be non-zero (1 = serial, -1 = all cores)")
+    _check_n_jobs(n_jobs)
     if chunk_size <= 0:
         raise ValueError(f"chunk_size must be positive, got {chunk_size}")
     if execution_mode not in ("auto", "standard", "large_data"):
@@ -2077,6 +2095,12 @@ def evaluate_sklearn_models(
             f"Unknown execution_mode: {execution_mode!r}. "
             "Must be 'auto', 'standard', or 'large_data'."
         )
+    # Overlap-precheck thresholds are probabilities/fractions; reject values
+    # that would make the gate meaningless (#206 review). NaN fails both.
+    if not 0.0 < overlap_floor <= 1.0:
+        raise ValueError(f"overlap_floor must be in (0, 1], got {overlap_floor}")
+    if not 0.0 <= min_match_rate <= 1.0:
+        raise ValueError(f"min_match_rate must be in [0, 1], got {min_match_rate}")
 
     # Build design
     design = build_design(logs, y_col=y_col)
@@ -2386,6 +2410,21 @@ def evaluate_sklearn_models(
     # Run the per-model evaluations (serial or threaded) and reassemble in the
     # caller's model order so the report is deterministic regardless of n_jobs.
     model_items = list(models.items())
+    # Threaded fitting mutates each estimator in place, so two keys pointing at
+    # the *same* instance would race under n_jobs != 1 and yield nondeterministic
+    # results — serial is unaffected. Fail fast with a clear message (#178 review).
+    if model_n_jobs != 1 and fit_models:
+        first_seen: dict[int, str] = {}
+        for name, mdl in model_items:
+            prior = first_seen.get(id(mdl))
+            if prior is not None:
+                raise DataValidationError(
+                    f"models[{name!r}] and models[{prior!r}] are the same "
+                    "estimator instance; parallel fitting (n_jobs != 1, "
+                    "fit_models=True) would race on the shared object. Pass "
+                    "distinct instances (e.g. via sklearn.clone) or use n_jobs=1."
+                )
+            first_seen[id(mdl)] = name
     if model_n_jobs == 1:
         computed = [_evaluate_one_model(name, mdl) for name, mdl in model_items]
     else:

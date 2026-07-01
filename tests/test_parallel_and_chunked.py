@@ -306,3 +306,77 @@ def test_induce_rejects_nonpositive_chunk_size() -> None:
         induce_policy_from_sklearn(
             model, design.X_base, design.ops_all, design.elig, chunk_size=0
         )
+
+
+# --------------------------------------------------------------------------- #
+# Input-validation hardening (Copilot review on #265)                         #
+# --------------------------------------------------------------------------- #
+def test_evaluate_rejects_zero_n_jobs() -> None:
+    logs, _ops, _q = make_synth_logs(n=200, n_ops=3, seed=1)
+    with pytest.raises(ValueError, match="n_jobs must be non-zero"):
+        evaluate_sklearn_models(
+            logs, {"ridge": Ridge()}, policy_train="pre_split", n_jobs=0
+        )
+
+
+@pytest.mark.parametrize("fn_name", ["fit_propensity_timecal", "fit_outcome_crossfit"])
+def test_fit_crossfitters_reject_zero_n_jobs(fn_name: str) -> None:
+    logs, _ops, _q = make_synth_logs(n=200, n_ops=3, seed=1)
+    design = build_design(logs, y_col="service_time")
+    with pytest.raises(ValueError, match="n_jobs must be non-zero"):
+        if fn_name == "fit_propensity_timecal":
+            core.fit_propensity_timecal(design.X_phi, design.A, design.ts, n_jobs=0)
+        else:
+            core.fit_outcome_crossfit(design.X_obs, design.Y, n_jobs=0)
+
+
+def test_block_bootstrap_ci_rejects_zero_n_jobs() -> None:
+    values = np.linspace(0.0, 1.0, 50)
+    with pytest.raises(ValueError, match="n_jobs must be non-zero"):
+        core.block_bootstrap_ci(values, None, values.mean(), n_jobs=0)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"overlap_floor": 0.0}, "overlap_floor"),
+        ({"overlap_floor": 1.5}, "overlap_floor"),
+        ({"min_match_rate": -0.1}, "min_match_rate"),
+        ({"min_match_rate": 1.1}, "min_match_rate"),
+    ],
+)
+def test_evaluate_rejects_out_of_range_overlap_thresholds(kwargs, match) -> None:
+    logs, _ops, _q = make_synth_logs(n=200, n_ops=3, seed=1)
+    with pytest.raises(ValueError, match=match):
+        evaluate_sklearn_models(
+            logs, {"ridge": Ridge()}, policy_train="pre_split", **kwargs
+        )
+
+
+def test_shared_estimator_instance_fails_fast_under_parallel_fit() -> None:
+    # The same object under two keys + threaded in-place fitting would race
+    # (#178 review); the guard must reject it before dispatching workers.
+    logs, _ops, _q = make_synth_logs(n=600, n_ops=3, seed=2)
+    shared = Ridge()
+    with pytest.raises(DataValidationError, match="same estimator instance"):
+        evaluate_sklearn_models(
+            logs,
+            {"a": shared, "b": shared},
+            policy_train="pre_split",
+            fit_models=True,
+            n_jobs=2,
+        )
+
+
+def test_shared_estimator_instance_allowed_when_serial() -> None:
+    # Serial fitting is deterministic even with a shared object, so no guard.
+    logs, _ops, _q = make_synth_logs(n=600, n_ops=3, seed=2)
+    shared = Ridge()
+    artifact = evaluate_sklearn_models(
+        logs,
+        {"a": shared, "b": shared},
+        policy_train="pre_split",
+        fit_models=True,
+        n_jobs=1,
+    )
+    assert not artifact.report.empty
