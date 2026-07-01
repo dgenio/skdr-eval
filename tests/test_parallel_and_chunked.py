@@ -20,6 +20,8 @@ from sklearn.linear_model import Ridge
 
 from skdr_eval import core, make_pairwise_synth, simulate_autoscaling_scenario
 from skdr_eval.core import (
+    Design,
+    _requires_overlap_precheck,
     build_design,
     evaluate_sklearn_models,
     induce_policy_from_sklearn,
@@ -176,6 +178,72 @@ def test_precheck_fails_fast_when_no_eligibility() -> None:
         evaluate_sklearn_models(
             bad, {"ridge": Ridge()}, policy_train="pre_split", requires_overlap=True
         )
+
+
+def test_precheck_fails_fast_on_poor_propensity_overlap() -> None:
+    # Healthy eligibility (match rate passes) but an aggressive overlap_floor
+    # forces the propensity-floor branch: the smallest estimated propensity of
+    # an observed action falls below the floor, so the gate fires.
+    logs, _ops, _q = make_synth_logs(n=900, n_ops=4, seed=5)
+    with pytest.raises(InsufficientOverlapError, match="propensity"):
+        evaluate_sklearn_models(
+            logs,
+            {"ridge": Ridge()},
+            policy_train="pre_split",
+            requires_overlap=True,
+            overlap_floor=0.99,
+        )
+
+
+def test_precheck_skips_coarse_fit_when_single_action() -> None:
+    # <2 observed actions: the precheck returns before the coarse propensity fit
+    # (the downstream estimator raises the clearer 'need >=2 actions').
+    logs, _ops, _q = make_synth_logs(n=300, n_ops=3, seed=4)
+    d = build_design(logs, y_col="service_time")
+    n = len(d.A)
+    single = Design(
+        X_base=d.X_base,
+        X_obs=d.X_obs,
+        X_phi=d.X_phi,
+        A=np.zeros(n, dtype=d.A.dtype),  # one observed action
+        Y=d.Y,
+        ts=d.ts,
+        ops_all=d.ops_all,
+        elig=np.ones_like(d.elig),  # match_rate = 1.0, so the gate is reached
+        idx=d.idx,
+    )
+    assert (
+        _requires_overlap_precheck(
+            single, random_state=0, overlap_floor=1e-3, min_match_rate=0.05
+        )
+        is None
+    )
+
+
+def test_precheck_defers_when_coarse_fit_fails() -> None:
+    # A degenerate coarse fit (NaN feature) is not evidence of no overlap: the
+    # precheck swallows the error and defers to the full path rather than raising.
+    logs, _ops, _q = make_synth_logs(n=300, n_ops=3, seed=4)
+    d = build_design(logs, y_col="service_time")
+    x_phi_bad = d.X_phi.copy()
+    x_phi_bad[0, 0] = np.nan  # LogisticRegression.fit raises ValueError on NaN
+    bad = Design(
+        X_base=d.X_base,
+        X_obs=d.X_obs,
+        X_phi=x_phi_bad,
+        A=d.A,
+        Y=d.Y,
+        ts=d.ts,
+        ops_all=d.ops_all,
+        elig=np.ones_like(d.elig),  # match_rate passes; the fit is what fails
+        idx=d.idx,
+    )
+    assert (
+        _requires_overlap_precheck(
+            bad, random_state=0, overlap_floor=1e-3, min_match_rate=0.05
+        )
+        is None
+    )
 
 
 def test_precheck_is_off_by_default() -> None:
