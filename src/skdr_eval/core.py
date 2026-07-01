@@ -1889,7 +1889,10 @@ def _requires_overlap_precheck(
         class_to_col = {int(c): i for i, c in enumerate(clf.classes_)}
         obs_cols = np.array([class_to_col.get(int(a), -1) for a in A])
         seen = obs_cols >= 0
-        if not seen.any():
+        # Defensive: ``clf`` is fit on ``A``, so every observed action maps to a
+        # column and ``seen`` is always all-True here — but keep the guard so a
+        # future change to the coarse fit can't index with -1.
+        if not seen.any():  # pragma: no cover
             return
         pi_obs = proba[np.arange(n)[seen], obs_cols[seen]]
         min_pscore = float(pi_obs.min())
