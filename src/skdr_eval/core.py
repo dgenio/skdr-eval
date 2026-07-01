@@ -2090,7 +2090,9 @@ def evaluate_sklearn_models(
         resolved_execution_mode = (
             "large_data" if len(logs) >= LARGE_DATA_ROW_THRESHOLD else "standard"
         )
-    induction_chunk_size = chunk_size if resolved_execution_mode == "large_data" else None
+    induction_chunk_size = (
+        chunk_size if resolved_execution_mode == "large_data" else None
+    )
 
     # Resolve a column-name embedding to an action-level array up front (#136),
     # using the full design so every action's embedding is covered.
