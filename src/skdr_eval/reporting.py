@@ -594,6 +594,128 @@ class _ReportRowSchema(BaseModel):
     pareto_k: float | None = None
 
 
+class ReportRow(BaseModel):
+    """Typed, public view of one ``EvaluationArtifact.report`` row (#234).
+
+    A thin, generated projection of the headline report DataFrame so downstream
+    code can read results by attribute (``row.V_hat``) instead of by string
+    column name (``report["V_hat"]``). Built by
+    :meth:`EvaluationArtifact.rows` / :meth:`EvaluationArtifact.row`; the
+    DataFrame remains the source of truth and stays available unchanged.
+
+    ``verdict`` / ``confidence`` mirror the :class:`Recommendation` for the row
+    (``None`` when a recommendation could not be computed — e.g. no CI). Every
+    numeric field is ``float | None`` for the same non-finite-→-``null`` reason
+    documented on :class:`_ReportRowSchema`. ``extra="allow"`` keeps
+    forward-added report columns (e.g. ``delta_V_hat``) accessible.
+    """
+
+    model_config = ConfigDict(extra="allow", protected_namespaces=())
+
+    model: str
+    estimator: str
+    V_hat: float | None = None
+    SE_if: float | None = None
+    clip: float | None = None
+    ESS: float | None = None
+    tail_mass: float | None = None
+    MSE_est: float | None = None
+    match_rate: float | None = None
+    min_pscore: float | None = None
+    pscore_q10: float | None = None
+    pscore_q05: float | None = None
+    pscore_q01: float | None = None
+    pareto_k: float | None = None
+    ci_lower: float | None = None
+    ci_upper: float | None = None
+    support_health: str | None = None
+    diagnostic_warnings: str | None = None
+    verdict: str | None = None
+    confidence: str | None = None
+
+
+# Verdict ordering for regression detection (#184). Higher is a *better*
+# deployment posture. ``do_not_deploy`` and ``insufficient_evidence`` are both
+# non-deployable; ``insufficient_evidence`` ranks above ``do_not_deploy`` since
+# "we can't tell yet" is a less adverse finding than "we can tell, and no".
+_VERDICT_RANK: dict[str, int] = {
+    "do_not_deploy": 0,
+    "insufficient_evidence": 1,
+    "ab_test": 2,
+    "deploy": 3,
+}
+
+
+class ArtifactRowDiff(BaseModel):
+    """Per-``(model, estimator)`` difference between two artifacts (#184)."""
+
+    model_config = ConfigDict(extra="allow", protected_namespaces=())
+
+    model: str
+    estimator: str
+    status: str  # "added" | "removed" | "changed" | "unchanged"
+    V_hat_before: float | None = None
+    V_hat_after: float | None = None
+    delta_V_hat: float | None = None
+    ci_lower_before: float | None = None
+    ci_lower_after: float | None = None
+    ci_upper_before: float | None = None
+    ci_upper_after: float | None = None
+    verdict_before: str | None = None
+    verdict_after: str | None = None
+    support_health_before: str | None = None
+    support_health_after: str | None = None
+    added_warnings: list[str] = Field(default_factory=list)
+    removed_warnings: list[str] = Field(default_factory=list)
+    verdict_regressed: bool = False
+
+
+class ArtifactDiff(BaseModel):
+    """Structured diff of two :class:`EvaluationArtifact` runs (#184).
+
+    Produced by :meth:`EvaluationArtifact.compare` / :func:`compare_artifacts`.
+    Aligns rows by ``(model, estimator)`` and records per-row value deltas,
+    support-health transitions, warning-code changes, and verdict flips. A
+    numeric delta whose magnitude is below ``epsilon`` is treated as unchanged
+    so float jitter does not spam the diff.
+    """
+
+    model_config = ConfigDict(extra="allow", protected_namespaces=())
+
+    rows: list[ArtifactRowDiff] = Field(default_factory=list)
+    verdict_regressed: bool = False
+
+    def to_markdown(self) -> str:
+        """Render the diff as a copy-pasteable Markdown table for PRs (#184)."""
+
+        def _fmt(v: float | None) -> str:
+            return _fmt_num(v)
+
+        lines = [
+            "| Model | Estimator | Status | V̂ before | V̂ after | ΔV̂ "
+            "| Verdict before | Verdict after | Regressed |",
+            "| ----- | --------- | ------ | -------- | ------- | --- "
+            "| -------------- | ------------- | --------- |",
+        ]
+        for r in self.rows:
+            regressed = "⚠️ yes" if r.verdict_regressed else ""
+            lines.append(
+                f"| {r.model} | {r.estimator} | {r.status} "
+                f"| {_fmt(r.V_hat_before)} | {_fmt(r.V_hat_after)} "
+                f"| {_fmt(r.delta_V_hat)} "
+                f"| {r.verdict_before or '—'} | {r.verdict_after or '—'} "
+                f"| {regressed} |"
+            )
+        lines.append("")
+        overall = (
+            "⚠️ **A verdict regressed vs the baseline run.**"
+            if self.verdict_regressed
+            else "No verdict regression vs the baseline run."
+        )
+        lines.append(overall)
+        return "\n".join(lines)
+
+
 class _WarningRowSchema(BaseModel):
     model: str
     estimator: str
@@ -664,6 +786,18 @@ class ArtifactSchema(BaseModel):
     # the report row remain interpretable after a round trip.
     baseline_kind: str | None = None
     baseline_value: float | None = None
+
+    @classmethod
+    def json_schema(cls) -> dict[str, Any]:
+        """Return the Pydantic-generated JSON Schema for the artifact (#205).
+
+        The published, downloadable contract for the serialized
+        ``artifact.json`` — the sibling of :meth:`EvaluationCard.json_schema`.
+        Lets downstream tooling validate ``skdr-eval`` outputs without
+        importing the library.
+        """
+        schema: dict[str, Any] = cls.model_json_schema()
+        return schema
 
 
 # --------------------------------------------------------------------------- #
@@ -1511,6 +1645,61 @@ class EvaluationArtifact:
         return frame
 
     # ------------------------------------------------------------------ #
+    # Typed results façade (#234)                                         #
+    # ------------------------------------------------------------------ #
+
+    def _row_to_report_row(self, row: dict[str, Any]) -> ReportRow:
+        """Build one :class:`ReportRow`, filling verdict/confidence if possible."""
+        model_name = str(row["model"])
+        estimator = str(row["estimator"])
+        verdict: str | None = None
+        confidence: str | None = None
+        try:
+            rec = self.recommendation(model_name, estimator=estimator)
+            verdict = rec.verdict
+            confidence = rec.confidence
+        except (DataValidationError, KeyError, ValueError):
+            # A row whose verdict cannot be computed (e.g. no CI, or a thin
+            # artifact) still yields a typed row — verdict simply stays None.
+            pass
+        payload = {k: _jsonable(v) for k, v in row.items()}
+        payload["verdict"] = verdict
+        payload["confidence"] = confidence
+        return ReportRow(**payload)
+
+    def rows(self) -> list[ReportRow]:
+        """Return the headline report as a list of typed :class:`ReportRow` (#234).
+
+        A typed, attribute-addressable view of :attr:`report`; the DataFrame is
+        left untouched and remains the source of truth. Each row carries the
+        report columns plus the computed ``verdict``/``confidence`` (``None``
+        when a recommendation cannot be produced for that row).
+        """
+        return [
+            self._row_to_report_row(row)
+            for row in self.report.to_dict(orient="records")
+        ]
+
+    def row(self, model_name: str, estimator: str = "SNDR") -> ReportRow:
+        """Return the typed :class:`ReportRow` for one ``(model, estimator)`` (#234).
+
+        Raises
+        ------
+        DataValidationError
+            If no report row matches ``(model_name, estimator)``.
+        """
+        report = self.report
+        mask = (report["model"] == model_name) & (report["estimator"] == estimator)
+        matched = report[mask]
+        if matched.empty:
+            raise DataValidationError(
+                f"No report row for model={model_name!r}, estimator={estimator!r} "
+                f"(known estimators for this model: "
+                f"{sorted(report.loc[report['model'] == model_name, 'estimator'])}).",
+            )
+        return self._row_to_report_row(matched.iloc[0].to_dict())
+
+    # ------------------------------------------------------------------ #
     # Bulk export                                                         #
     # ------------------------------------------------------------------ #
 
@@ -1535,8 +1724,9 @@ class EvaluationArtifact:
             - Otherwise ``path`` is treated as a stem and ``.<fmt>`` is
               appended directly: ``"artifacts/run"`` produces
               ``artifacts/run.json`` and ``artifacts/run.html``.
-        formats : list of {"json", "html"}, optional
-            Defaults to both.
+        formats : list of {"json", "html", "markdown"}, optional
+            Defaults to ``["json", "html"]``. ``"markdown"`` writes the
+            compact :meth:`to_markdown` summary with a ``.md`` suffix (#237).
 
         Returns
         -------
@@ -1545,13 +1735,16 @@ class EvaluationArtifact:
         """
         if formats is None:
             formats = ["json", "html"]
-        supported = {"json", "html"}
+        supported = {"json", "html", "markdown"}
         unknown = set(formats) - supported
         if unknown:
             raise ConfigurationError(
                 f"Unknown export format(s): {sorted(unknown)} "
                 f"(supported: {sorted(supported)})",
             )
+        # ``markdown`` maps to a ``.md`` file suffix; other formats use the
+        # format name directly.
+        _suffix = {"markdown": "md"}
 
         p = Path(path)
         # Trailing-separator hint must be checked on the original string,
@@ -1563,19 +1756,442 @@ class EvaluationArtifact:
 
         written: dict[str, Path] = {}
         for fmt in formats:
-            if treat_as_dir:
-                target = p / f"artifact.{fmt}"
-            elif p.suffix:
-                target = p.with_suffix(f".{fmt}")
-            else:
-                target = p.with_suffix(f".{fmt}")
+            ext = _suffix.get(fmt, fmt)
+            target = p / f"artifact.{ext}" if treat_as_dir else p.with_suffix(f".{ext}")
             if fmt == "json":
                 # ``target`` is always a concrete path here, so to_json returns
                 # the written Path (never the str branch).
                 written["json"] = cast("Path", self.to_json(target))
             elif fmt == "html":
                 written["html"] = cast("Path", self.to_html(target))
+            elif fmt == "markdown":
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(self.to_markdown(), encoding="utf-8")
+                logger.info("Wrote evaluation artifact Markdown to %s", target)
+                written["markdown"] = target
         return written
+
+    # ------------------------------------------------------------------ #
+    # Markdown summary (#237)                                             #
+    # ------------------------------------------------------------------ #
+
+    def to_markdown(
+        self, model: str | None = None, *, estimator: str | None = None
+    ) -> str:
+        """Render a compact, paste-ready Markdown summary (#237).
+
+        Designed for PR descriptions, tickets, and chat, alongside the JSON /
+        HTML / card outputs. Deterministic and free of non-reproducible
+        content. Follows the same escaped-pipe table convention as
+        :meth:`skdr_eval.doctor.DoctorReport.to_markdown`.
+
+        Parameters
+        ----------
+        model : str, optional
+            Restrict to one model. ``None`` (default) summarizes every row.
+        estimator : str, optional
+            Restrict to one estimator (e.g. ``"SNDR"``). ``None`` includes all.
+
+        Returns
+        -------
+        str
+            A Markdown document: one headline table row per
+            ``(model, estimator)`` with V̂, CI, verdict, and key diagnostics.
+        """
+        selected = self.rows()
+        if model is not None:
+            selected = [r for r in selected if r.model == model]
+        if estimator is not None:
+            selected = [r for r in selected if r.estimator == estimator]
+
+        def _md(v: Any) -> str:
+            return _fmt_num(v).replace("|", "\\|")
+
+        def _ci(r: ReportRow) -> str:
+            if r.ci_lower is None or r.ci_upper is None:
+                return "—"
+            return f"[{_fmt_num(r.ci_lower)}, {_fmt_num(r.ci_upper)}]"
+
+        lines = [
+            "# skdr-eval evaluation summary",
+            "",
+            "| Model | Estimator | V̂ | CI | Verdict | Support | ESS | Pareto-k |",
+            "| ----- | --------- | -- | -- | ------- | ------- | --- | -------- |",
+        ]
+        for r in selected:
+            lines.append(
+                f"| {str(r.model).replace('|', chr(92) + '|')} "
+                f"| {r.estimator} | {_md(r.V_hat)} | {_ci(r)} "
+                f"| {r.verdict or '—'} | {r.support_health or '—'} "
+                f"| {_md(r.ESS)} | {_md(r.pareto_k)} |"
+            )
+        lines.append("")
+        lines.append(
+            "_Generated by [skdr-eval](https://github.com/dgenio/skdr-eval); "
+            "V̂ is the estimated policy value under the logged data. Read the "
+            "support column before acting on V̂._"
+        )
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------ #
+    # Decision summary (#238)                                            #
+    # ------------------------------------------------------------------ #
+
+    def decision_summary(
+        self,
+        model_name: str,
+        *,
+        estimator: str = "SNDR",
+        baseline: float | None = None,
+    ) -> dict[str, Any]:
+        """Combine value-delta and support-risk into one honest statement (#238).
+
+        Pairs the estimated value delta (candidate vs ``baseline``) with the
+        deployment verdict and support-health, so a stakeholder gets a single
+        readable line. Deliberately minimal: it reports the delta in the
+        artifact's native reward units and does **not** yet apply user-supplied
+        unit/volume scaling (tracked as follow-up work).
+
+        The summary stays honest under thin support: when ``support_health`` is
+        ``high_risk`` the text leads with the risk rather than the delta.
+
+        Parameters
+        ----------
+        model_name : str
+            Model present in :attr:`detailed`.
+        estimator : str, default ``"SNDR"``
+            Estimator row to summarize.
+        baseline : float or None
+            Baseline value the delta is measured against. When ``None``, falls
+            back to the artifact's configured ``baseline_value`` if set.
+
+        Returns
+        -------
+        dict
+            Keys: ``model``, ``estimator``, ``V_hat``, ``baseline``,
+            ``delta_vs_baseline``, ``ci_lower``, ``ci_upper``, ``verdict``,
+            ``support_health``, ``summary`` (the one-line statement).
+        """
+        r = self.row(model_name, estimator)
+        base = baseline if baseline is not None else self.baseline_value
+        delta = (r.V_hat - base) if (r.V_hat is not None and base is not None) else None
+        support = r.support_health
+        verdict = r.verdict
+
+        v_txt = _fmt_num(r.V_hat)
+        if delta is not None:
+            delta_txt = f"{'+' if delta >= 0 else ''}{_fmt_num(delta)} vs baseline"
+        else:
+            delta_txt = "no baseline supplied"
+
+        if support == SUPPORT_HIGH_RISK:
+            summary = (
+                f"High-risk support: the estimate (V̂ = {v_txt}, {delta_txt}) is "
+                f"not trustworthy enough to act on — verdict "
+                f"'{verdict or 'unavailable'}'. Do not deploy on this evidence."
+            )
+        elif support == SUPPORT_CAUTION:
+            summary = (
+                f"Proceed with caution: V̂ = {v_txt} ({delta_txt}); verdict "
+                f"'{verdict or 'unavailable'}'. Support diagnostics warrant a "
+                f"careful read before acting."
+            )
+        else:
+            summary = (
+                f"V̂ = {v_txt} ({delta_txt}); verdict "
+                f"'{verdict or 'unavailable'}'. Support diagnostics are healthy."
+            )
+
+        return {
+            "model": r.model,
+            "estimator": r.estimator,
+            "V_hat": r.V_hat,
+            "baseline": base,
+            "delta_vs_baseline": delta,
+            "ci_lower": r.ci_lower,
+            "ci_upper": r.ci_upper,
+            "verdict": verdict,
+            "support_health": support,
+            "summary": summary,
+        }
+
+    # ------------------------------------------------------------------ #
+    # LLM-ready summary facts (#249)                                      #
+    # ------------------------------------------------------------------ #
+
+    def to_summary_facts(
+        self,
+        model_name: str,
+        *,
+        estimator: str = "SNDR",
+        baseline: float | None = None,
+    ) -> dict[str, Any]:
+        """Emit a compact, LLM-ready facts payload for one row (#249).
+
+        Provider-agnostic: the library adds no LLM dependency. Feed the returned
+        dict into the documented prompt template
+        (``docs/recipes/llm-summary-prompt.md``) with any model to generate a
+        natural-language executive summary. All fields are grounded in the
+        already-computed report/recommendation — nothing new is estimated.
+
+        Returns
+        -------
+        dict
+            Keys: ``model``, ``estimator``, ``V_hat``, ``ci_lower``,
+            ``ci_upper``, ``baseline``, ``delta_vs_baseline``, ``verdict``,
+            ``confidence``, ``support_health``, ``primary_blocker``,
+            ``warning_codes``, ``reasons`` (list of ``{code, message,
+            severity}``).
+        """
+        r = self.row(model_name, estimator)
+        base = baseline if baseline is not None else self.baseline_value
+        delta = (r.V_hat - base) if (r.V_hat is not None and base is not None) else None
+        warning_codes = (
+            [c.strip() for c in str(r.diagnostic_warnings).split(",") if c.strip()]
+            if r.diagnostic_warnings
+            else []
+        )
+        primary_blocker: str | None = None
+        reasons: list[dict[str, str]] = []
+        try:
+            rec = self.recommendation(
+                model_name,
+                estimator=estimator,
+                baseline=base if base is not None else 0.0,
+            )
+            primary_blocker = rec.primary_blocker
+            reasons = [
+                {"code": rr.code, "message": rr.message, "severity": rr.severity}
+                for rr in rec.reasons
+            ]
+        except (DataValidationError, KeyError, ValueError):
+            pass
+
+        return {
+            "model": r.model,
+            "estimator": r.estimator,
+            "V_hat": r.V_hat,
+            "ci_lower": r.ci_lower,
+            "ci_upper": r.ci_upper,
+            "baseline": base,
+            "delta_vs_baseline": delta,
+            "verdict": r.verdict,
+            "confidence": r.confidence,
+            "support_health": r.support_health,
+            "primary_blocker": primary_blocker,
+            "warning_codes": warning_codes,
+            "reasons": reasons,
+        }
+
+    # ------------------------------------------------------------------ #
+    # Shareable badge (#251)                                              #
+    # ------------------------------------------------------------------ #
+
+    def badge(self, model_name: str, *, estimator: str = "SNDR") -> dict[str, str]:
+        """Generate a shareable evaluation badge for one row (#251).
+
+        A dependency-free SVG (shields.io-style flat badge, built from a string
+        template — no graphics library) plus a Markdown embed snippet. Colour is
+        keyed to ``support_health`` so a thin-support result reads as cautionary,
+        never oversold.
+
+        Returns
+        -------
+        dict
+            Keys: ``label``, ``message``, ``color``, ``svg``, ``markdown``.
+        """
+        r = self.row(model_name, estimator)
+        color = _BADGE_COLORS.get(r.support_health or "", _BADGE_COLOR_UNKNOWN)
+        label = "skdr-eval"
+        verdict = r.verdict or "no verdict"
+        message = f"{verdict} · {r.support_health or 'unknown'}"
+        svg = _render_badge_svg(label, message, color)
+        markdown = f"![skdr-eval: {message}](badge.svg)"
+        return {
+            "label": label,
+            "message": message,
+            "color": color,
+            "svg": svg,
+            "markdown": markdown,
+        }
+
+    # ------------------------------------------------------------------ #
+    # Compare two artifacts (#184)                                        #
+    # ------------------------------------------------------------------ #
+
+    def compare(
+        self, other: EvaluationArtifact, *, epsilon: float = 1e-9
+    ) -> ArtifactDiff:
+        """Diff this artifact against a previous run (#184).
+
+        Aligns rows by ``(model, estimator)`` and reports value deltas,
+        support-health transitions, warning-code changes, and verdict flips.
+        Numeric deltas with magnitude ``< epsilon`` are treated as unchanged so
+        float jitter between identical runs does not surface as a diff.
+
+        ``self`` is the *new* run and ``other`` the *baseline*: a diff row is
+        marked ``verdict_regressed`` when the new verdict ranks below the
+        baseline's (see :data:`_VERDICT_RANK`).
+
+        Parameters
+        ----------
+        other : EvaluationArtifact
+            The baseline run to compare against.
+        epsilon : float, default 1e-9
+            Tolerance below which a numeric delta is considered unchanged.
+
+        Returns
+        -------
+        ArtifactDiff
+            Aligned per-row diff plus an overall ``verdict_regressed`` flag.
+        """
+        return _compare_artifacts(self, other, epsilon=epsilon)
+
+
+# --------------------------------------------------------------------------- #
+# Badge rendering (#251)                                                       #
+# --------------------------------------------------------------------------- #
+
+# Support-health → badge colour (shields.io palette). Honest by design:
+# high_risk is red so a thin-support result cannot read as an endorsement.
+_BADGE_COLORS: dict[str, str] = {
+    SUPPORT_OK: "#4c1",  # green
+    SUPPORT_CAUTION: "#dfb317",  # yellow
+    SUPPORT_HIGH_RISK: "#e05d44",  # red
+}
+_BADGE_COLOR_UNKNOWN = "#9f9f9f"  # grey
+
+
+def _badge_text_width(text: str) -> int:
+    """Approximate rendered width (px) of badge text at 11px sans-serif.
+
+    A deterministic heuristic (≈7px/char plus padding) so the SVG needs no font
+    metrics library and no runtime measurement — keeping badge generation
+    dependency-free per #251.
+    """
+    return 7 * len(text) + 10
+
+
+def _render_badge_svg(label: str, message: str, color: str) -> str:
+    """Render a flat shields.io-style badge as a self-contained SVG string."""
+    label_w = _badge_text_width(label)
+    msg_w = _badge_text_width(message)
+    total_w = label_w + msg_w
+    label_x = label_w / 2
+    msg_x = label_w + msg_w / 2
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{total_w}" height="20" '
+        f'role="img" aria-label="{label}: {message}">'
+        f"<title>{label}: {message}</title>"
+        f'<rect width="{label_w}" height="20" fill="#555"/>'
+        f'<rect x="{label_w}" width="{msg_w}" height="20" fill="{color}"/>'
+        f'<g fill="#fff" text-anchor="middle" '
+        f'font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">'
+        f'<text x="{label_x}" y="14">{label}</text>'
+        f'<text x="{msg_x}" y="14">{message}</text>'
+        f"</g></svg>"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Artifact comparison (#184)                                                   #
+# --------------------------------------------------------------------------- #
+
+
+def _compare_artifacts(
+    new: EvaluationArtifact, baseline: EvaluationArtifact, *, epsilon: float
+) -> ArtifactDiff:
+    """Diff ``new`` against ``baseline``; see :meth:`EvaluationArtifact.compare`."""
+    new_rows = {(r.model, r.estimator): r for r in new.rows()}
+    base_rows = {(r.model, r.estimator): r for r in baseline.rows()}
+    keys = sorted(set(new_rows) | set(base_rows))
+
+    def _delta(a: float | None, b: float | None) -> float | None:
+        if a is None or b is None:
+            return None
+        d = a - b
+        return 0.0 if abs(d) < epsilon else d
+
+    def _warns(r: ReportRow | None) -> set[str]:
+        if r is None or not r.diagnostic_warnings:
+            return set()
+        return {c.strip() for c in str(r.diagnostic_warnings).split(",") if c.strip()}
+
+    diffs: list[ArtifactRowDiff] = []
+    any_regressed = False
+    for key in keys:
+        model, estimator = key
+        cur = new_rows.get(key)
+        old = base_rows.get(key)
+        if cur is not None and old is None:
+            status = "added"
+        elif cur is None and old is not None:
+            status = "removed"
+        else:
+            status = "unchanged"
+
+        v_before = old.V_hat if old else None
+        v_after = cur.V_hat if cur else None
+        delta_v = _delta(v_after, v_before)
+        verdict_before = old.verdict if old else None
+        verdict_after = cur.verdict if cur else None
+        old_warns, new_warns = _warns(old), _warns(cur)
+
+        # A verdict regresses only when both ranks are known and the new one is
+        # strictly worse.
+        regressed = False
+        if verdict_before in _VERDICT_RANK and verdict_after in _VERDICT_RANK:
+            regressed = _VERDICT_RANK[verdict_after] < _VERDICT_RANK[verdict_before]
+        any_regressed = any_regressed or regressed
+
+        changed = (
+            status != "unchanged"
+            or (delta_v not in (None, 0.0))
+            or verdict_before != verdict_after
+            or (old.support_health if old else None)
+            != (cur.support_health if cur else None)
+            or old_warns != new_warns
+        )
+        if status == "unchanged" and changed:
+            status = "changed"
+
+        diffs.append(
+            ArtifactRowDiff(
+                model=model,
+                estimator=estimator,
+                status=status,
+                V_hat_before=v_before,
+                V_hat_after=v_after,
+                delta_V_hat=delta_v,
+                ci_lower_before=old.ci_lower if old else None,
+                ci_lower_after=cur.ci_lower if cur else None,
+                ci_upper_before=old.ci_upper if old else None,
+                ci_upper_after=cur.ci_upper if cur else None,
+                verdict_before=verdict_before,
+                verdict_after=verdict_after,
+                support_health_before=old.support_health if old else None,
+                support_health_after=cur.support_health if cur else None,
+                added_warnings=sorted(new_warns - old_warns),
+                removed_warnings=sorted(old_warns - new_warns),
+                verdict_regressed=regressed,
+            )
+        )
+
+    return ArtifactDiff(rows=diffs, verdict_regressed=any_regressed)
+
+
+def compare_artifacts(
+    new: EvaluationArtifact,
+    baseline: EvaluationArtifact,
+    *,
+    epsilon: float = 1e-9,
+) -> ArtifactDiff:
+    """Top-level diff of two artifacts (#184).
+
+    Convenience wrapper around :meth:`EvaluationArtifact.compare` so the diff is
+    reachable as ``skdr_eval.compare_artifacts(new, baseline)``.
+    """
+    return _compare_artifacts(new, baseline, epsilon=epsilon)
 
 
 # --------------------------------------------------------------------------- #
