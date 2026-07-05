@@ -5,6 +5,9 @@ Subcommands
 - ``evaluate``        — run :func:`skdr_eval.evaluate_sklearn_models`
 - ``pairwise``        — run :func:`skdr_eval.evaluate_pairwise_models`
 - ``card``            — re-render the YAML card from a saved artifact JSON
+- ``compare``         — diff two saved artifacts; gate on verdict regressions
+- ``schema``          — print the JSON Schema for the artifact or card
+- ``badge``           — emit a shareable SVG/Markdown evaluation badge
 - ``validate-schema`` — call ``validate_logs`` / ``validate_pairwise_inputs``
 - ``doctor``          — run :func:`skdr_eval.doctor`
 - ``version``         — print the package version
@@ -56,7 +59,13 @@ import pandas as pd
 import skdr_eval
 from skdr_eval.capabilities import get_capability_matrix
 from skdr_eval.doctor import doctor as doctor_fn
-from skdr_eval.reporting import explain_artifact_schema
+from skdr_eval.reporting import (
+    ArtifactSchema,
+    EvaluationCard,
+    _thin_artifact_from_schema,
+    compare_artifacts,
+    explain_artifact_schema,
+)
 from skdr_eval.trackers import FileTracker
 
 logger = logging.getLogger("skdr_eval.cli")
@@ -264,6 +273,49 @@ def _verdict_exit_code(artifact: skdr_eval.EvaluationArtifact) -> int:
     return EXIT_INSUFFICIENT_EVIDENCE if saw_insufficient else EXIT_OK
 
 
+# Selectable stdout formats for the headline report (#231).
+_REPORT_FORMATS = ("table", "csv", "json", "markdown")
+
+
+def _render_report(artifact: skdr_eval.EvaluationArtifact, fmt: str) -> str:
+    """Render the headline report in the requested stdout format (#231)."""
+    if fmt == "table":
+        return str(artifact.report.to_string(index=False))
+    if fmt == "csv":
+        return str(artifact.report.to_csv(index=False)).rstrip("\n")
+    if fmt == "json":
+        return artifact.to_json_str()
+    if fmt == "markdown":
+        return artifact.to_markdown()
+    raise typer.BadParameter(
+        f"--format must be one of {_REPORT_FORMATS} (got {fmt!r}).",
+    )
+
+
+def _emit_report_and_confirm(
+    artifact: skdr_eval.EvaluationArtifact,
+    fmt: str | None,
+    paths: dict[str, Path],
+    out: Path,
+) -> None:
+    """Emit the report to stdout (if ``--format`` given) with stream separation.
+
+    When ``fmt`` is set the machine-readable report goes to **stdout** and the
+    human-readable "wrote N files" confirmation is routed to **stderr**, so the
+    command composes in a pipe (``| jq``, ``| column``). With ``fmt is None``
+    the legacy behaviour is preserved: the confirmation prints to stdout.
+    """
+    if fmt is None:
+        typer.echo(f"Wrote {len(paths)} files to {out}.")
+        return
+    if fmt not in _REPORT_FORMATS:
+        raise typer.BadParameter(
+            f"--format must be one of {_REPORT_FORMATS} (got {fmt!r}).",
+        )
+    typer.echo(_render_report(artifact, fmt))
+    typer.echo(f"Wrote {len(paths)} files to {out}.", err=True)
+
+
 @app.command("version")
 def version_cmd() -> None:
     """Print the installed skdr-eval version."""
@@ -395,6 +447,15 @@ def evaluate_cmd(
         False, "--ci-bootstrap/--no-ci-bootstrap", help="Compute bootstrap CIs."
     ),
     random_state: int = typer.Option(0, "--random-state"),
+    fmt: str | None = typer.Option(
+        None,
+        "--format",
+        help=(
+            "Print the headline report to stdout in this format "
+            "(table|csv|json|markdown); the 'wrote N files' line moves to "
+            "stderr so stdout is pipe-clean. Omit to keep the legacy output."
+        ),
+    ),
     tracker_dir: Path | None = typer.Option(
         None, "--tracker-dir", help="Optional FileTracker output directory."
     ),
@@ -421,7 +482,7 @@ def evaluate_cmd(
         typer.secho(f"Evaluation error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=EXIT_DATA) from exc
     paths = _write_artifact_outputs(artifact, out)
-    typer.echo(f"Wrote {len(paths)} files to {out}.")
+    _emit_report_and_confirm(artifact, fmt, paths, out)
     raise typer.Exit(code=_verdict_exit_code(artifact))
 
 
@@ -448,6 +509,15 @@ def pairwise_cmd(
     n_splits: int = typer.Option(3, "--n-splits", min=1),
     random_state: int = typer.Option(0, "--random-state"),
     ci_bootstrap: bool = typer.Option(False, "--ci-bootstrap/--no-ci-bootstrap"),
+    fmt: str | None = typer.Option(
+        None,
+        "--format",
+        help=(
+            "Print the headline report to stdout in this format "
+            "(table|csv|json|markdown); the 'wrote N files' line moves to "
+            "stderr so stdout is pipe-clean. Omit to keep the legacy output."
+        ),
+    ),
     tracker_dir: Path | None = typer.Option(
         None, "--tracker-dir", help="Optional FileTracker output directory."
     ),
@@ -492,7 +562,7 @@ def pairwise_cmd(
         typer.secho(f"Evaluation error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=EXIT_DATA) from exc
     paths = _write_artifact_outputs(artifact, out)
-    typer.echo(f"Wrote {len(paths)} files to {out}.")
+    _emit_report_and_confirm(artifact, fmt, paths, out)
     raise typer.Exit(code=_verdict_exit_code(artifact))
 
 
@@ -772,6 +842,110 @@ def quickstart_cmd(
         f"Wrote {len(paths)} files to {out} "
         f"(open {out / 'report.html'} for the full card)."
     )
+
+
+@app.command("compare")
+def compare_cmd(
+    baseline_json: Path = typer.Argument(
+        ..., exists=True, readable=True, help="Baseline (previous) artifact.json."
+    ),
+    candidate_json: Path = typer.Argument(
+        ..., exists=True, readable=True, help="Candidate (new) artifact.json."
+    ),
+    fmt: str = typer.Option(
+        "text", "--format", help="Output format: text | markdown | json."
+    ),
+    epsilon: float = typer.Option(
+        1e-9, "--epsilon", help="Numeric deltas below this are treated as unchanged."
+    ),
+) -> None:
+    """Diff two saved artifacts and gate on verdict regressions (#184).
+
+    Loads two ``artifact.json`` files and reports per-(model, estimator) value
+    deltas, support-health transitions, warning-code changes, and verdict flips.
+    Exits ``EXIT_DO_NOT_DEPLOY`` (3) when any verdict regressed vs the baseline,
+    so CI can fail not only on ``do_not_deploy`` but on "the verdict got worse
+    than the last accepted run".
+    """
+    if fmt not in {"text", "markdown", "json"}:
+        raise typer.BadParameter(
+            f"--format must be 'text', 'markdown', or 'json' (got {fmt!r}).",
+        )
+    baseline = _thin_artifact_from_schema(skdr_eval.load_artifact_json(baseline_json))
+    candidate = _thin_artifact_from_schema(skdr_eval.load_artifact_json(candidate_json))
+    diff = compare_artifacts(candidate, baseline, epsilon=epsilon)
+
+    if fmt == "json":
+        typer.echo(diff.model_dump_json(indent=2))
+    elif fmt == "markdown":
+        typer.echo(diff.to_markdown())
+    else:
+        for r in diff.rows:
+            flag = " [REGRESSED]" if r.verdict_regressed else ""
+            typer.echo(
+                f"{r.model}/{r.estimator}: {r.status} "
+                f"{r.verdict_before or '—'} -> {r.verdict_after or '—'}{flag}"
+            )
+        typer.echo(
+            "Verdict regression detected."
+            if diff.verdict_regressed
+            else "No verdict regression."
+        )
+    raise typer.Exit(code=EXIT_DO_NOT_DEPLOY if diff.verdict_regressed else EXIT_OK)
+
+
+@app.command("schema")
+def schema_cmd(
+    kind: str = typer.Option(
+        "artifact", "--kind", help="Which schema to emit: 'artifact' or 'card'."
+    ),
+) -> None:
+    """Print the JSON Schema for the artifact or card contract (#205).
+
+    Emits the versioned JSON Schema downstream tooling can use to validate
+    ``skdr-eval`` outputs without importing the library. Pipe to a file to pin
+    it in Git or publish it.
+    """
+    if kind == "artifact":
+        schema = ArtifactSchema.json_schema()
+    elif kind == "card":
+        schema = EvaluationCard.json_schema()
+    else:
+        raise typer.BadParameter(
+            f"--kind must be 'artifact' or 'card' (got {kind!r}).",
+        )
+    typer.echo(json.dumps(schema, indent=2))
+
+
+@app.command("badge")
+def badge_cmd(
+    artifact_json: Path = typer.Argument(
+        ..., exists=True, readable=True, help="Path to artifact.json."
+    ),
+    model_name: str = typer.Option(..., "--model", help="Model name."),
+    estimator: str = typer.Option("SNDR", "--estimator", help="DR or SNDR."),
+    out: Path | None = typer.Option(
+        None, "--out", help="Write the SVG here; otherwise print the Markdown snippet."
+    ),
+) -> None:
+    """Generate a shareable evaluation badge from a saved artifact (#251).
+
+    Colour is keyed to ``support_health`` so a thin-support result reads as
+    cautionary, never oversold. With ``--out`` writes the SVG; otherwise prints
+    the Markdown embed snippet to stdout.
+    """
+    artifact = _thin_artifact_from_schema(skdr_eval.load_artifact_json(artifact_json))
+    try:
+        badge = artifact.badge(model_name, estimator=estimator)
+    except skdr_eval.DataValidationError as exc:
+        typer.secho(f"badge: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=EXIT_DATA) from exc
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(badge["svg"], encoding="utf-8")
+        typer.echo(f"Wrote {out}", err=True)
+    else:
+        typer.echo(badge["markdown"])
 
 
 if __name__ == "__main__":  # pragma: no cover
