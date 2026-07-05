@@ -1372,6 +1372,15 @@ class TestSummaryFacts:
         assert isinstance(facts["warning_codes"], list)
         assert isinstance(facts["reasons"], list)
 
+    def test_facts_without_ci_still_structured(self) -> None:
+        # No bootstrap CI: reasons/warning_codes stay lists, CI bounds are None.
+        art = _run_eval(ci=False)
+        facts = art.to_summary_facts("HGB", estimator="SNDR")
+        assert facts["ci_lower"] is None
+        assert facts["ci_upper"] is None
+        assert isinstance(facts["reasons"], list)
+        assert isinstance(facts["warning_codes"], list)
+
 
 class TestBadge:
     def test_badge_color_tracks_support_health(self) -> None:
@@ -1453,6 +1462,13 @@ class TestExportMarkdown:
             .read_text(encoding="utf-8")
             .startswith("# skdr-eval evaluation summary")
         )
+
+    def test_export_markdown_to_directory(self, tmp_path: Path) -> None:
+        # Existing directory → files land as <dir>/artifact.<ext>.
+        art = _run_eval(ci=True)
+        paths = art.export(tmp_path, formats=["markdown"])
+        assert paths["markdown"] == tmp_path / "artifact.md"
+        assert paths["markdown"].is_file()
 
     def test_export_rejects_unknown_format(self, tmp_path: Path) -> None:
         art = _run_eval()

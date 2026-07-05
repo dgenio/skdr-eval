@@ -823,6 +823,31 @@ class TestEvaluateFormat:
         # Without --format the confirmation stays on stdout (legacy behaviour).
         assert "Wrote" in result.stdout
 
+    @pytest.mark.parametrize("fmt", ["table", "csv"])
+    def test_format_table_and_csv(
+        self, fmt: str, design_model_and_logs: tuple[Path, Path], tmp_path: Path
+    ):
+        logs_path, model_path = design_model_and_logs
+        result = runner.invoke(
+            app,
+            [
+                "evaluate",
+                str(logs_path),
+                "--model",
+                f"M={model_path}",
+                "--out",
+                str(tmp_path / "out"),
+                "--format",
+                fmt,
+            ],
+        )
+        # The report header column names appear on stdout in both formats.
+        assert "V_hat" in result.stdout
+        assert "estimator" in result.stdout
+        if fmt == "csv":
+            assert "," in result.stdout  # CSV separator present
+        assert "Wrote" in result.stderr
+
     def test_bad_format_rejected(
         self, design_model_and_logs: tuple[Path, Path], tmp_path: Path
     ):
@@ -890,6 +915,28 @@ class TestCompareCommand:
         b = _saved_artifact_json(tmp_path / "b.json", seed=0)
         result = runner.invoke(app, ["compare", str(a), str(b), "--format", "markdown"])
         assert "| Model |" in result.stdout
+
+    def test_compare_json_format(self, tmp_path: Path):
+        a = _saved_artifact_json(tmp_path / "a.json", seed=0)
+        b = _saved_artifact_json(tmp_path / "b.json", seed=0)
+        result = runner.invoke(app, ["compare", str(a), str(b), "--format", "json"])
+        assert result.exit_code == EXIT_OK
+        payload = json.loads(result.stdout)
+        assert "rows" in payload
+        assert payload["verdict_regressed"] is False
+
+    def test_compare_text_lists_rows(self, tmp_path: Path):
+        a = _saved_artifact_json(tmp_path / "a.json", seed=0)
+        b = _saved_artifact_json(tmp_path / "b.json", seed=0)
+        result = runner.invoke(app, ["compare", str(a), str(b)])
+        # Default text format lists each (model, estimator) row with its verdict.
+        assert "HGB/SNDR" in result.stdout
+
+    def test_compare_bad_format_rejected(self, tmp_path: Path):
+        a = _saved_artifact_json(tmp_path / "a.json", seed=0)
+        b = _saved_artifact_json(tmp_path / "b.json", seed=0)
+        result = runner.invoke(app, ["compare", str(a), str(b), "--format", "bogus"])
+        assert result.exit_code != EXIT_OK
 
 
 class TestBadgeCommand:
