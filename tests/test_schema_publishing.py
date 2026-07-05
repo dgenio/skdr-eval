@@ -26,7 +26,7 @@ from skdr_eval.reporting import (
 
 _REPO = Path(__file__).resolve().parents[1]
 _SCHEMA_DIR = _REPO / "docs" / "schemas"
-_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "artifacts"
+_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "artifact_samples"
 
 # Keep in sync with scripts/generate_schemas.py::SCHEMAS.
 SCHEMA_FILES = {
