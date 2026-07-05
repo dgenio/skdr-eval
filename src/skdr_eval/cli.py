@@ -925,14 +925,20 @@ def badge_cmd(
     model_name: str = typer.Option(..., "--model", help="Model name."),
     estimator: str = typer.Option("SNDR", "--estimator", help="DR or SNDR."),
     out: Path | None = typer.Option(
-        None, "--out", help="Write the SVG here; otherwise print the Markdown snippet."
+        None,
+        "--out",
+        help=(
+            "Write the SVG here and print a ready-to-use Markdown snippet to "
+            "stderr. Omit to print the raw SVG to stdout (e.g. `> badge.svg`)."
+        ),
     ),
 ) -> None:
     """Generate a shareable evaluation badge from a saved artifact (#251).
 
     Colour is keyed to ``support_health`` so a thin-support result reads as
-    cautionary, never oversold. With ``--out`` writes the SVG; otherwise prints
-    the Markdown embed snippet to stdout.
+    cautionary, never oversold. With ``--out`` the SVG is written there and a
+    Markdown embed snippet referencing that file is printed to stderr; without
+    ``--out`` the raw SVG is printed to stdout so it can be redirected to a file.
     """
     artifact = _thin_artifact_from_schema(skdr_eval.load_artifact_json(artifact_json))
     try:
@@ -943,9 +949,14 @@ def badge_cmd(
     if out is not None:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(badge["svg"], encoding="utf-8")
+        # Point the Markdown snippet at the file we actually wrote, not the
+        # generic placeholder from badge()["markdown"].
         typer.echo(f"Wrote {out}", err=True)
+        typer.echo(f"![skdr-eval: {badge['message']}]({out.name})", err=True)
     else:
-        typer.echo(badge["markdown"])
+        # No --out: emit the SVG itself so `... > badge.svg` produces a usable
+        # file (a dangling Markdown reference to a non-existent file would not).
+        typer.echo(badge["svg"])
 
 
 if __name__ == "__main__":  # pragma: no cover

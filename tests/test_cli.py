@@ -893,13 +893,15 @@ class TestCompareCommand:
 
 
 class TestBadgeCommand:
-    def test_badge_markdown_snippet(self, tmp_path: Path):
+    def test_badge_prints_svg_to_stdout(self, tmp_path: Path):
+        # Without --out the raw SVG goes to stdout so `> badge.svg` works.
         aj = _saved_artifact_json(tmp_path / "a.json", seed=0)
         result = runner.invoke(app, ["badge", str(aj), "--model", "HGB"])
         assert result.exit_code == EXIT_OK
-        assert result.stdout.strip().startswith("![skdr-eval")
+        assert result.stdout.strip().startswith("<svg")
+        assert "</svg>" in result.stdout
 
-    def test_badge_writes_svg(self, tmp_path: Path):
+    def test_badge_writes_svg_and_snippet(self, tmp_path: Path):
         aj = _saved_artifact_json(tmp_path / "a.json", seed=0)
         svg = tmp_path / "badge.svg"
         result = runner.invoke(
@@ -907,6 +909,9 @@ class TestBadgeCommand:
         )
         assert result.exit_code == EXIT_OK
         assert svg.read_text(encoding="utf-8").startswith("<svg")
+        # The Markdown snippet on stderr references the file we actually wrote.
+        assert "![skdr-eval:" in result.stderr
+        assert "badge.svg" in result.stderr
 
     def test_badge_unknown_model_exits_data(self, tmp_path: Path):
         aj = _saved_artifact_json(tmp_path / "a.json", seed=0)

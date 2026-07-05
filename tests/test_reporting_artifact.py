@@ -1330,6 +1330,23 @@ class TestDecisionSummary:
             summary["delta_vs_baseline"], r.V_hat - 0.0, rel_tol=0, abs_tol=1e-9
         )
 
+    def test_ok_support_reads_healthy(self) -> None:
+        report = _make_report_row()
+        report["support_health"] = SUPPORT_OK
+        art = _make_artifact_from_row(report)
+        summary = art.decision_summary("HGB", estimator="SNDR")
+        assert "healthy" in summary["summary"].lower()
+
+    def test_unknown_support_does_not_read_healthy(self) -> None:
+        # A missing/unknown support_health must not be narrated as an endorsement.
+        report = _make_report_row()
+        report["support_health"] = None
+        art = _make_artifact_from_row(report)
+        summary = art.decision_summary("HGB", estimator="SNDR")
+        assert summary["support_health"] is None
+        assert "healthy" not in summary["summary"].lower()
+        assert "unavailable" in summary["summary"].lower()
+
 
 class TestSummaryFacts:
     def test_facts_keys_and_grounding(self) -> None:

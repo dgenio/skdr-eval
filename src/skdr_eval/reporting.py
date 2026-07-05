@@ -1896,10 +1896,18 @@ class EvaluationArtifact:
                 f"'{verdict or 'unavailable'}'. Support diagnostics warrant a "
                 f"careful read before acting."
             )
-        else:
+        elif support == SUPPORT_OK:
             summary = (
                 f"V̂ = {v_txt} ({delta_txt}); verdict "
                 f"'{verdict or 'unavailable'}'. Support diagnostics are healthy."
+            )
+        else:
+            # Unknown/missing support health (e.g. a forward-compat payload with
+            # no support column) must not read as an endorsement.
+            summary = (
+                f"V̂ = {v_txt} ({delta_txt}); verdict "
+                f"'{verdict or 'unavailable'}'. Support health is unavailable — "
+                f"treat this estimate with caution."
             )
 
         return {

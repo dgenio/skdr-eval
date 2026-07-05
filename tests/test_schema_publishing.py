@@ -7,7 +7,7 @@ Two guarantees are locked in here:
   them; this test fails if they are stale.
 * Older serialized artifacts (a genuine ``1.0.0``-shaped payload) still load
   through the current models, and the fields added since default correctly
-  (#212). Fixtures live under ``tests/fixtures/artifacts/``.
+  (#212). Fixtures live under ``tests/fixtures/artifact_samples/``.
 """
 
 from __future__ import annotations
