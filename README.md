@@ -410,6 +410,10 @@ skdr-eval evaluate logs.parquet \
     --out ./run \
     --tracker-dir ./tracker_runs/2026-05-20
 
+# Stream the headline report to stdout in a pipe-friendly format (#231);
+# the "wrote N files" line goes to stderr so stdout stays clean.
+skdr-eval evaluate logs.parquet --model HGB=model.joblib --format json | jq .
+
 # Re-render a card directly from a saved artifact.json.
 skdr-eval card ./run/artifact.json --model HGB --estimator DR \
     --out ./run/card.yaml --format yaml
@@ -417,6 +421,15 @@ skdr-eval card ./run/artifact.json --model HGB --estimator DR \
 # Narrate *why* a saved artifact got its verdict (no re-evaluation).
 skdr-eval explain ./run/artifact.json --model HGB --estimator SNDR
 skdr-eval explain ./run/artifact.json --model HGB --json | jq .
+
+# Diff two saved runs; exit 3 if a verdict regressed vs the baseline (#184).
+skdr-eval compare ./baseline/artifact.json ./run/artifact.json --format markdown
+
+# Print the published JSON Schema for the artifact or card (#205).
+skdr-eval schema --kind artifact > artifact.schema.json
+
+# Emit a shareable evaluation badge (#251).
+skdr-eval badge ./run/artifact.json --model HGB --out ./run/badge.svg
 
 # Stable exit codes (good for CI gates):
 #   0 — success: no 'do_not_deploy' or 'insufficient_evidence' verdict was
@@ -495,6 +508,42 @@ assert loaded == card
 if card.trust.recommendation and card.trust.recommendation["verdict"] == "do_not_deploy":
     raise SystemExit(1)
 ```
+
+## Sharing & comparing results
+
+Once you have an artifact, the last mile is *communicating* it and *tracking it
+over time*. The consumption surface is additive — `artifact.report` stays the
+source of truth.
+
+```python
+# Typed rows — read results by attribute, not by DataFrame column string.
+for row in artifact.rows():
+    print(row.model, row.estimator, row.V_hat, row.verdict, row.support_health)
+
+# Paste-ready Markdown for a PR / ticket, and one honest stakeholder line.
+print(artifact.to_markdown())
+print(artifact.decision_summary("RandomForest", estimator="SNDR")["summary"])
+
+# Provider-agnostic facts for an LLM summary — no runtime LLM dependency.
+# (Prompt template: docs/recipes/llm-summary-prompt.md)
+facts = artifact.to_summary_facts("RandomForest", estimator="SNDR")
+
+# A dependency-free SVG badge whose colour tracks support-health.
+svg = artifact.badge("RandomForest", estimator="SNDR")["svg"]
+
+# Diff a new run against a previous one; catch verdict regressions in CI.
+diff = skdr_eval.compare_artifacts(new_artifact, previous_artifact)
+if diff.verdict_regressed:
+    raise SystemExit(1)
+```
+
+The same surface is on the CLI (`pip install 'skdr-eval[cli]'`): `skdr-eval
+evaluate ... --format {table,csv,json,markdown}` streams the report to stdout,
+`skdr-eval compare baseline.json candidate.json` gates on regressions,
+`skdr-eval schema --kind artifact|card` prints the published JSON Schema (also
+committed under [`docs/schemas/`](docs/schemas/)), and `skdr-eval badge
+artifact.json --model M` emits a badge. See
+[`examples/use_cases/08_share_and_compare.py`](examples/use_cases/08_share_and_compare.py).
 
 ## Experiment tracker
 

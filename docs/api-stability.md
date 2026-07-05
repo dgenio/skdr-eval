@@ -62,6 +62,14 @@ keep working); a major bump may remove or rename fields. The current values
 are exported as constants and embedded in every artifact's `metadata` and on
 every card.
 
+The generated JSON Schemas are committed under [`docs/schemas/`](schemas/)
+(`artifact.schema.json`, `card.schema.json`) so downstream tooling can validate
+`skdr-eval` output without importing the library. Emit them yourself with
+`skdr-eval schema --kind artifact|card`, or from Python via
+`ArtifactSchema.json_schema()` / `EvaluationCard.json_schema()`. A test
+(`tests/test_schema_publishing.py`) fails if the committed files drift from the
+live schema, and `scripts/generate_schemas.py` regenerates them.
+
 ## Road to 1.0
 
 1.0 means "the public surface below is frozen under SemVer and safe to build
@@ -90,7 +98,8 @@ extra is installed.
 
 `attach_warnings` `block_bootstrap_ci` `bootstrap_confidence_interval`
 `build_design` `build_evaluation_artifact` `build_strategy` `chi_square_test`
-`create_dashboard` `create_model_ensemble` `doctor` `dr_value_with_clip`
+`compare_artifacts` `create_dashboard` `create_model_ensemble` `doctor`
+`dr_value_with_clip`
 `dr_value_with_strategy` `embedding_sufficiency_diagnostic`
 `evaluate_external_policies` `evaluate_pairwise_models`
 `evaluate_propensity_diagnostics` `evaluate_sklearn_models`
@@ -113,7 +122,8 @@ extra is installed.
 
 ### Classes and dataclasses
 
-`ArtifactSchema` `BaselineBlock` `Capability` `Check` `ClipTransform`
+`ArtifactDiff` `ArtifactRowDiff` `ArtifactSchema` `BaselineBlock` `Capability`
+`Check` `ClipTransform`
 `ConfigManager` `CoverageResult` `CoverageSimBlock` `DRResult`
 `DRosShrinkTransform` `DataProfile` `DatasetBundle` `Design` `DiagnosticGate`
 `DiagnosticsBlock` `DoctorReport` `EmbeddingSufficiencyReport` `EstimandBlock`
@@ -123,7 +133,8 @@ extra is installed.
 `MRDRWeightedLoss` `MSEOutcomeLoss` `ModelConfig` `ModelEvaluator`
 `ModelFactory` `ModelSelector` `NullTracker` `OutcomeLoss` `PairwiseDesign`
 `PerActionDiagnostics` `PropensityDiagnostics` `ProvenanceBlock` `Reason`
-`Recommendation` `RecommendationPolicy` `SensitivityBlock` `SlateGroundTruth`
+`Recommendation` `RecommendationPolicy` `ReportRow` `SensitivityBlock`
+`SlateGroundTruth`
 `SlateResult` `StatisticalTest` `SupportHealthThresholds` `SwitchTauTransform`
 `Tracker` `TransformContext` `TrustBlock` `VisualizationConfig`
 `WeightTransform`
