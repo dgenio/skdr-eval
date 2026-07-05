@@ -1247,3 +1247,197 @@ class TestDiagnosticGate:
         assert d["state"] == "pass"
         assert d["value"] == 0.05
         assert d["threshold"] == 0.0025
+
+
+# --------------------------------------------------------------------------- #
+# Export / consumption surface (#184 #234 #237 #238 #249 #251)                #
+# --------------------------------------------------------------------------- #
+
+
+class TestTypedRows:
+    def test_rows_match_report(self) -> None:
+        art = _run_eval(ci=True)
+        rows = art.rows()
+        assert len(rows) == len(art.report)
+        # Field parity vs the DataFrame for the SNDR row.
+        r = art.row("HGB", estimator="SNDR")
+        df_row = art.report[
+            (art.report["model"] == "HGB") & (art.report["estimator"] == "SNDR")
+        ].iloc[0]
+        assert r.model == "HGB"
+        assert r.estimator == "SNDR"
+        assert math.isclose(r.V_hat, float(df_row["V_hat"]), rel_tol=0, abs_tol=1e-9)
+        assert r.verdict in {
+            "deploy",
+            "ab_test",
+            "insufficient_evidence",
+            "do_not_deploy",
+            None,
+        }
+
+    def test_row_unknown_raises(self) -> None:
+        art = _run_eval()
+        with pytest.raises(DataValidationError, match="No report row"):
+            art.row("HGB", estimator="NOPE")
+
+    def test_rows_verdict_never_positive_without_ci(self) -> None:
+        # No bootstrap CI → the gate cannot return a positive verdict; it is
+        # either insufficient_evidence or do_not_deploy (a high-risk blocker),
+        # never deploy/ab_test.
+        art = _run_eval(ci=False)
+        for r in art.rows():
+            assert r.verdict in {"insufficient_evidence", "do_not_deploy", None}
+
+
+class TestToMarkdown:
+    def test_markdown_has_table_and_rows(self) -> None:
+        art = _run_eval(ci=True)
+        md = art.to_markdown()
+        assert md.startswith("# skdr-eval evaluation summary")
+        assert "| Model | Estimator |" in md
+        # One data row per (model, estimator).
+        assert md.count("| HGB |") == len(art.report)
+
+    def test_markdown_filters_by_model_and_estimator(self) -> None:
+        art = _run_eval(ci=True)
+        md = art.to_markdown("HGB", estimator="SNDR")
+        assert md.count("| HGB |") == 1
+
+    def test_markdown_escapes_pipes_in_model_name(self) -> None:
+        report = _make_report_row()
+        report["model"] = "a|b"
+        art = _make_artifact_from_row(report)
+        md = art.to_markdown()
+        assert "a\\|b" in md
+
+
+class TestDecisionSummary:
+    def test_high_risk_leads_with_risk(self) -> None:
+        report = _make_report_row()
+        report["support_health"] = SUPPORT_HIGH_RISK
+        art = _make_artifact_from_row(report)
+        summary = art.decision_summary("HGB", estimator="SNDR")
+        assert summary["support_health"] == SUPPORT_HIGH_RISK
+        assert summary["summary"].lower().startswith("high-risk support")
+        assert "do not deploy" in summary["summary"].lower()
+
+    def test_delta_reported_against_baseline(self) -> None:
+        art = _run_eval(ci=True)
+        r = art.row("HGB", estimator="SNDR")
+        summary = art.decision_summary("HGB", estimator="SNDR", baseline=0.0)
+        assert summary["baseline"] == 0.0
+        assert math.isclose(
+            summary["delta_vs_baseline"], r.V_hat - 0.0, rel_tol=0, abs_tol=1e-9
+        )
+
+
+class TestSummaryFacts:
+    def test_facts_keys_and_grounding(self) -> None:
+        art = _run_eval(ci=True)
+        facts = art.to_summary_facts("HGB", estimator="SNDR")
+        expected = {
+            "model",
+            "estimator",
+            "V_hat",
+            "ci_lower",
+            "ci_upper",
+            "baseline",
+            "delta_vs_baseline",
+            "verdict",
+            "confidence",
+            "support_health",
+            "primary_blocker",
+            "warning_codes",
+            "reasons",
+        }
+        assert set(facts) == expected
+        assert facts["model"] == "HGB"
+        assert isinstance(facts["warning_codes"], list)
+        assert isinstance(facts["reasons"], list)
+
+
+class TestBadge:
+    def test_badge_color_tracks_support_health(self) -> None:
+        report = _make_report_row()
+        report["support_health"] = SUPPORT_HIGH_RISK
+        art = _make_artifact_from_row(report)
+        badge = art.badge("HGB", estimator="SNDR")
+        # high_risk must render red — never oversell a thin-support result.
+        assert badge["color"] == "#e05d44"
+        assert badge["message"].endswith("high_risk")
+        assert badge["svg"].startswith("<svg")
+        assert "</svg>" in badge["svg"]
+        assert badge["markdown"].startswith("![skdr-eval")
+
+    def test_badge_ok_is_green(self) -> None:
+        report = _make_report_row()
+        report["support_health"] = SUPPORT_OK
+        art = _make_artifact_from_row(report)
+        badge = art.badge("HGB", estimator="SNDR")
+        assert badge["color"] == "#4c1"
+
+
+class TestCompare:
+    def test_identical_runs_have_no_regression(self) -> None:
+        art = _run_eval(seed=7, ci=True)
+        other = _run_eval(seed=7, ci=True)
+        diff = art.compare(other)
+        assert not diff.verdict_regressed
+        assert all(not r.verdict_regressed for r in diff.rows)
+        assert all(r.status in {"unchanged", "changed"} for r in diff.rows)
+
+    def test_verdict_regression_detected(self) -> None:
+        art = _run_eval(seed=7, ci=True)
+        # Build a healthy baseline by hand so the candidate's verdict is worse.
+        baseline = _run_eval(seed=7, ci=True)
+        baseline.report["support_health"] = SUPPORT_OK
+        baseline.report["diagnostic_warnings"] = ""
+        baseline.report["pareto_k"] = 0.1
+        baseline.report["ci_lower"] = 1_000.0
+        baseline.report["ci_upper"] = 1_100.0
+        diff = art.compare(baseline)
+        assert diff.verdict_regressed
+        regressed = [r for r in diff.rows if r.verdict_regressed]
+        assert regressed
+        assert regressed[0].verdict_before == "deploy"
+        md = diff.to_markdown()
+        assert "regressed" in md.lower()
+
+    def test_epsilon_suppresses_float_jitter(self) -> None:
+        art = _run_eval(seed=7, ci=True)
+        other = _run_eval(seed=7, ci=True)
+        # Nudge a V_hat by less than epsilon; the delta must read as unchanged.
+        other.report.loc[other.report["estimator"] == "SNDR", "V_hat"] += 1e-12
+        diff = art.compare(other, epsilon=1e-9)
+        sndr = next(r for r in diff.rows if r.estimator == "SNDR")
+        assert sndr.delta_V_hat == 0.0
+
+    def test_added_and_removed_rows(self) -> None:
+        art = _run_eval(seed=7, ci=True)
+        baseline = _run_eval(seed=7, ci=True)
+        # Drop the DR row from the baseline → it appears as "added" in the diff.
+        baseline.report = baseline.report[
+            baseline.report["estimator"] != "DR"
+        ].reset_index(drop=True)
+        del baseline.detailed["HGB"]["DR"]
+        diff = art.compare(baseline)
+        statuses = {(r.estimator, r.status) for r in diff.rows}
+        assert ("DR", "added") in statuses
+
+
+class TestExportMarkdown:
+    def test_export_writes_markdown(self, tmp_path: Path) -> None:
+        art = _run_eval(ci=True)
+        paths = art.export(tmp_path / "run", formats=["json", "markdown"])
+        assert paths["markdown"].suffix == ".md"
+        assert paths["markdown"].is_file()
+        assert (
+            paths["markdown"]
+            .read_text(encoding="utf-8")
+            .startswith("# skdr-eval evaluation summary")
+        )
+
+    def test_export_rejects_unknown_format(self, tmp_path: Path) -> None:
+        art = _run_eval()
+        with pytest.raises(ConfigurationError, match="Unknown export format"):
+            art.export(tmp_path / "run", formats=["json", "pdf"])

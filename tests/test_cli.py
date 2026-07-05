@@ -715,3 +715,200 @@ class TestLoadModelDirect:
     def test_parse_model_specs_empty_path(self):
         with pytest.raises(Exit):
             _parse_model_specs(["name="])
+
+
+# --------------------------------------------------------------------------- #
+# New output / consumption commands (#184 #205 #231 #251)                     #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def design_model_and_logs(tmp_path: Path) -> tuple[Path, Path]:
+    """A logs parquet + a pickled model fitted on the full design feature set.
+
+    The CLI ``evaluate`` runs with ``fit_models=False``, so the candidate model
+    must predict on the same columns ``build_design`` assembles (cli_*, st_*,
+    and op_*_elig — seven features here). Returns ``(logs_path, model_path)``.
+    """
+    logs, _, _ = skdr_eval.make_synth_logs(n=600, n_ops=3, seed=0)
+    feature_cols = [
+        c
+        for c in logs.columns
+        if c.startswith("cli_") or c.startswith("st_") or c.startswith("op_")
+    ]
+    model = HistGradientBoostingRegressor(max_iter=20, random_state=0)
+    model.fit(logs[feature_cols].to_numpy(), logs["service_time"].to_numpy())
+    logs_path = tmp_path / "logs.parquet"
+    logs.to_parquet(logs_path)
+    model_path = tmp_path / "model.joblib"
+    joblib.dump(model, model_path)
+    return logs_path, model_path
+
+
+def _saved_artifact_json(path: Path, *, seed: int = 0) -> Path:
+    """Write a real artifact.json via the Python API and return its path."""
+    logs, _, _ = skdr_eval.make_synth_logs(n=500, n_ops=3, seed=seed)
+    art = skdr_eval.evaluate_sklearn_models(
+        logs=logs,
+        models={"HGB": HistGradientBoostingRegressor(max_iter=15, random_state=seed)},
+        fit_models=True,
+        n_splits=3,
+        random_state=seed,
+        policy_train="all",
+        ci_bootstrap=True,
+    )
+    path.write_text(art.to_schema().model_dump_json(indent=2), encoding="utf-8")
+    return path
+
+
+class TestEvaluateFormat:
+    def test_format_json_is_pipe_clean_stdout(
+        self, design_model_and_logs: tuple[Path, Path], tmp_path: Path
+    ):
+        logs_path, model_path = design_model_and_logs
+        result = runner.invoke(
+            app,
+            [
+                "evaluate",
+                str(logs_path),
+                "--model",
+                f"M={model_path}",
+                "--out",
+                str(tmp_path / "out"),
+                "--format",
+                "json",
+            ],
+        )
+        # Exit code follows the verdict gate (0/3/4); stdout must be valid JSON.
+        payload = json.loads(result.stdout)
+        assert "report" in payload
+        # The "wrote N files" confirmation is on stderr, not stdout.
+        assert "Wrote" not in result.stdout
+        assert "Wrote" in result.stderr
+
+    def test_format_markdown(
+        self, design_model_and_logs: tuple[Path, Path], tmp_path: Path
+    ):
+        logs_path, model_path = design_model_and_logs
+        result = runner.invoke(
+            app,
+            [
+                "evaluate",
+                str(logs_path),
+                "--model",
+                f"M={model_path}",
+                "--out",
+                str(tmp_path / "out"),
+                "--format",
+                "markdown",
+            ],
+        )
+        assert "# skdr-eval evaluation summary" in result.stdout
+
+    def test_default_output_unchanged(
+        self, design_model_and_logs: tuple[Path, Path], tmp_path: Path
+    ):
+        logs_path, model_path = design_model_and_logs
+        result = runner.invoke(
+            app,
+            [
+                "evaluate",
+                str(logs_path),
+                "--model",
+                f"M={model_path}",
+                "--out",
+                str(tmp_path / "out"),
+            ],
+        )
+        # Without --format the confirmation stays on stdout (legacy behaviour).
+        assert "Wrote" in result.stdout
+
+    def test_bad_format_rejected(
+        self, design_model_and_logs: tuple[Path, Path], tmp_path: Path
+    ):
+        logs_path, model_path = design_model_and_logs
+        result = runner.invoke(
+            app,
+            [
+                "evaluate",
+                str(logs_path),
+                "--model",
+                f"M={model_path}",
+                "--out",
+                str(tmp_path / "out"),
+                "--format",
+                "bogus",
+            ],
+        )
+        assert result.exit_code != EXIT_OK
+
+
+class TestSchemaCommand:
+    def test_schema_artifact(self):
+        result = runner.invoke(app, ["schema", "--kind", "artifact"])
+        assert result.exit_code == EXIT_OK
+        payload = json.loads(result.stdout)
+        assert payload["title"] == "ArtifactSchema"
+
+    def test_schema_card(self):
+        result = runner.invoke(app, ["schema", "--kind", "card"])
+        assert result.exit_code == EXIT_OK
+        assert json.loads(result.stdout)["title"] == "EvaluationCard"
+
+    def test_schema_bad_kind(self):
+        result = runner.invoke(app, ["schema", "--kind", "bogus"])
+        assert result.exit_code != EXIT_OK
+
+
+class TestCompareCommand:
+    def test_compare_no_regression_exits_zero(self, tmp_path: Path):
+        a = _saved_artifact_json(tmp_path / "a.json", seed=0)
+        b = _saved_artifact_json(tmp_path / "b.json", seed=0)
+        result = runner.invoke(app, ["compare", str(a), str(b)])
+        assert result.exit_code == EXIT_OK
+        assert "No verdict regression" in result.stdout
+
+    def test_compare_regression_exits_do_not_deploy(self, tmp_path: Path):
+        # Baseline: hand-edit a saved artifact into a clean "deploy" posture,
+        # then compare the (worse) candidate against it.
+        candidate = _saved_artifact_json(tmp_path / "cand.json", seed=0)
+        raw = json.loads(candidate.read_text())
+        for row in raw["report"]:
+            row["support_health"] = "ok"
+            row["diagnostic_warnings"] = ""
+            row["pareto_k"] = 0.1
+            row["ci_lower"] = 1000.0
+            row["ci_upper"] = 1100.0
+        baseline = tmp_path / "base.json"
+        baseline.write_text(json.dumps(raw), encoding="utf-8")
+        result = runner.invoke(app, ["compare", str(baseline), str(candidate)])
+        assert result.exit_code == EXIT_DO_NOT_DEPLOY
+        assert "regression" in result.stdout.lower()
+
+    def test_compare_markdown_format(self, tmp_path: Path):
+        a = _saved_artifact_json(tmp_path / "a.json", seed=0)
+        b = _saved_artifact_json(tmp_path / "b.json", seed=0)
+        result = runner.invoke(app, ["compare", str(a), str(b), "--format", "markdown"])
+        assert "| Model |" in result.stdout
+
+
+class TestBadgeCommand:
+    def test_badge_markdown_snippet(self, tmp_path: Path):
+        aj = _saved_artifact_json(tmp_path / "a.json", seed=0)
+        result = runner.invoke(app, ["badge", str(aj), "--model", "HGB"])
+        assert result.exit_code == EXIT_OK
+        assert result.stdout.strip().startswith("![skdr-eval")
+
+    def test_badge_writes_svg(self, tmp_path: Path):
+        aj = _saved_artifact_json(tmp_path / "a.json", seed=0)
+        svg = tmp_path / "badge.svg"
+        result = runner.invoke(
+            app, ["badge", str(aj), "--model", "HGB", "--out", str(svg)]
+        )
+        assert result.exit_code == EXIT_OK
+        assert svg.read_text(encoding="utf-8").startswith("<svg")
+
+    def test_badge_unknown_model_exits_data(self, tmp_path: Path):
+        aj = _saved_artifact_json(tmp_path / "a.json", seed=0)
+        result = runner.invoke(app, ["badge", str(aj), "--model", "NOPE"])
+        assert result.exit_code == EXIT_DATA
