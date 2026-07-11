@@ -131,7 +131,8 @@ extra is installed.
 ### Exceptions
 
 `BootstrapError` `ConfigurationError` `ConvergenceError` `DataValidationError`
-`DatasetError` `EstimationError` `InsufficientDataError` `MemoryError`
+`DatasetError` `EstimationError` `InsufficientDataError`
+`InsufficientOverlapError` `MemoryError`
 `ModelValidationError` `OptionalDependencyError` `OutcomeModelError`
 `PairwiseEvaluationError` `PolicyInductionError` `PropensityScoreError`
 `SkdrEvalError` `VersionError`

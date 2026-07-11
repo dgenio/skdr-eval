@@ -54,6 +54,20 @@ class InsufficientDataError(DataValidationError):
     pass
 
 
+class InsufficientOverlapError(InsufficientDataError):
+    """Raised by the fast overlap precheck when the logs cannot support the
+    requested off-policy evaluation at all.
+
+    Emitted *before* the expensive cross-fitting / bootstrap when
+    ``evaluate_sklearn_models(..., requires_overlap=True)`` finds the logged
+    data has effectively no positivity/overlap (e.g. observed actions with
+    near-zero estimated propensity, or a degenerate eligibility match rate),
+    so callers fail fast instead of paying the full fit cost for a verdict that
+    can only be "your logs don't support this" (#206)."""
+
+    pass
+
+
 class PropensityScoreError(EstimationError):
     """Raised when propensity score estimation fails."""
 

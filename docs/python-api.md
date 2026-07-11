@@ -53,6 +53,23 @@ The same trio is accepted by `evaluate_pairwise_models`,
 `fit_propensity_timecal`, `fit_outcome_crossfit`, and
 `estimate_propensity_pairwise`.
 
+**Scaling controls (keyword-only):**
+- `n_jobs`: Parallel workers for the candidate-model loop, cross-fitting folds,
+  and bootstrap replicates (default: `1` = serial; `-1` = all cores). Results
+  are **deterministic and independent of `n_jobs`** — the model loop and folds
+  are bit-identical to serial, and the bootstrap reseeds per replicate so the
+  CIs reproduce exactly.
+- `execution_mode`: `"auto"` (default), `"standard"`, or `"large_data"`.
+  `"large_data"` predicts the policy-induction feature matrix in `chunk_size`
+  row-blocks to bound peak memory on large logs; it is numerically identical to
+  `"standard"`. `"auto"` selects `"large_data"` once the log is large.
+- `chunk_size`: Max eligible (sample, operator) pairs materialised at once in
+  `"large_data"` mode (default: `100_000`).
+- `requires_overlap`: When `True`, run a cheap overlap/positivity precheck
+  before the expensive fit and raise `InsufficientOverlapError` if the logs
+  cannot support OPE at all (default: `False`). Tune with `overlap_floor` and
+  `min_match_rate`.
+
 ### `evaluate_pairwise_models(logs_df, op_daily_df, models, metric_col, task_type, direction, **kwargs)`
 Evaluate models using pairwise (client-operator) evaluation with autoscaling.
 
