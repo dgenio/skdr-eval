@@ -2717,9 +2717,17 @@ def evaluate_pairwise_models(
     use_external = external_policies is not None
     if not use_external:
         validate_models_dict(models)
-    # Accept polars / pyarrow frames at the boundary; convert once (#72).
+    # Accept polars / pyarrow frames at the boundary; convert once (#72, #236).
+    # Every user-supplied frame on the pairwise path — including the external
+    # policy tables — flows through the single ``coerce_to_pandas`` seam so the
+    # downstream NumPy code only ever sees pandas.
     logs_df = coerce_to_pandas(logs_df, name="logs_df")
     op_daily_df = coerce_to_pandas(op_daily_df, name="op_daily_df")
+    if external_policies is not None:
+        external_policies = {
+            name: coerce_to_pandas(frame, name=f"external_policies[{name!r}]")
+            for name, frame in external_policies.items()
+        }
     if execution_mode not in ("auto", "standard", "large_data"):
         raise ValueError(
             f"Unknown execution_mode: {execution_mode}. "

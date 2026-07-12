@@ -203,6 +203,75 @@ def test_pairwise_polars_inputs() -> None:
     _assert_pairwise_report_equiv(art_pd, art_pl)
 
 
+@requires_polars
+def test_pairwise_external_policies_accepts_polars() -> None:
+    # #236: the external-policy tables passed to evaluate_pairwise_models now go
+    # through the same coerce_to_pandas seam, so a polars policy frame produces
+    # results identical to the pandas one.
+    import polars as pl  # noqa: PLC0415
+
+    logs_df, op_daily_df = skdr_eval.make_pairwise_synth(
+        n_days=2, n_clients_day=120, n_ops=4, seed=8
+    )
+    rng = np.random.default_rng(0)
+    clients = logs_df["client_id"].unique()
+    known_ops = op_daily_df["operator_id"].unique()
+    policy = pd.DataFrame(
+        {
+            "client_id": clients,
+            "operator_id": rng.choice(known_ops, size=len(clients)),
+        }
+    )
+
+    common = {
+        "logs_df": logs_df,
+        "op_daily_df": op_daily_df,
+        "models": {},
+        "metric_col": "service_time",
+        "task_type": "regression",
+        "direction": "min",
+        "n_splits": 2,
+        "fit_models": False,  # external policies are scored, not fit
+        "random_state": 0,
+    }
+    art_pd = skdr_eval.evaluate_pairwise_models(
+        external_policies={"sim": policy}, **common
+    )
+    art_pl = skdr_eval.evaluate_pairwise_models(
+        external_policies={"sim": pl.from_pandas(policy)}, **common
+    )
+    _assert_pairwise_report_equiv(art_pd, art_pl)
+
+
+@requires_polars
+def test_autoscaling_scenario_accepts_polars() -> None:
+    # #236: simulate_autoscaling_scenario routes its logs/op-daily frames through
+    # the seam, so polars inputs are accepted and match the pandas run.
+    import polars as pl  # noqa: PLC0415
+
+    logs_df, op_daily_df = skdr_eval.make_pairwise_synth(
+        n_days=2, n_clients_day=120, n_ops=4, seed=9
+    )
+
+    def _run(logs: object, op_daily: object) -> skdr_eval.EvaluationArtifact:
+        return skdr_eval.simulate_autoscaling_scenario(
+            logs,
+            op_daily,
+            {"HGB": HistGradientBoostingRegressor(max_iter=20, random_state=0)},
+            {"capacity_multiplier": 0.8},
+            metric_col="service_time",
+            task_type="regression",
+            direction="min",
+            random_state=0,
+            fit_models=True,
+            policy_train="pre_split",
+        )
+
+    art_pd = _run(logs_df, op_daily_df)
+    art_pl = _run(pl.from_pandas(logs_df), pl.from_pandas(op_daily_df))
+    _assert_pairwise_report_equiv(art_pd, art_pl)
+
+
 def _with_set_masks(logs_df: pd.DataFrame) -> pd.DataFrame:
     """Re-express each list-valued ``elig_mask`` cell as an (unordered) set."""
     out = logs_df.copy()
