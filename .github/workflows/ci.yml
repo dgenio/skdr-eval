@@ -223,7 +223,7 @@ jobs:
         python examples/use_cases/05_logs_to_experiment_card.py
         python examples/use_cases/06_agent_routing_policy.py
         python examples/use_cases/07_simulator_and_scenarios.py
-        python examples/use_cases/08_share_and_compare.py
+        python examples/use_cases/08_share_results.py
 
   # Boosting-adapter job (#71): the GBDT adapter tests are skipif-gated on the
   # backend being importable, and the default `test` job installs only `[dev]`

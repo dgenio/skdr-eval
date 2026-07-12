@@ -19,15 +19,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from skdr_eval.reporting import ArtifactSchema, EvaluationCard
+from skdr_eval.reporting import ArtifactSchema
 
 SCHEMA_DIR = Path(__file__).resolve().parent.parent / "docs" / "schemas"
 
 # Map of committed filename -> schema producer. Keep in sync with
 # tests/test_schema_publishing.py::SCHEMA_FILES.
+#
+# Only the artifact payload schema is published. The card schema (which encodes
+# the deploy/recommendation verdict) is deferred until the verdict contract
+# stabilizes after the July 2026 experiment-eligibility audit.
 SCHEMAS = {
     "artifact.schema.json": ArtifactSchema.json_schema,
-    "card.schema.json": EvaluationCard.json_schema,
 }
 
 

@@ -62,13 +62,18 @@ keep working); a major bump may remove or rename fields. The current values
 are exported as constants and embedded in every artifact's `metadata` and on
 every card.
 
-The generated JSON Schemas are committed under [`docs/schemas/`](schemas/)
-(`artifact.schema.json`, `card.schema.json`) so downstream tooling can validate
-`skdr-eval` output without importing the library. Emit them yourself with
-`skdr-eval schema --kind artifact|card`, or from Python via
-`ArtifactSchema.json_schema()` / `EvaluationCard.json_schema()`. A test
-(`tests/test_schema_publishing.py`) fails if the committed files drift from the
-live schema, and `scripts/generate_schemas.py` regenerates them.
+The generated JSON Schema for the **artifact** payload is committed under
+[`docs/schemas/`](schemas/) (`artifact.schema.json`) so downstream tooling can
+validate `skdr-eval` output without importing the library. Emit it yourself with
+`skdr-eval schema --kind artifact`, or from Python via
+`ArtifactSchema.json_schema()`. A test (`tests/test_schema_publishing.py`) fails
+if the committed file drifts from the live schema, and
+`scripts/generate_schemas.py` regenerates it.
+
+The **card** schema is intentionally *not* published yet: the card carries the
+`deploy`/recommendation verdict, whose contract is under the July 2026
+experiment-eligibility audit. Publishing it now would freeze a provisional
+verdict shape; it will be added once that contract stabilizes.
 
 ## Road to 1.0
 
@@ -98,8 +103,7 @@ extra is installed.
 
 `attach_warnings` `block_bootstrap_ci` `bootstrap_confidence_interval`
 `build_design` `build_evaluation_artifact` `build_strategy` `chi_square_test`
-`compare_artifacts` `create_dashboard` `create_model_ensemble` `doctor`
-`dr_value_with_clip`
+`create_dashboard` `create_model_ensemble` `doctor` `dr_value_with_clip`
 `dr_value_with_strategy` `embedding_sufficiency_diagnostic`
 `evaluate_external_policies` `evaluate_pairwise_models`
 `evaluate_propensity_diagnostics` `evaluate_sklearn_models`
@@ -122,8 +126,7 @@ extra is installed.
 
 ### Classes and dataclasses
 
-`ArtifactDiff` `ArtifactRowDiff` `ArtifactSchema` `BaselineBlock` `Capability`
-`Check` `ClipTransform`
+`ArtifactSchema` `BaselineBlock` `Capability` `Check` `ClipTransform`
 `ConfigManager` `CoverageResult` `CoverageSimBlock` `DRResult`
 `DRosShrinkTransform` `DataProfile` `DatasetBundle` `Design` `DiagnosticGate`
 `DiagnosticsBlock` `DoctorReport` `EmbeddingSufficiencyReport` `EstimandBlock`
@@ -133,8 +136,7 @@ extra is installed.
 `MRDRWeightedLoss` `MSEOutcomeLoss` `ModelConfig` `ModelEvaluator`
 `ModelFactory` `ModelSelector` `NullTracker` `OutcomeLoss` `PairwiseDesign`
 `PerActionDiagnostics` `PropensityDiagnostics` `ProvenanceBlock` `Reason`
-`Recommendation` `RecommendationPolicy` `ReportRow` `SensitivityBlock`
-`SlateGroundTruth`
+`Recommendation` `RecommendationPolicy` `ReportRow` `SensitivityBlock` `SlateGroundTruth`
 `SlateResult` `StatisticalTest` `SupportHealthThresholds` `SwitchTauTransform`
 `Tracker` `TransformContext` `TrustBlock` `VisualizationConfig`
 `WeightTransform`

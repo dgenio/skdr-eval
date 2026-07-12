@@ -94,7 +94,6 @@ nav:
       - Logs → experiment-review card: recipes/logs-to-experiment-card.md
       - Good vs bad support: recipes/good-vs-bad-support.md
       - LLM-reranker OPE: recipes/llm-reranker-ope.md
-      - NL summary (provider-agnostic): recipes/llm-summary-prompt.md
       - Coming from Open Bandit Pipeline: recipes/obp-interop.md
       - Datasets, inputs & adapters: datasets.md
   - Comparisons:

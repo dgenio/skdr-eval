@@ -132,7 +132,7 @@ use-cases:
 	python examples/use_cases/05_logs_to_experiment_card.py
 	python examples/use_cases/06_agent_routing_policy.py
 	python examples/use_cases/07_simulator_and_scenarios.py
-	python examples/use_cases/08_share_and_compare.py
+	python examples/use_cases/08_share_results.py
 
 # Known-failure-mode tutorials (#134). These scripts intentionally
 # produce ``support_health=high_risk`` so a newcomer can see what a bad
