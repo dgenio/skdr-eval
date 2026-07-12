@@ -8,12 +8,15 @@ boundary, :func:`coerce_to_pandas` accepts a Polars ``DataFrame`` or a PyArrow
 ingestion, so every downstream consumer — which already speaks pandas — is
 unchanged.
 
-This module is the **single canonical conversion seam** (#236): every public
-evaluator (``evaluate_sklearn_models``, ``evaluate_pairwise_models`` and its
+This module is the **single canonical conversion seam** (#236): the public
+evaluators (``evaluate_sklearn_models``, ``evaluate_pairwise_models`` and its
 external-policy tables, ``evaluate_external_policies``, and
-``simulate_autoscaling_scenario``) routes its user-supplied frames through
-``coerce_to_pandas`` exactly once at the boundary, so the NumPy design-matrix
-code paths never branch on input backend.
+``simulate_autoscaling_scenario``) route their user-supplied frames through
+``coerce_to_pandas`` at the boundary, so the NumPy design-matrix code paths
+never branch on input backend. A non-pandas frame is converted at most once:
+``coerce_to_pandas`` returns a pandas input unchanged, so a layer that both
+coerces and delegates (e.g. ``simulate_autoscaling_scenario`` calling
+``evaluate_pairwise_models``) does not double-convert.
 
 Detection is by class identity, *not* by importing ``polars`` / ``pyarrow``
 at module load: the conversion only imports the relevant package when an

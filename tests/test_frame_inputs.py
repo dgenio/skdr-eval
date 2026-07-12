@@ -231,7 +231,7 @@ def test_pairwise_external_policies_accepts_polars() -> None:
         "task_type": "regression",
         "direction": "min",
         "n_splits": 2,
-        "policy_train": "pre_split",
+        "fit_models": False,  # external policies are scored, not fit
         "random_state": 0,
     }
     art_pd = skdr_eval.evaluate_pairwise_models(
