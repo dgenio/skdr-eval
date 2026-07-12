@@ -1247,3 +1247,90 @@ class TestDiagnosticGate:
         assert d["state"] == "pass"
         assert d["value"] == 0.05
         assert d["threshold"] == 0.0025
+
+
+# --------------------------------------------------------------------------- #
+# Export / consumption surface (#184 #234 #237 #238 #249 #251)                #
+# --------------------------------------------------------------------------- #
+
+
+class TestTypedRows:
+    def test_rows_match_report(self) -> None:
+        art = _run_eval(ci=True)
+        rows = art.rows()
+        assert len(rows) == len(art.report)
+        # Field parity vs the DataFrame for the SNDR row.
+        r = art.row("HGB", estimator="SNDR")
+        df_row = art.report[
+            (art.report["model"] == "HGB") & (art.report["estimator"] == "SNDR")
+        ].iloc[0]
+        assert r.model == "HGB"
+        assert r.estimator == "SNDR"
+        assert math.isclose(r.V_hat, float(df_row["V_hat"]), rel_tol=0, abs_tol=1e-9)
+        assert r.verdict in {
+            "deploy",
+            "ab_test",
+            "insufficient_evidence",
+            "do_not_deploy",
+            None,
+        }
+
+    def test_row_unknown_raises(self) -> None:
+        art = _run_eval()
+        with pytest.raises(DataValidationError, match="No report row"):
+            art.row("HGB", estimator="NOPE")
+
+    def test_rows_verdict_never_positive_without_ci(self) -> None:
+        # No bootstrap CI → the gate cannot return a positive verdict; it is
+        # either insufficient_evidence or do_not_deploy (a high-risk blocker),
+        # never deploy/ab_test.
+        art = _run_eval(ci=False)
+        for r in art.rows():
+            assert r.verdict in {"insufficient_evidence", "do_not_deploy", None}
+
+
+class TestToMarkdown:
+    def test_markdown_has_table_and_rows(self) -> None:
+        art = _run_eval(ci=True)
+        md = art.to_markdown()
+        assert md.startswith("# skdr-eval evaluation summary")
+        assert "| Model | Estimator |" in md
+        # One data row per (model, estimator).
+        assert md.count("| HGB |") == len(art.report)
+
+    def test_markdown_filters_by_model_and_estimator(self) -> None:
+        art = _run_eval(ci=True)
+        md = art.to_markdown("HGB", estimator="SNDR")
+        assert md.count("| HGB |") == 1
+
+    def test_markdown_escapes_pipes_in_model_name(self) -> None:
+        report = _make_report_row()
+        report["model"] = "a|b"
+        art = _make_artifact_from_row(report)
+        md = art.to_markdown()
+        assert "a\\|b" in md
+
+
+class TestExportMarkdown:
+    def test_export_writes_markdown(self, tmp_path: Path) -> None:
+        art = _run_eval(ci=True)
+        paths = art.export(tmp_path / "run", formats=["json", "markdown"])
+        assert paths["markdown"].suffix == ".md"
+        assert paths["markdown"].is_file()
+        assert (
+            paths["markdown"]
+            .read_text(encoding="utf-8")
+            .startswith("# skdr-eval evaluation summary")
+        )
+
+    def test_export_markdown_to_directory(self, tmp_path: Path) -> None:
+        # Existing directory → files land as <dir>/artifact.<ext>.
+        art = _run_eval(ci=True)
+        paths = art.export(tmp_path, formats=["markdown"])
+        assert paths["markdown"] == tmp_path / "artifact.md"
+        assert paths["markdown"].is_file()
+
+    def test_export_rejects_unknown_format(self, tmp_path: Path) -> None:
+        art = _run_eval()
+        with pytest.raises(ConfigurationError, match="Unknown export format"):
+            art.export(tmp_path / "run", formats=["json", "pdf"])

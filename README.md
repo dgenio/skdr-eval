@@ -411,6 +411,10 @@ skdr-eval evaluate logs.parquet \
     --out ./run \
     --tracker-dir ./tracker_runs/2026-05-20
 
+# Stream the headline report to stdout in a pipe-friendly format (#231);
+# the "wrote N files" line goes to stderr so stdout stays clean.
+skdr-eval evaluate logs.parquet --model HGB=model.joblib --format json | jq .
+
 # Re-render a card directly from a saved artifact.json.
 skdr-eval card ./run/artifact.json --model HGB --estimator DR \
     --out ./run/card.yaml --format yaml
@@ -418,6 +422,9 @@ skdr-eval card ./run/artifact.json --model HGB --estimator DR \
 # Narrate *why* a saved artifact got its verdict (no re-evaluation).
 skdr-eval explain ./run/artifact.json --model HGB --estimator SNDR
 skdr-eval explain ./run/artifact.json --model HGB --json | jq .
+
+# Print the published JSON Schema for the artifact payload (#205).
+skdr-eval schema --kind artifact > artifact.schema.json
 
 # Stable exit codes (good for CI gates):
 #   0 — success: no 'do_not_deploy' or 'insufficient_evidence' verdict was
@@ -496,6 +503,37 @@ assert loaded == card
 if card.trust.recommendation and card.trust.recommendation["verdict"] == "do_not_deploy":
     raise SystemExit(1)
 ```
+
+## Sharing results
+
+Once you have an artifact, the last mile is *reading* and *communicating* it.
+The consumption surface is additive — `artifact.report` stays the source of
+truth.
+
+```python
+# Typed rows — read results by attribute, not by DataFrame column string.
+for row in artifact.rows():
+    print(row.model, row.estimator, row.V_hat, row.support_health)
+
+# Paste-ready Markdown (V̂, CI, trust diagnostics) for a PR / ticket.
+print(artifact.to_markdown())
+artifact.export("artifacts/run", formats=["json", "markdown"])
+
+# The published JSON Schema for the artifact payload — validate skdr-eval
+# output in other tools/languages without importing the library.
+schema = skdr_eval.ArtifactSchema.json_schema()
+```
+
+The same surface is on the CLI (`pip install 'skdr-eval[cli]'`): `skdr-eval
+evaluate ... --format {table,csv,json,markdown}` streams the report to stdout,
+and `skdr-eval schema --kind artifact` prints the published JSON Schema (also
+committed under [`docs/schemas/`](docs/schemas/)). See
+[`examples/use_cases/08_share_results.py`](examples/use_cases/08_share_results.py).
+
+> **Deployment-verdict outputs** — artifact comparison/regression gates,
+> cost-benefit decision summaries, LLM-summary facts, and shareable badges — are
+> deferred until the experiment-eligibility / verdict contract stabilizes (see
+> `docs/api-stability.md`), so provisional verdicts aren't made easy to publish.
 
 ## Experiment tracker
 

@@ -1,0 +1,235 @@
+{
+  "schema_version": "1.0.0",
+  "skdr_eval_version": "0.0.1.dev292",
+  "timestamp": "2026-07-05T10:31:55+00:00",
+  "metadata": {
+    "evaluator": "evaluate_sklearn_models",
+    "n_samples": 400,
+    "random_state": 5,
+    "alpha": 0.05,
+    "policy_train": "all",
+    "policy_train_frac": 0.85,
+    "n_splits": 3,
+    "clip_grid": [
+      2.0,
+      5.0,
+      10.0,
+      20.0,
+      50.0,
+      null
+    ],
+    "ci_bootstrap": true,
+    "estimators": [
+      "DR",
+      "SNDR"
+    ],
+    "schema_version": "1.0.0"
+  },
+  "report": [
+    {
+      "model": "demo",
+      "estimator": "DR",
+      "V_hat": 33.70273329157544,
+      "SE_if": 0.7976634517216816,
+      "clip": 2.0,
+      "ESS": 337.4681731358855,
+      "tail_mass": 0.0875,
+      "MSE_est": 0.6362669822125475,
+      "match_rate": 1.0,
+      "min_pscore": 0.0448096048592409,
+      "pscore_q10": 0.27124875563964834,
+      "pscore_q05": 0.14955086688485653,
+      "pscore_q01": 0.05518890889632599,
+      "ci_lower": 30.695794153583584,
+      "ci_upper": 35.68364508938171,
+      "support_health": "high_risk",
+      "diagnostic_warnings": "EXTREME_CLIP,HIGH_PARETO_K,MISCAL_PROP,PER_ACTION_MISCAL"
+    },
+    {
+      "model": "demo",
+      "estimator": "SNDR",
+      "V_hat": 33.1169642701265,
+      "SE_if": 0.7976634517216816,
+      "clip": 2.0,
+      "ESS": 337.4681731358855,
+      "tail_mass": 0.0875,
+      "MSE_est": 0.6362669822125475,
+      "match_rate": 1.0,
+      "min_pscore": 0.0448096048592409,
+      "pscore_q10": 0.27124875563964834,
+      "pscore_q05": 0.14955086688485653,
+      "pscore_q01": 0.05518890889632599,
+      "ci_lower": 30.4385485516052,
+      "ci_upper": 34.763953121191754,
+      "support_health": "high_risk",
+      "diagnostic_warnings": "EXTREME_CLIP,HIGH_PARETO_K,MISCAL_PROP,PER_ACTION_MISCAL"
+    }
+  ],
+  "warnings": [
+    {
+      "model": "demo",
+      "estimator": "DR",
+      "support_health": "high_risk",
+      "warning_codes": [
+        "EXTREME_CLIP",
+        "HIGH_PARETO_K",
+        "MISCAL_PROP",
+        "PER_ACTION_MISCAL"
+      ]
+    },
+    {
+      "model": "demo",
+      "estimator": "SNDR",
+      "support_health": "high_risk",
+      "warning_codes": [
+        "EXTREME_CLIP",
+        "HIGH_PARETO_K",
+        "MISCAL_PROP",
+        "PER_ACTION_MISCAL"
+      ]
+    }
+  ],
+  "sensitivity": [
+    {
+      "model": "demo",
+      "estimator": "DR",
+      "V_min": 33.70273329157544,
+      "V_max": 34.29969497143271,
+      "V_range": 0.5969616798572659,
+      "chosen_clip": 2.0,
+      "chosen_V": 33.70273329157544,
+      "argmin_MSE_clip": 2.0,
+      "dr_sndr_agree": true,
+      "stable": true,
+      "v_range_frac": 0.017712559829872503,
+      "stability_grade": "stable"
+    },
+    {
+      "model": "demo",
+      "estimator": "SNDR",
+      "V_min": 31.64776264014741,
+      "V_max": 33.1169642701265,
+      "V_range": 1.4692016299790929,
+      "chosen_clip": 2.0,
+      "chosen_V": 33.1169642701265,
+      "argmin_MSE_clip": 2.0,
+      "dr_sndr_agree": true,
+      "stable": true,
+      "v_range_frac": 0.044364018935890245,
+      "stability_grade": "stable"
+    }
+  ],
+  "diagnostics": {
+    "demo": {
+      "overlap_ratio": 0.818478077528417,
+      "balance_ratio": 0.5853467168569589,
+      "calibration_score": 0.7047492863021075,
+      "discrimination_score": 0.5977107635496153,
+      "log_loss_score": 0.8804224842648276,
+      "statistics": {
+        "min_pscore": 0.0448096048592409,
+        "max_pscore": 0.887853073264736,
+        "mean_pscore": 0.46242522664393837,
+        "std_pscore": 0.18116032906114762,
+        "median_pscore": 0.43945321763654704,
+        "pscore_q1": 0.05518890889632599,
+        "pscore_q5": 0.14955086688485653,
+        "pscore_q10": 0.27124875563964834,
+        "pscore_q25": 0.3333333333333333,
+        "pscore_q75": 0.6332899080502599,
+        "pscore_q90": 0.7048284760938095,
+        "pscore_q95": 0.7333953029299984,
+        "pscore_q99": 0.7663826855261311
+      },
+      "balance_stats": {
+        "action_0_count": 236.0,
+        "action_0_mean_pscore": 0.5142013973196152,
+        "action_0_std_pscore": 0.15972198116504213,
+        "action_1_count": 27.0,
+        "action_1_mean_pscore": 0.14553421709081865,
+        "action_1_std_pscore": 0.11545259789299382,
+        "action_2_count": 137.0,
+        "action_2_mean_pscore": 0.4356871315963069,
+        "action_2_std_pscore": 0.1553232537903839
+      },
+      "reliability_curve": [
+        [
+          0.03333333333333333,
+          null,
+          0
+        ],
+        [
+          0.1,
+          null,
+          0
+        ],
+        [
+          0.16666666666666669,
+          null,
+          0
+        ],
+        [
+          0.23333333333333334,
+          null,
+          0
+        ],
+        [
+          0.3,
+          null,
+          0
+        ],
+        [
+          0.3333333333333334,
+          0.59,
+          100
+        ],
+        [
+          0.44639782660721367,
+          0.38461538461538464,
+          13
+        ],
+        [
+          0.5002089959979855,
+          0.5873015873015873,
+          63
+        ],
+        [
+          0.5662892329503425,
+          0.5517241379310345,
+          58
+        ],
+        [
+          0.6374628519071097,
+          0.6621621621621622,
+          74
+        ],
+        [
+          0.6965713460174773,
+          0.7903225806451613,
+          62
+        ],
+        [
+          0.7563523325624125,
+          0.7037037037037037,
+          27
+        ],
+        [
+          0.8148298907686266,
+          0.5,
+          2
+        ],
+        [
+          0.887853073264736,
+          1.0,
+          1
+        ],
+        [
+          0.9666666666666667,
+          null,
+          0
+        ]
+      ],
+      "ece_n_bins": 15
+    }
+  }
+}

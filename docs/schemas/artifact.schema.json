@@ -1,0 +1,661 @@
+{
+  "$defs": {
+    "_DiagnosticsPayloadSchema": {
+      "properties": {
+        "balance_ratio": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Balance Ratio"
+        },
+        "balance_stats": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Balance Stats",
+          "type": "object"
+        },
+        "brier_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Brier Score"
+        },
+        "calibration_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Calibration Score"
+        },
+        "discrimination_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Discrimination Score"
+        },
+        "ece": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ece"
+        },
+        "ece_n_bins": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ece N Bins"
+        },
+        "log_loss_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Log Loss Score"
+        },
+        "overlap_ratio": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Overlap Ratio"
+        },
+        "reliability_curve": {
+          "anyOf": [
+            {
+              "items": {
+                "maxItems": 3,
+                "minItems": 3,
+                "prefixItems": [
+                  {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reliability Curve"
+        },
+        "statistics": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Statistics",
+          "type": "object"
+        }
+      },
+      "required": [
+        "overlap_ratio",
+        "balance_ratio",
+        "calibration_score",
+        "discrimination_score",
+        "log_loss_score",
+        "statistics",
+        "balance_stats"
+      ],
+      "title": "_DiagnosticsPayloadSchema",
+      "type": "object"
+    },
+    "_ReportRowSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "ESS": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ess"
+        },
+        "MSE_est": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mse Est"
+        },
+        "SE_if": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Se If"
+        },
+        "V_hat": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "V Hat"
+        },
+        "ci_lower": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ci Lower"
+        },
+        "ci_upper": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ci Upper"
+        },
+        "clip": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Clip"
+        },
+        "diagnostic_warnings": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Diagnostic Warnings"
+        },
+        "estimator": {
+          "title": "Estimator",
+          "type": "string"
+        },
+        "match_rate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Match Rate"
+        },
+        "min_pscore": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Min Pscore"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "pareto_k": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pareto K"
+        },
+        "pscore_q01": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pscore Q01"
+        },
+        "pscore_q05": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pscore Q05"
+        },
+        "pscore_q10": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pscore Q10"
+        },
+        "support_health": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Support Health"
+        },
+        "tail_mass": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Tail Mass"
+        }
+      },
+      "required": [
+        "model",
+        "estimator",
+        "V_hat",
+        "SE_if",
+        "clip",
+        "ESS",
+        "tail_mass",
+        "MSE_est",
+        "match_rate",
+        "min_pscore",
+        "pscore_q10",
+        "pscore_q05",
+        "pscore_q01"
+      ],
+      "title": "_ReportRowSchema",
+      "type": "object"
+    },
+    "_SensitivityRowSchema": {
+      "properties": {
+        "V_max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "V Max"
+        },
+        "V_min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "V Min"
+        },
+        "V_range": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "V Range"
+        },
+        "argmin_MSE_clip": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Argmin Mse Clip"
+        },
+        "chosen_V": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Chosen V"
+        },
+        "chosen_clip": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Chosen Clip"
+        },
+        "dr_sndr_agree": {
+          "title": "Dr Sndr Agree",
+          "type": "boolean"
+        },
+        "estimator": {
+          "title": "Estimator",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "stability_grade": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stability Grade"
+        },
+        "stable": {
+          "title": "Stable",
+          "type": "boolean"
+        },
+        "v_range_frac": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "V Range Frac"
+        }
+      },
+      "required": [
+        "model",
+        "estimator",
+        "V_min",
+        "V_max",
+        "V_range",
+        "chosen_clip",
+        "chosen_V",
+        "argmin_MSE_clip",
+        "dr_sndr_agree",
+        "stable"
+      ],
+      "title": "_SensitivityRowSchema",
+      "type": "object"
+    },
+    "_WarningRowSchema": {
+      "properties": {
+        "estimator": {
+          "title": "Estimator",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "support_health": {
+          "title": "Support Health",
+          "type": "string"
+        },
+        "warning_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warning Codes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "model",
+        "estimator",
+        "support_health",
+        "warning_codes"
+      ],
+      "title": "_WarningRowSchema",
+      "type": "object"
+    }
+  },
+  "description": "Versioned, JSON-serializable schema for :class:`EvaluationArtifact`.\n\nThis is the canonical wire-format. See :meth:`EvaluationArtifact.to_json`\nand :func:`load_artifact_json` for round-trip behaviour.",
+  "properties": {
+    "assumptions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Assumptions",
+      "type": "array"
+    },
+    "baseline_kind": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Baseline Kind"
+    },
+    "baseline_value": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Baseline Value"
+    },
+    "diagnostics": {
+      "additionalProperties": {
+        "$ref": "#/$defs/_DiagnosticsPayloadSchema"
+      },
+      "title": "Diagnostics",
+      "type": "object"
+    },
+    "estimand_summary": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Estimand Summary"
+    },
+    "estimand_tex": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Estimand Tex"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "report": {
+      "items": {
+        "$ref": "#/$defs/_ReportRowSchema"
+      },
+      "title": "Report",
+      "type": "array"
+    },
+    "schema_version": {
+      "default": "1.1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "sensitivity": {
+      "items": {
+        "$ref": "#/$defs/_SensitivityRowSchema"
+      },
+      "title": "Sensitivity",
+      "type": "array"
+    },
+    "skdr_eval_version": {
+      "title": "Skdr Eval Version",
+      "type": "string"
+    },
+    "timestamp": {
+      "title": "Timestamp",
+      "type": "string"
+    },
+    "warnings": {
+      "items": {
+        "$ref": "#/$defs/_WarningRowSchema"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "skdr_eval_version",
+    "timestamp",
+    "metadata",
+    "report",
+    "warnings",
+    "sensitivity",
+    "diagnostics"
+  ],
+  "title": "ArtifactSchema",
+  "type": "object"
+}

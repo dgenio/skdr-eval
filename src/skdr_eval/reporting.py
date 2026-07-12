@@ -594,6 +594,46 @@ class _ReportRowSchema(BaseModel):
     pareto_k: float | None = None
 
 
+class ReportRow(BaseModel):
+    """Typed, public view of one ``EvaluationArtifact.report`` row (#234).
+
+    A thin, generated projection of the headline report DataFrame so downstream
+    code can read results by attribute (``row.V_hat``) instead of by string
+    column name (``report["V_hat"]``). Built by
+    :meth:`EvaluationArtifact.rows` / :meth:`EvaluationArtifact.row`; the
+    DataFrame remains the source of truth and stays available unchanged.
+
+    ``verdict`` / ``confidence`` mirror the :class:`Recommendation` for the row
+    (``None`` when a recommendation could not be computed — e.g. no CI). Every
+    numeric field is ``float | None`` for the same non-finite-→-``null`` reason
+    documented on :class:`_ReportRowSchema`. ``extra="allow"`` keeps
+    forward-added report columns (e.g. ``delta_V_hat``) accessible.
+    """
+
+    model_config = ConfigDict(extra="allow", protected_namespaces=())
+
+    model: str
+    estimator: str
+    V_hat: float | None = None
+    SE_if: float | None = None
+    clip: float | None = None
+    ESS: float | None = None
+    tail_mass: float | None = None
+    MSE_est: float | None = None
+    match_rate: float | None = None
+    min_pscore: float | None = None
+    pscore_q10: float | None = None
+    pscore_q05: float | None = None
+    pscore_q01: float | None = None
+    pareto_k: float | None = None
+    ci_lower: float | None = None
+    ci_upper: float | None = None
+    support_health: str | None = None
+    diagnostic_warnings: str | None = None
+    verdict: str | None = None
+    confidence: str | None = None
+
+
 class _WarningRowSchema(BaseModel):
     model: str
     estimator: str
@@ -664,6 +704,18 @@ class ArtifactSchema(BaseModel):
     # the report row remain interpretable after a round trip.
     baseline_kind: str | None = None
     baseline_value: float | None = None
+
+    @classmethod
+    def json_schema(cls) -> dict[str, Any]:
+        """Return the Pydantic-generated JSON Schema for the artifact (#205).
+
+        The published, downloadable contract for the serialized
+        ``artifact.json`` — the sibling of :meth:`EvaluationCard.json_schema`.
+        Lets downstream tooling validate ``skdr-eval`` outputs without
+        importing the library.
+        """
+        schema: dict[str, Any] = cls.model_json_schema()
+        return schema
 
 
 # --------------------------------------------------------------------------- #
@@ -1511,6 +1563,61 @@ class EvaluationArtifact:
         return frame
 
     # ------------------------------------------------------------------ #
+    # Typed results façade (#234)                                         #
+    # ------------------------------------------------------------------ #
+
+    def _row_to_report_row(self, row: dict[str, Any]) -> ReportRow:
+        """Build one :class:`ReportRow`, filling verdict/confidence if possible."""
+        model_name = str(row["model"])
+        estimator = str(row["estimator"])
+        verdict: str | None = None
+        confidence: str | None = None
+        try:
+            rec = self.recommendation(model_name, estimator=estimator)
+            verdict = rec.verdict
+            confidence = rec.confidence
+        except (DataValidationError, KeyError, ValueError):
+            # A row whose verdict cannot be computed (e.g. no CI, or a thin
+            # artifact) still yields a typed row — verdict simply stays None.
+            pass
+        payload = {k: _jsonable(v) for k, v in row.items()}
+        payload["verdict"] = verdict
+        payload["confidence"] = confidence
+        return ReportRow(**payload)
+
+    def rows(self) -> list[ReportRow]:
+        """Return the headline report as a list of typed :class:`ReportRow` (#234).
+
+        A typed, attribute-addressable view of :attr:`report`; the DataFrame is
+        left untouched and remains the source of truth. Each row carries the
+        report columns plus the computed ``verdict``/``confidence`` (``None``
+        when a recommendation cannot be produced for that row).
+        """
+        return [
+            self._row_to_report_row(row)
+            for row in self.report.to_dict(orient="records")
+        ]
+
+    def row(self, model_name: str, estimator: str = "SNDR") -> ReportRow:
+        """Return the typed :class:`ReportRow` for one ``(model, estimator)`` (#234).
+
+        Raises
+        ------
+        DataValidationError
+            If no report row matches ``(model_name, estimator)``.
+        """
+        report = self.report
+        mask = (report["model"] == model_name) & (report["estimator"] == estimator)
+        matched = report[mask]
+        if matched.empty:
+            raise DataValidationError(
+                f"No report row for model={model_name!r}, estimator={estimator!r} "
+                f"(known estimators for this model: "
+                f"{sorted(report.loc[report['model'] == model_name, 'estimator'])}).",
+            )
+        return self._row_to_report_row(matched.iloc[0].to_dict())
+
+    # ------------------------------------------------------------------ #
     # Bulk export                                                         #
     # ------------------------------------------------------------------ #
 
@@ -1535,8 +1642,9 @@ class EvaluationArtifact:
             - Otherwise ``path`` is treated as a stem and ``.<fmt>`` is
               appended directly: ``"artifacts/run"`` produces
               ``artifacts/run.json`` and ``artifacts/run.html``.
-        formats : list of {"json", "html"}, optional
-            Defaults to both.
+        formats : list of {"json", "html", "markdown"}, optional
+            Defaults to ``["json", "html"]``. ``"markdown"`` writes the
+            compact :meth:`to_markdown` summary with a ``.md`` suffix (#237).
 
         Returns
         -------
@@ -1545,13 +1653,16 @@ class EvaluationArtifact:
         """
         if formats is None:
             formats = ["json", "html"]
-        supported = {"json", "html"}
+        supported = {"json", "html", "markdown"}
         unknown = set(formats) - supported
         if unknown:
             raise ConfigurationError(
                 f"Unknown export format(s): {sorted(unknown)} "
                 f"(supported: {sorted(supported)})",
             )
+        # ``markdown`` maps to a ``.md`` file suffix; other formats use the
+        # format name directly.
+        _suffix = {"markdown": "md"}
 
         p = Path(path)
         # Trailing-separator hint must be checked on the original string,
@@ -1563,19 +1674,84 @@ class EvaluationArtifact:
 
         written: dict[str, Path] = {}
         for fmt in formats:
-            if treat_as_dir:
-                target = p / f"artifact.{fmt}"
-            elif p.suffix:
-                target = p.with_suffix(f".{fmt}")
-            else:
-                target = p.with_suffix(f".{fmt}")
+            ext = _suffix.get(fmt, fmt)
+            target = p / f"artifact.{ext}" if treat_as_dir else p.with_suffix(f".{ext}")
             if fmt == "json":
                 # ``target`` is always a concrete path here, so to_json returns
                 # the written Path (never the str branch).
                 written["json"] = cast("Path", self.to_json(target))
             elif fmt == "html":
                 written["html"] = cast("Path", self.to_html(target))
+            elif fmt == "markdown":
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(self.to_markdown(), encoding="utf-8")
+                logger.info("Wrote evaluation artifact Markdown to %s", target)
+                written["markdown"] = target
         return written
+
+    # ------------------------------------------------------------------ #
+    # Markdown summary (#237)                                             #
+    # ------------------------------------------------------------------ #
+
+    def to_markdown(
+        self, model: str | None = None, *, estimator: str | None = None
+    ) -> str:
+        """Render a compact, paste-ready Markdown summary (#237).
+
+        Designed for PR descriptions, tickets, and chat, alongside the JSON /
+        HTML / card outputs. Deterministic and free of non-reproducible
+        content. Follows the same escaped-pipe table convention as
+        :meth:`skdr_eval.doctor.DoctorReport.to_markdown`.
+
+        Parameters
+        ----------
+        model : str, optional
+            Restrict to one model. ``None`` (default) summarizes every row.
+        estimator : str, optional
+            Restrict to one estimator (e.g. ``"SNDR"``). ``None`` includes all.
+
+        Returns
+        -------
+        str
+            A Markdown document: one headline table row per
+            ``(model, estimator)`` with V̂, CI, and the trust diagnostics
+            (support-health, ESS, Pareto-k). It intentionally reports the
+            stable trust layer, not the deployment verdict.
+        """
+        selected = self.rows()
+        if model is not None:
+            selected = [r for r in selected if r.model == model]
+        if estimator is not None:
+            selected = [r for r in selected if r.estimator == estimator]
+
+        def _md(v: Any) -> str:
+            return _fmt_num(v).replace("|", "\\|")
+
+        def _ci(r: ReportRow) -> str:
+            if r.ci_lower is None or r.ci_upper is None:
+                return "—"
+            return f"[{_fmt_num(r.ci_lower)}, {_fmt_num(r.ci_upper)}]"
+
+        lines = [
+            "# skdr-eval evaluation summary",
+            "",
+            "| Model | Estimator | V̂ | CI | Support | ESS | Pareto-k |",
+            "| ----- | --------- | -- | -- | ------- | --- | -------- |",
+        ]
+        for r in selected:
+            lines.append(
+                f"| {str(r.model).replace('|', chr(92) + '|')} "
+                f"| {r.estimator} | {_md(r.V_hat)} | {_ci(r)} "
+                f"| {r.support_health or '—'} "
+                f"| {_md(r.ESS)} | {_md(r.pareto_k)} |"
+            )
+        lines.append("")
+        lines.append(
+            "_Generated by [skdr-eval](https://github.com/dgenio/skdr-eval); "
+            "V̂ is the estimated policy value under the logged data. Read the "
+            "support column before acting on V̂._"
+        )
+        return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------- #

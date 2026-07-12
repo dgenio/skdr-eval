@@ -715,3 +715,150 @@ class TestLoadModelDirect:
     def test_parse_model_specs_empty_path(self):
         with pytest.raises(Exit):
             _parse_model_specs(["name="])
+
+
+# --------------------------------------------------------------------------- #
+# New output / consumption commands (#184 #205 #231 #251)                     #
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def design_model_and_logs(tmp_path: Path) -> tuple[Path, Path]:
+    """A logs parquet + a pickled model fitted on the full design feature set.
+
+    The CLI ``evaluate`` runs with ``fit_models=False``, so the candidate model
+    must predict on the same columns ``build_design`` assembles (cli_*, st_*,
+    and op_*_elig — seven features here). Returns ``(logs_path, model_path)``.
+    """
+    logs, _, _ = skdr_eval.make_synth_logs(n=600, n_ops=3, seed=0)
+    feature_cols = [
+        c
+        for c in logs.columns
+        if c.startswith("cli_") or c.startswith("st_") or c.startswith("op_")
+    ]
+    model = HistGradientBoostingRegressor(max_iter=20, random_state=0)
+    model.fit(logs[feature_cols].to_numpy(), logs["service_time"].to_numpy())
+    logs_path = tmp_path / "logs.parquet"
+    logs.to_parquet(logs_path)
+    model_path = tmp_path / "model.joblib"
+    joblib.dump(model, model_path)
+    return logs_path, model_path
+
+
+class TestEvaluateFormat:
+    def test_format_json_is_pipe_clean_stdout(
+        self, design_model_and_logs: tuple[Path, Path], tmp_path: Path
+    ):
+        logs_path, model_path = design_model_and_logs
+        result = runner.invoke(
+            app,
+            [
+                "evaluate",
+                str(logs_path),
+                "--model",
+                f"M={model_path}",
+                "--out",
+                str(tmp_path / "out"),
+                "--format",
+                "json",
+            ],
+        )
+        # Exit code follows the verdict gate (0/3/4); stdout must be valid JSON.
+        payload = json.loads(result.stdout)
+        assert "report" in payload
+        # The "wrote N files" confirmation is on stderr, not stdout.
+        assert "Wrote" not in result.stdout
+        assert "Wrote" in result.stderr
+
+    def test_format_markdown(
+        self, design_model_and_logs: tuple[Path, Path], tmp_path: Path
+    ):
+        logs_path, model_path = design_model_and_logs
+        result = runner.invoke(
+            app,
+            [
+                "evaluate",
+                str(logs_path),
+                "--model",
+                f"M={model_path}",
+                "--out",
+                str(tmp_path / "out"),
+                "--format",
+                "markdown",
+            ],
+        )
+        assert "# skdr-eval evaluation summary" in result.stdout
+
+    def test_default_output_unchanged(
+        self, design_model_and_logs: tuple[Path, Path], tmp_path: Path
+    ):
+        logs_path, model_path = design_model_and_logs
+        result = runner.invoke(
+            app,
+            [
+                "evaluate",
+                str(logs_path),
+                "--model",
+                f"M={model_path}",
+                "--out",
+                str(tmp_path / "out"),
+            ],
+        )
+        # Without --format the confirmation stays on stdout (legacy behaviour).
+        assert "Wrote" in result.stdout
+
+    @pytest.mark.parametrize("fmt", ["table", "csv"])
+    def test_format_table_and_csv(
+        self, fmt: str, design_model_and_logs: tuple[Path, Path], tmp_path: Path
+    ):
+        logs_path, model_path = design_model_and_logs
+        result = runner.invoke(
+            app,
+            [
+                "evaluate",
+                str(logs_path),
+                "--model",
+                f"M={model_path}",
+                "--out",
+                str(tmp_path / "out"),
+                "--format",
+                fmt,
+            ],
+        )
+        # The report header column names appear on stdout in both formats.
+        assert "V_hat" in result.stdout
+        assert "estimator" in result.stdout
+        if fmt == "csv":
+            assert "," in result.stdout  # CSV separator present
+        assert "Wrote" in result.stderr
+
+    def test_bad_format_rejected(
+        self, design_model_and_logs: tuple[Path, Path], tmp_path: Path
+    ):
+        logs_path, model_path = design_model_and_logs
+        result = runner.invoke(
+            app,
+            [
+                "evaluate",
+                str(logs_path),
+                "--model",
+                f"M={model_path}",
+                "--out",
+                str(tmp_path / "out"),
+                "--format",
+                "bogus",
+            ],
+        )
+        assert result.exit_code != EXIT_OK
+
+
+class TestSchemaCommand:
+    def test_schema_artifact(self):
+        result = runner.invoke(app, ["schema", "--kind", "artifact"])
+        assert result.exit_code == EXIT_OK
+        payload = json.loads(result.stdout)
+        assert payload["title"] == "ArtifactSchema"
+
+    def test_schema_bad_kind(self):
+        result = runner.invoke(app, ["schema", "--kind", "bogus"])
+        assert result.exit_code != EXIT_OK

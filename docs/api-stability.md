@@ -62,6 +62,19 @@ keep working); a major bump may remove or rename fields. The current values
 are exported as constants and embedded in every artifact's `metadata` and on
 every card.
 
+The generated JSON Schema for the **artifact** payload is committed under
+[`docs/schemas/`](schemas/) (`artifact.schema.json`) so downstream tooling can
+validate `skdr-eval` output without importing the library. Emit it yourself with
+`skdr-eval schema --kind artifact`, or from Python via
+`ArtifactSchema.json_schema()`. A test (`tests/test_schema_publishing.py`) fails
+if the committed file drifts from the live schema, and
+`scripts/generate_schemas.py` regenerates it.
+
+The **card** schema is intentionally *not* published yet: the card carries the
+`deploy`/recommendation verdict, whose contract is under the July 2026
+experiment-eligibility audit. Publishing it now would freeze a provisional
+verdict shape; it will be added once that contract stabilizes.
+
 ## Road to 1.0
 
 1.0 means "the public surface below is frozen under SemVer and safe to build
@@ -123,7 +136,7 @@ extra is installed.
 `MRDRWeightedLoss` `MSEOutcomeLoss` `ModelConfig` `ModelEvaluator`
 `ModelFactory` `ModelSelector` `NullTracker` `OutcomeLoss` `PairwiseDesign`
 `PerActionDiagnostics` `PropensityDiagnostics` `ProvenanceBlock` `Reason`
-`Recommendation` `RecommendationPolicy` `SensitivityBlock` `SlateGroundTruth`
+`Recommendation` `RecommendationPolicy` `ReportRow` `SensitivityBlock` `SlateGroundTruth`
 `SlateResult` `StatisticalTest` `SupportHealthThresholds` `SwitchTauTransform`
 `Tracker` `TransformContext` `TrustBlock` `VisualizationConfig`
 `WeightTransform`

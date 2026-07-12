@@ -5,6 +5,7 @@ Subcommands
 - ``evaluate``        — run :func:`skdr_eval.evaluate_sklearn_models`
 - ``pairwise``        — run :func:`skdr_eval.evaluate_pairwise_models`
 - ``card``            — re-render the YAML card from a saved artifact JSON
+- ``schema``          — print the JSON Schema for the artifact payload
 - ``validate-schema`` — call ``validate_logs`` / ``validate_pairwise_inputs``
 - ``doctor``          — run :func:`skdr_eval.doctor`
 - ``version``         — print the package version
@@ -56,7 +57,10 @@ import pandas as pd
 import skdr_eval
 from skdr_eval.capabilities import get_capability_matrix
 from skdr_eval.doctor import doctor as doctor_fn
-from skdr_eval.reporting import explain_artifact_schema
+from skdr_eval.reporting import (
+    ArtifactSchema,
+    explain_artifact_schema,
+)
 from skdr_eval.trackers import FileTracker
 
 logger = logging.getLogger("skdr_eval.cli")
@@ -264,6 +268,49 @@ def _verdict_exit_code(artifact: skdr_eval.EvaluationArtifact) -> int:
     return EXIT_INSUFFICIENT_EVIDENCE if saw_insufficient else EXIT_OK
 
 
+# Selectable stdout formats for the headline report (#231).
+_REPORT_FORMATS = ("table", "csv", "json", "markdown")
+
+
+def _render_report(artifact: skdr_eval.EvaluationArtifact, fmt: str) -> str:
+    """Render the headline report in the requested stdout format (#231)."""
+    if fmt == "table":
+        return str(artifact.report.to_string(index=False))
+    if fmt == "csv":
+        return str(artifact.report.to_csv(index=False)).rstrip("\n")
+    if fmt == "json":
+        return artifact.to_json_str()
+    if fmt == "markdown":
+        return artifact.to_markdown()
+    raise typer.BadParameter(
+        f"--format must be one of {_REPORT_FORMATS} (got {fmt!r}).",
+    )
+
+
+def _emit_report_and_confirm(
+    artifact: skdr_eval.EvaluationArtifact,
+    fmt: str | None,
+    paths: dict[str, Path],
+    out: Path,
+) -> None:
+    """Emit the report to stdout (if ``--format`` given) with stream separation.
+
+    When ``fmt`` is set the machine-readable report goes to **stdout** and the
+    human-readable "wrote N files" confirmation is routed to **stderr**, so the
+    command composes in a pipe (``| jq``, ``| column``). With ``fmt is None``
+    the legacy behaviour is preserved: the confirmation prints to stdout.
+    """
+    if fmt is None:
+        typer.echo(f"Wrote {len(paths)} files to {out}.")
+        return
+    if fmt not in _REPORT_FORMATS:
+        raise typer.BadParameter(
+            f"--format must be one of {_REPORT_FORMATS} (got {fmt!r}).",
+        )
+    typer.echo(_render_report(artifact, fmt))
+    typer.echo(f"Wrote {len(paths)} files to {out}.", err=True)
+
+
 @app.command("version")
 def version_cmd() -> None:
     """Print the installed skdr-eval version."""
@@ -395,6 +442,15 @@ def evaluate_cmd(
         False, "--ci-bootstrap/--no-ci-bootstrap", help="Compute bootstrap CIs."
     ),
     random_state: int = typer.Option(0, "--random-state"),
+    fmt: str | None = typer.Option(
+        None,
+        "--format",
+        help=(
+            "Print the headline report to stdout in this format "
+            "(table|csv|json|markdown); the 'wrote N files' line moves to "
+            "stderr so stdout is pipe-clean. Omit to keep the legacy output."
+        ),
+    ),
     tracker_dir: Path | None = typer.Option(
         None, "--tracker-dir", help="Optional FileTracker output directory."
     ),
@@ -421,7 +477,7 @@ def evaluate_cmd(
         typer.secho(f"Evaluation error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=EXIT_DATA) from exc
     paths = _write_artifact_outputs(artifact, out)
-    typer.echo(f"Wrote {len(paths)} files to {out}.")
+    _emit_report_and_confirm(artifact, fmt, paths, out)
     raise typer.Exit(code=_verdict_exit_code(artifact))
 
 
@@ -448,6 +504,15 @@ def pairwise_cmd(
     n_splits: int = typer.Option(3, "--n-splits", min=1),
     random_state: int = typer.Option(0, "--random-state"),
     ci_bootstrap: bool = typer.Option(False, "--ci-bootstrap/--no-ci-bootstrap"),
+    fmt: str | None = typer.Option(
+        None,
+        "--format",
+        help=(
+            "Print the headline report to stdout in this format "
+            "(table|csv|json|markdown); the 'wrote N files' line moves to "
+            "stderr so stdout is pipe-clean. Omit to keep the legacy output."
+        ),
+    ),
     tracker_dir: Path | None = typer.Option(
         None, "--tracker-dir", help="Optional FileTracker output directory."
     ),
@@ -492,7 +557,7 @@ def pairwise_cmd(
         typer.secho(f"Evaluation error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=EXIT_DATA) from exc
     paths = _write_artifact_outputs(artifact, out)
-    typer.echo(f"Wrote {len(paths)} files to {out}.")
+    _emit_report_and_confirm(artifact, fmt, paths, out)
     raise typer.Exit(code=_verdict_exit_code(artifact))
 
 
@@ -772,6 +837,33 @@ def quickstart_cmd(
         f"Wrote {len(paths)} files to {out} "
         f"(open {out / 'report.html'} for the full card)."
     )
+
+
+@app.command("schema")
+def schema_cmd(
+    kind: str = typer.Option(
+        "artifact", "--kind", help="Which schema to emit (currently 'artifact')."
+    ),
+) -> None:
+    """Print the JSON Schema for the artifact payload contract (#205).
+
+    Emits the versioned JSON Schema downstream tooling can use to validate
+    ``skdr-eval`` artifact output without importing the library. Pipe to a file
+    to pin it in Git or publish it.
+
+    Only ``--kind artifact`` is supported: the artifact payload carries the
+    stable data/diagnostics layer. The card schema (which encodes the
+    ``deploy``/recommendation verdict) is intentionally not published while the
+    verdict contract is under the July 2026 experiment-eligibility audit.
+    """
+    if kind == "artifact":
+        schema = ArtifactSchema.json_schema()
+    else:
+        raise typer.BadParameter(
+            f"--kind must be 'artifact' (got {kind!r}); the card schema is "
+            "not published yet — see docs/api-stability.md.",
+        )
+    typer.echo(json.dumps(schema, indent=2))
 
 
 if __name__ == "__main__":  # pragma: no cover
