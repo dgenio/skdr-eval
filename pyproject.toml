@@ -99,8 +99,8 @@ dev = [
     # .pre-commit-config.yaml revs (#254) so pre-commit, `pip install -e .[dev]`
     # and CI all run the identical binary — no more "green locally, red on CI"
     # lint/type drift. Bump both deliberately in one PR (here + pre-commit).
-    "ruff==0.15.18",
-    "mypy==2.1.0",
+    "ruff==0.16.1",
+    "mypy==2.3.0",
     "types-PyYAML",
     "tomli; python_version < '3.11'",
     "build",
