@@ -1,16 +1,11 @@
 name: Release
 
 on:
-  # Publish on the version tag only (#191). The job's final step creates the
-  # GitHub Release from that tag, so a `release: published` trigger here would
-  # fire a SECOND run that re-attempts the PyPI upload and fails with
-  # "File already exists". Tag-push is the single source of truth for a release.
   push:
     tags:
-      - 'v*'  # Trigger on any version tag (v1.0.0, v2.1.3, etc.)
-  workflow_dispatch:  # Allow manual triggering
+      - 'v*'
+  workflow_dispatch:
 
-# Never run two publishes for the same ref concurrently.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -20,16 +15,16 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     permissions:
-      id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
-      contents: write  # Required to create GitHub Releases
+      id-token: write
+      contents: write
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
-        fetch-depth: 0  # Needed for setuptools_scm
+        fetch-depth: 0
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
       with:
         python-version: "3.11"
 
@@ -40,46 +35,32 @@ jobs:
 
     - name: Verify git state for clean versioning
       run: |
-        echo "Current git status:"
         git status --porcelain
-        echo "Current git describe:"
         git describe --tags --long --dirty
-        echo "Expected setuptools-scm version:"
         python -c "import setuptools_scm; print(setuptools_scm.get_version())"
 
     - name: Clean working directory for setuptools-scm
       run: |
-        # Remove any untracked files that might interfere with versioning
         git clean -fd
-        # Check for uncommitted changes (but don't reset them if they're intentional)
         if [ -n "$(git status --porcelain)" ]; then
           echo "Warning: Working directory has uncommitted changes"
           git status --porcelain
         fi
-        echo "Current git describe:"
         git describe --tags --long --dirty
 
     - name: Build package
-      run: |
-        python -m build
+      run: python -m build
 
     - name: Verify built version matches tag
       run: |
-        # Extract version from the built wheel file
         BUILT_VERSION=$(python -c "
-        import zipfile
-        import os
-        import re
-        
-        # Find the wheel file
+        import zipfile, os
         for file in os.listdir('dist'):
             if file.endswith('.whl'):
                 with zipfile.ZipFile(f'dist/{file}', 'r') as wheel:
-                    # Look for the package metadata
                     for name in wheel.namelist():
                         if name.endswith('.dist-info/METADATA'):
                             content = wheel.read(name).decode('utf-8')
-                            # Extract version from metadata
                             for line in content.split('\n'):
                                 if line.startswith('Version:'):
                                     print(line.split(':', 1)[1].strip())
@@ -87,69 +68,41 @@ jobs:
                             break
                 break
         ")
-        
-        # Extract tag version (remove 'v' prefix if present)
         TAG_VERSION=${GITHUB_REF#refs/tags/}
         TAG_VERSION=${TAG_VERSION#v}
-
         echo "Built version: $BUILT_VERSION"
         echo "Tag version: $TAG_VERSION"
-        echo "Git describe: $(git describe --tags --long --dirty)"
-
-        # Check if versions match
-        if [[ "$BUILT_VERSION" == "$TAG_VERSION" ]]; then
-          echo "✅ Version verification passed: $BUILT_VERSION (matches tag: $TAG_VERSION)"
-        else
-          echo "❌ ERROR: Built version ($BUILT_VERSION) does not match tag version ($TAG_VERSION)"
-          echo "This indicates a setuptools-scm configuration issue."
-          echo "Git status:"
-          git status --porcelain
-          echo "Git log (last 3 commits):"
-          git log --oneline -3
-          ls -la dist/
+        if [[ "$BUILT_VERSION" != "$TAG_VERSION" ]]; then
+          echo "ERROR: Built version does not match tag"
           exit 1
         fi
 
     - name: Check package
-      run: |
-        twine check dist/*
+      run: twine check dist/*
 
     - name: Publish to PyPI (Trusted Publishing)
       id: pypi-publish
       continue-on-error: true
-      uses: pypa/gh-action-pypi-publish@release/v1
+      uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
       with:
         print-hash: true
 
     - name: Fallback - Manual PyPI publish instructions
       if: steps.pypi-publish.outcome == 'failure'
       run: |
-        echo "❌ Trusted Publishing failed. Manual upload required."
-        echo ""
-        echo "To publish manually:"
-        echo "1. Download the build artifacts from this workflow"
-        echo "2. Set up your PyPI API token: https://pypi.org/manage/account/token/"
-        echo "3. Run: pip install twine"
-        echo "4. Run: twine upload dist/*"
-        echo ""
-        echo "For Trusted Publishing setup:"
-        echo "1. Go to https://pypi.org/manage/project/skdr-eval/settings/publishing/"
-        echo "2. Add this GitHub repository as a trusted publisher"
-        echo "3. Set environment name to 'release'"
-        echo "4. Set workflow filename to 'release.yml'"
-        echo ""
+        echo "Trusted Publishing failed. Manual upload required."
         exit 1
 
     - name: Upload build artifacts (for manual fallback)
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: dist-${{ github.run_number }}
         path: dist/
 
     - name: Create GitHub Release
       if: startsWith(github.ref, 'refs/tags/v')
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@7c4723f7a335432393329f8f1c564994ce50185d # v3
       with:
         files: dist/*
         generate_release_notes: false
