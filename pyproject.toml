@@ -48,7 +48,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Mathematics",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-requires-python = ">=3.10,<3.15"
+requires-python = ">=3.10"
 # Library-grade dependency constraints (#152): lower bounds only — no exact
 # pins (``==``) and no speculative upper-bound caps. Floors are the lowest
 # versions the test suite is known to pass on (proven by the ``floor-deps``

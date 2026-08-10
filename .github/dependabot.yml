@@ -7,21 +7,14 @@ updates:
       day: monday
       time: "06:00"
       timezone: Etc/UTC
-    open-pull-requests-limit: 5
-    cooldown:
-      default-days: 7
+    open-pull-requests-limit: 0
     groups:
-      python-nonmajor:
-        applies-to: version-updates
-        patterns: ["*"]
-        update-types: [minor, patch]
-      python-security-nonmajor:
+      python-security:
         applies-to: security-updates
         patterns: ["*"]
-        update-types: [minor, patch]
     labels: [dependencies]
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "fix(deps)"
 
   - package-ecosystem: github-actions
     directory: "/"
