@@ -48,7 +48,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Mathematics",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-requires-python = ">=3.10,<3.15"
+requires-python = ">=3.10"
 # Library-grade dependency constraints (#152): lower bounds only — no exact
 # pins (``==``) and no speculative upper-bound caps. Floors are the lowest
 # versions the test suite is known to pass on (proven by the ``floor-deps``
@@ -156,8 +156,6 @@ skdr_eval = ["templates/*.html"]
 write_to = "src/skdr_eval/_version.py"
 tag_regex = "^v(?P<version>[^\\+]+)(?:\\+.*)?$"
 fallback_version = "0.0.0"
-# Use "dirty-tag" to append '.dirty' to the version when the working directory has uncommitted changes,
-# making it clear when a build is not from a clean state.
 local_scheme = "dirty-tag"
 
 [tool.pytest.ini_options]
@@ -235,19 +233,10 @@ module = [
 ]
 ignore_missing_imports = true
 
-# The Typer CLI module uses ``@app.command(...)`` decorators that mypy
-# (correctly) flags as untyped because Typer's command decorator is
-# overloaded; suppress only that one error code so the rest of the strict
-# config still applies.
-# NOTE: These overrides mirror mypy.ini (which takes precedence at runtime).
 [[tool.mypy.overrides]]
 module = ["skdr_eval.cli"]
 disable_error_code = ["untyped-decorator"]
 
-# Conflict-resistant changelog (#255). Each PR drops a small fragment under
-# changelog.d/ (e.g. ``123.fixed.md``) instead of editing a shared "Unreleased"
-# section, so concurrent branches stop colliding on CHANGELOG.md. The fragments
-# are compiled into a dated section at release time with ``make changelog``.
 [tool.towncrier]
 package = "skdr_eval"
 directory = "changelog.d"
@@ -256,7 +245,6 @@ start_string = "<!-- towncrier release notes start -->\n"
 title_format = "## [{version}] - {project_date}"
 issue_format = "[#{issue}](https://github.com/dgenio/skdr-eval/issues/{issue})"
 underlines = ["", "", ""]
-# Non-fragment files kept in changelog.d/ for humans, not for compilation.
 ignore = ["README.md", ".gitkeep"]
 
 [[tool.towncrier.type]]
