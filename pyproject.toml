@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "skdr-eval"
 dynamic = ["version"]
-description = "Offline policy evaluation (OPE) for scikit-learn policies — time-aware doubly-robust (DR/SNDR) estimates with honest trust diagnostics and a deploy / don't-deploy verdict"
+description = "Offline policy evaluation (OPE) for scikit-learn-compatible decision policies — DR/SNDR estimates with overlap, support, sensitivity, and uncertainty diagnostics for pre-experiment review"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -22,6 +22,10 @@ keywords = [
     "contextual bandits",
     "causal inference",
     "treatment effects",
+    "decision policy",
+    "routing policy",
+    "agent evaluation",
+    "llm evaluation",
     "ranking",
     "recommender systems",
     "ad targeting",
@@ -33,7 +37,7 @@ keywords = [
     "python",
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
