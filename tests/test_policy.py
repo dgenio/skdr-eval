@@ -27,6 +27,29 @@ def test_explicit_policy_satisfies_protocol_and_preserves_distribution():
     assert policy.name == "candidate-v1"
 
 
+def test_explicit_policy_probability_state_is_read_only():
+    source = np.array([[0.2, 0.8]])
+    policy = ExplicitPolicy(source, actions=("control", "candidate"))
+
+    # Construction copies the caller's array, so mutating the source cannot
+    # change the policy that was bound to this action vocabulary.
+    source[0, 0] = 1.0
+    np.testing.assert_allclose(policy.probabilities, [[0.2, 0.8]])
+    assert policy.probabilities.flags.writeable is False
+
+    with pytest.raises(ValueError):
+        policy.probabilities[0, 0] = 1.0
+
+    # Resolved output is a fresh validated copy; callers may manipulate their
+    # local result without mutating the immutable policy state.
+    resolved = policy.action_distribution(
+        np.zeros((1, 1)), actions=("control", "candidate")
+    )
+    assert resolved.flags.writeable is True
+    resolved[0, 0] = 0.3
+    np.testing.assert_allclose(policy.probabilities, [[0.2, 0.8]])
+
+
 def test_deterministic_one_hot_is_same_contract_as_stochastic_policy():
     deterministic = np.array([[0.0, 1.0], [1.0, 0.0]])
     resolved = validate_action_distribution(deterministic, actions=("left", "right"))
@@ -110,9 +133,7 @@ def test_malformed_eligibility_values_fail():
 def test_resolver_accepts_raw_numpy_matrix_through_same_validation():
     contexts = np.zeros((2, 4))
     probs = np.array([[0.7, 0.3], [0.1, 0.9]])
-    resolved = resolve_action_distribution(
-        probs, contexts, actions=("a", "b")
-    )
+    resolved = resolve_action_distribution(probs, contexts, actions=("a", "b"))
     np.testing.assert_allclose(resolved, probs)
 
 
