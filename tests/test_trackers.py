@@ -41,17 +41,14 @@ class TestNullTracker:
         tracker.log_metric("foo", 1.0)
         tracker.log_metric("foo", 1.0, step=5)
         tracker.set_tag("seed", "0")
-        # ``log_artifact`` should accept paths but produce no side effects.
         sample = tmp_path / "sample.txt"
         sample.write_text("hello")
         tracker.log_artifact(sample, artifact_path="sub/path.txt")
-        # No new entries beside the original ``sample.txt``.
         assert sorted(p.name for p in tmp_path.iterdir()) == ["sample.txt"]
 
     def test_context_manager(self):
         with NullTracker() as t:
             t.log_metric("x", 0.0)
-        # No raise = pass.
 
     def test_log_card_no_op(self):
         artifact = _build_artifact()
@@ -119,7 +116,6 @@ class TestFileTracker:
         tracker.log_card(card)
         out = root / "cards" / "HGB_DR.card.yaml"
         assert out.is_file()
-        # Round-trip the YAML to ensure the card was written correctly.
         loaded = skdr_eval.EvaluationCard.from_yaml(out)
         assert loaded == card
 
@@ -127,7 +123,6 @@ class TestFileTracker:
         root = tmp_path / "run-8"
         FileTracker(root).set_tag("a", "1")
         second = FileTracker(root)
-        # Tag round-trip across two trackers on the same root.
         second.set_tag("b", "2")
         tags = json.loads((root / "tags.json").read_text())
         assert tags == {"a": "1", "b": "2"}
@@ -135,16 +130,11 @@ class TestFileTracker:
 
 class TestEvaluatorTrackerWiring:
     def test_none_default_is_no_op(self, tmp_path: Path):
-        """With ``tracker=None`` (default) the evaluator must not write."""
-        # Nothing to assert beyond "no raise" — there is no tracker dir to
-        # inspect for absence of state.
         artifact = _build_artifact()
         assert isinstance(artifact, skdr_eval.EvaluationArtifact)
 
     def test_null_tracker_artifact_identical_to_none(self):
         art_a = _build_artifact()
-        # Re-run with NullTracker — by construction the per-row metrics are
-        # identical because the tracker only observes, never mutates.
         logs, _, _ = skdr_eval.make_synth_logs(n=400, n_ops=3, seed=0)
         models = {"HGB": HistGradientBoostingRegressor(max_iter=20, random_state=0)}
         art_b = skdr_eval.evaluate_sklearn_models(
@@ -156,11 +146,9 @@ class TestEvaluatorTrackerWiring:
             policy_train="pre_split",
             tracker=NullTracker(),
         )
-        # Compare V_hat rows — deterministic per seed.
         cols = ["model", "estimator", "V_hat"]
         pd_a = art_a.report[cols].reset_index(drop=True)
         pd_b = art_b.report[cols].reset_index(drop=True)
-        # Float equality up to determinism (same seed, same pipeline).
         assert (pd_a["V_hat"] - pd_b["V_hat"]).abs().max() < 1e-12
 
     def test_file_tracker_writes_metrics_and_cards(self, tmp_path: Path):
@@ -177,7 +165,6 @@ class TestEvaluatorTrackerWiring:
                 policy_train="pre_split",
                 tracker=tracker,
             )
-        # At least V_hat for DR and SNDR was logged.
         metrics_path = root / "metrics.jsonl"
         assert metrics_path.is_file()
         names = {
@@ -187,7 +174,6 @@ class TestEvaluatorTrackerWiring:
         }
         assert "HGB/DR/V_hat" in names
         assert "HGB/SNDR/V_hat" in names
-        # One card per estimator.
         cards = sorted((root / "cards").iterdir())
         assert len(cards) == 2, [p.name for p in cards]
 
@@ -215,37 +201,39 @@ class TestEvaluatorTrackerWiring:
         assert (root / "metrics.jsonl").is_file()
 
 
-class TestTrackerStubs:
-    def test_mlflow_stub_raises_on_construct(self):
-        with pytest.raises(NotImplementedError, match=r"mlflow"):
-            MLflowTracker()
-
-    def test_wandb_stub_raises_on_construct(self):
-        with pytest.raises(NotImplementedError, match=r"wandb"):
-            WandbTracker()
-
-    def test_aim_stub_raises_on_construct(self):
-        with pytest.raises(NotImplementedError, match=r"aim"):
-            AimTracker()
+class TestDeprecatedTrackerPlaceholders:
+    @pytest.mark.parametrize(
+        ("tracker_cls", "package"),
+        [
+            (MLflowTracker, "mlflow"),
+            (WandbTracker, "wandb"),
+            (AimTracker, "aim"),
+        ],
+    )
+    def test_placeholder_is_explicitly_deprecated_and_unusable(
+        self, tracker_cls, package
+    ):
+        with pytest.warns(DeprecationWarning, match="deprecated compatibility"):
+            with pytest.raises(
+                NotImplementedError,
+                match=rf"does not provide a working {package} tracker integration",
+            ):
+                tracker_cls()
 
 
 class TestFileTrackerEdgeCases:
     def test_corrupt_tags_json_recovers(self, tmp_path: Path):
-        """FileTracker gracefully handles corrupted tags.json."""
         root = tmp_path / "run-corrupt"
         root.mkdir(parents=True)
         (root / "artifacts").mkdir()
         (root / "cards").mkdir()
-        # Write garbage to tags.json before constructing tracker.
         (root / "tags.json").write_text("{invalid json", encoding="utf-8")
         tracker = FileTracker(root)
-        # Should recover with empty tags.
         tracker.set_tag("new", "value")
         tags = json.loads((root / "tags.json").read_text(encoding="utf-8"))
         assert tags == {"new": "value"}
 
     def test_log_artifact_path_traversal_raises(self, tmp_path: Path):
-        """log_artifact rejects paths that escape the artifacts directory."""
         root = tmp_path / "run-traversal"
         tracker = FileTracker(root)
         src = tmp_path / "evil.txt"
