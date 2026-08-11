@@ -48,6 +48,34 @@ def test_population_intersects_all_required_coverage() -> None:
     }
 
 
+def test_direct_population_construction_enforces_consistency() -> None:
+    direct = EvaluationPopulation(
+        input_rows=2,
+        evaluated_mask=np.array([1, 0]),
+        exclusion_reasons=((), ("warmup",)),
+    )
+    np.testing.assert_array_equal(direct.evaluated_mask, np.array([True, False]))
+
+    with pytest.raises(DataValidationError, match="evaluated rows cannot"):
+        EvaluationPopulation(
+            input_rows=1,
+            evaluated_mask=np.array([True]),
+            exclusion_reasons=(("impossible",),),
+        )
+    with pytest.raises(DataValidationError, match="excluded rows must"):
+        EvaluationPopulation(
+            input_rows=1,
+            evaluated_mask=np.array([False]),
+            exclusion_reasons=((),),
+        )
+    with pytest.raises(DataValidationError, match="one tuple per input row"):
+        EvaluationPopulation(
+            input_rows=2,
+            evaluated_mask=np.array([True, False]),
+            exclusion_reasons=((),),
+        )
+
+
 def test_multiple_exclusion_reasons_are_preserved_per_row() -> None:
     population = build_evaluation_population(
         3,
