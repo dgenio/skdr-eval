@@ -76,6 +76,13 @@ The target semantics are evidence-oriented states such as:
 
 Exact names are being finalized under #245.
 
+**Migration note:** released versions still expose legacy deployment/experiment
+verdict names such as `deploy`, `ab_test`, and `do_not_deploy`, and some CLI/docs
+still describe exit codes in those terms. Those are compatibility-era semantics,
+not the target claim of the core library. Issue #245 owns their migration to the
+evidence-only state machine; until that work lands, callers must not interpret a
+legacy positive verdict as deployment or experiment authorization.
+
 A positive evidence state means that the statistical/evidence contract passed
 under the declared validation envelope. It does **not** mean that deployment or
 an online experiment is safe, ethical, approved, reversible, sufficiently
@@ -104,7 +111,8 @@ The public validation-lab work is tracked by #223.
 ## Current non-claims
 
 - **No deployment recommendation.** Core statistical output is not a deployment
-  or experiment-approval decision.
+  or experiment-approval decision. Legacy verdict labels remain temporarily for
+  compatibility while #245 migrates the public state machine.
 - **No guarantee from diagnostics.** ESS, overlap, Pareto-k, calibration and
   sensitivity are evidence signals. Their thresholds must be empirically
   validated; they are not proofs of correctness.
