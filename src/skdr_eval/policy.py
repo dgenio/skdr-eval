@@ -56,7 +56,7 @@ def validate_action_distribution(
     eligible_actions: np.ndarray | None = None,
     atol: float = 1e-10,
 ) -> np.ndarray:
-    """Validate and normalize the representation contract, not the policy itself.
+    """Validate the target-policy representation without silently repairing it.
 
     Parameters
     ----------
@@ -155,7 +155,8 @@ class ExplicitPolicy:
     This class is primarily useful when candidate action probabilities have
     already been computed by another model/service. It binds the probability
     columns to an explicit action vocabulary so action reordering cannot be
-    silently accepted.
+    silently accepted. The stored probability matrix is copied and marked
+    read-only so policy state cannot change after construction.
     """
 
     probabilities: np.ndarray
@@ -171,6 +172,7 @@ class ExplicitPolicy:
     ) -> None:
         action_tuple = tuple(actions)
         validated = validate_action_distribution(probabilities, actions=action_tuple)
+        validated.setflags(write=False)
         object.__setattr__(self, "probabilities", validated)
         object.__setattr__(self, "actions", action_tuple)
         object.__setattr__(self, "name", name)
@@ -236,4 +238,9 @@ def resolve_action_distribution(
     )
 
 
-__all__ = ["ExplicitPolicy", "Policy", "resolve_action_distribution", "validate_action_distribution"]
+__all__ = [
+    "ExplicitPolicy",
+    "Policy",
+    "resolve_action_distribution",
+    "validate_action_distribution",
+]
