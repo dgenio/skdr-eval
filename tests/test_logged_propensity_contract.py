@@ -29,6 +29,27 @@ def test_valid_logged_propensity_records_provenance() -> None:
     assert result.n_rows == 3
 
 
+def test_direct_construction_enforces_the_same_contract() -> None:
+    direct = LoggedActionPropensity(
+        values=np.array([0.25, 0.75]),
+        field_name=" propensity ",
+        policy_id=" logger-v1 ",
+    )
+    np.testing.assert_array_equal(direct.values, np.array([0.25, 0.75]))
+    assert direct.field_name == "propensity"
+    assert direct.policy_id == "logger-v1"
+
+    with pytest.raises(DataValidationError, match=r"\(0, 1\]"):
+        LoggedActionPropensity(values=np.array([0.0]))
+    with pytest.raises(DataValidationError, match="finite"):
+        LoggedActionPropensity(values=np.array([np.nan]))
+    with pytest.raises(DataValidationError, match="source"):
+        LoggedActionPropensity(
+            values=np.array([0.5]),
+            source="estimated",  # type: ignore[arg-type]
+        )
+
+
 def test_validated_values_are_immutable_copy() -> None:
     raw = np.array([0.25, 0.75])
     result = validate_logged_action_propensity(raw)
