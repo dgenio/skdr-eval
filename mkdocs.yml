@@ -81,6 +81,7 @@ nav:
       - Quickstart: getting-started/quickstart.md
   - Concepts:
       - Estimands & assumptions: concepts/estimands-and-assumptions.md
+      - Target policy contract: concepts/policy-contract.md
       - Methods (DR / SNDR): methods.md
       - Choosing an estimator: choosing-an-estimator.md
       - Metrics glossary: metrics-glossary.md
