@@ -1,23 +1,21 @@
-"""Tracker protocol and built-in trackers (#93).
+"""Tracker protocol and working built-in trackers (#93 / #217).
 
-The :class:`Tracker` protocol defines the minimum surface
-(``log_metric`` / ``log_artifact`` / ``log_card`` / ``set_tag`` plus context
-management) that evaluators use to push results to disk or an external
-experiment tracker. The core ships:
+The :class:`Tracker` protocol defines the minimum surface evaluators use for
+optional result logging. The core-supported implementations are deliberately
+small:
 
 - :class:`NullTracker` — no-op default; used when ``tracker=None``.
 - :class:`FileTracker` — writes JSONL metrics and artifact files to a run
   directory.
 
-External adapters (MLflow / W&B / Aim) live in this package as separate
-modules gated behind their own optional extras (``[mlflow]``, ``[wandb]``,
-``[aim]``). They currently raise :class:`NotImplementedError` on
-construction — the umbrella issue #73 tracks each adapter's full
-implementation as a follow-up PR.
+Historical MLflow / W&B / Aim modules exposed importable classes that always
+raised ``NotImplementedError``. They are not working integrations and are no
+longer advertised as capabilities. Their compatibility modules are being retired
+under #217; users can implement the protocol directly if an external tracker is
+needed before real demand justifies an official adapter.
 
-This module has zero new mandatory dependencies. The ``FileTracker`` uses
-only the standard library and the existing ``pyyaml`` dep already shipped
-in core.
+This module has zero new mandatory dependencies. ``FileTracker`` uses only the
+standard library and the existing ``pyyaml`` dependency already shipped in core.
 """
 
 from __future__ import annotations
@@ -38,12 +36,11 @@ logger = logging.getLogger("skdr_eval")
 
 @runtime_checkable
 class Tracker(Protocol):
-    """Minimum surface for experiment trackers used by ``evaluate_*_models``.
+    """Minimum result-logging surface used by ``evaluate_*_models``.
 
-    Implementations must be safe to use as context managers. The
-    :class:`NullTracker` and :class:`FileTracker` ship in core; external
-    adapters (MLflow / W&B / Aim) live in sibling modules behind optional
-    extras.
+    Implementations must be safe to use as context managers. ``NullTracker``
+    and ``FileTracker`` are the supported built-ins; callers may provide their
+    own implementation for third-party systems.
     """
 
     def log_metric(self, name: str, value: float, step: int | None = None) -> None: ...
@@ -70,11 +67,7 @@ class NullTracker:
     Every method is a true no-op — calling any method (in any order) is
     guaranteed to have zero observable side effects on the filesystem or
     process state. The class is included in the public API so callers can
-    spell their intent explicitly:
-
-    >>> from skdr_eval.trackers import NullTracker
-    >>> tracker = NullTracker()
-    >>> tracker.log_metric("V_hat", 1.23)  # no-op
+    spell their intent explicitly.
     """
 
     def log_metric(self, name: str, value: float, step: int | None = None) -> None:
@@ -106,20 +99,15 @@ class FileTracker:
 
     Writes a run directory containing:
 
-    - ``metrics.jsonl`` — one JSON object per ``log_metric`` call,
-      append-only (includes a wall-clock timestamp per record).
-    - ``tags.json`` — flat dict of tags (written on every ``set_tag`` call).
-    - ``artifacts/`` — files copied from ``log_artifact`` (or sub-paths
-      under it when ``artifact_path`` is provided).
-    - ``cards/<model_name>_<estimator>.card.yaml`` — YAML dump of each
-      ``log_card`` payload.
+    - ``metrics.jsonl`` — one JSON object per ``log_metric`` call;
+    - ``tags.json`` — flat dict of tags;
+    - ``artifacts/`` — files copied from ``log_artifact``;
+    - ``cards/<model_name>_<estimator>.card.yaml`` — YAML evaluation cards.
 
     Parameters
     ----------
     root : str or Path
-        Output directory. Created if it does not exist. Each instance writes
-        all its records into this single directory; reuse a path across runs
-        only if you want the metrics to be concatenated.
+        Output directory. Created if it does not exist.
     """
 
     def __init__(self, root: str | Path) -> None:
@@ -159,8 +147,8 @@ class FileTracker:
         except ValueError:
             raise ValueError(
                 f"artifact_path {artifact_path!r} resolves outside the "
-                f"artifacts directory. Only relative, non-traversing paths "
-                f"are allowed."
+                "artifacts directory. Only relative, non-traversing paths "
+                "are allowed."
             ) from None
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(src.read_bytes())
@@ -189,8 +177,4 @@ class FileTracker:
         del exc_type, exc, tb
 
 
-__all__ = [
-    "FileTracker",
-    "NullTracker",
-    "Tracker",
-]
+__all__ = ["FileTracker", "NullTracker", "Tracker"]
