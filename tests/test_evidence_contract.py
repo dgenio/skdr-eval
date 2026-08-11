@@ -8,6 +8,7 @@ from skdr_eval.evidence import (
     DiagnosticState,
     ESTIMATOR_VALIDATION_REGISTRY,
     EstimatorMaturity,
+    EstimatorValidationRecord,
     EvidenceStatus,
     can_support_estimate,
     get_estimator_validation,
@@ -88,8 +89,7 @@ def test_validation_pending_estimator_cannot_support_estimate() -> None:
 
 
 def test_validated_implementation_is_necessary_but_not_sufficient() -> None:
-    record_type = type(get_estimator_validation("DR"))
-    validated = record_type(
+    validated = EstimatorValidationRecord(
         name="DR-test",
         maturity=EstimatorMaturity.REFERENCE_VALIDATED,
         estimand="test estimand",
@@ -114,8 +114,7 @@ def test_validated_implementation_is_necessary_but_not_sufficient() -> None:
 
 
 def test_deprecated_estimator_never_qualifies_for_positive_evidence() -> None:
-    record_type = type(get_estimator_validation("DR"))
-    deprecated = record_type(
+    deprecated = EstimatorValidationRecord(
         name="old",
         maturity=EstimatorMaturity.DEPRECATED,
         estimand="old estimand",
