@@ -10,7 +10,7 @@ statistical software (#245 / #259 / #282):
 3. **Evidence status** — whether the *particular evaluation* has enough valid
    evidence to support its estimate under a declared validation envelope.
 
-A validated estimator can therefore still produce unsupported evidence.  These
+A validated estimator can therefore still produce unsupported evidence. These
 states intentionally contain no deployment or online-experiment authorization.
 """
 
@@ -46,7 +46,7 @@ class DiagnosticState(str, Enum):
 class EvidenceStatus(str, Enum):
     """Statistical/evidence state of a concrete evaluation.
 
-    These are deliberately evidence-only semantics.  In particular, none of
+    These are deliberately evidence-only semantics. In particular, none of
     these values means "deploy", "do not deploy", or "approved for an online
     experiment".
     """
@@ -60,7 +60,13 @@ class EvidenceStatus(str, Enum):
 
 @dataclass(frozen=True)
 class EstimatorValidationRecord:
-    """One estimator entry in the implementation-maturity registry."""
+    """One immutable estimator entry in the implementation-maturity registry.
+
+    Instances are descriptive records only. Positive evidence is never granted
+    from an arbitrary caller-created record; :func:`can_support_estimate`
+    resolves maturity from :data:`ESTIMATOR_VALIDATION_REGISTRY` by canonical
+    estimator name so promotion requires a deliberate versioned code change.
+    """
 
     name: str
     maturity: EstimatorMaturity
@@ -71,10 +77,11 @@ class EstimatorValidationRecord:
 
     @property
     def validated_for_positive_evidence(self) -> bool:
-        """Whether maturity can participate in a positive evidence claim.
+        """Whether this registry record's maturity can participate in support.
 
-        This is necessary but never sufficient: a concrete evaluation still
-        needs supported data/diagnostics/inference.
+        This remains necessary but never sufficient: a concrete evaluation still
+        needs supported data, diagnostics, and inference inside its declared
+        validation envelope.
         """
 
         return self.maturity in {
@@ -122,16 +129,15 @@ _INITIAL_REGISTRY: dict[str, EstimatorValidationRecord] = {
     ),
 }
 
-# Immutable public initial registry.  Promotion/demotion should happen through a
-# deliberate versioned code change plus validation evidence, never mutable
-# process state at runtime.
+# Runtime mutation is forbidden. Promotion/demotion happens through a reviewed
+# code change that also records validation-report provenance.
 ESTIMATOR_VALIDATION_REGISTRY: Mapping[str, EstimatorValidationRecord] = MappingProxyType(
     _INITIAL_REGISTRY
 )
 
 
 def get_estimator_validation(name: str) -> EstimatorValidationRecord:
-    """Return the implementation-maturity record for a canonical estimator."""
+    """Return the registry-backed implementation-maturity record."""
 
     canonical = str(name).strip()
     try:
@@ -147,7 +153,7 @@ def required_diagnostics_support_evidence(
 ) -> bool:
     """Return whether all required diagnostics are affirmative or N/A.
 
-    ``UNKNOWN`` is deliberately fail-closed for positive evidence.  This helper
+    ``UNKNOWN`` is deliberately fail-closed for positive evidence. This helper
     does not decide the final :class:`EvidenceStatus`; it only captures the hard
     invariant that a required unknown/failed diagnostic cannot satisfy a
     positive evidence contract.
@@ -171,17 +177,26 @@ def required_diagnostics_support_evidence(
 
 
 def can_support_estimate(
-    estimator: EstimatorValidationRecord,
+    estimator_name: str,
     required_diagnostics: Mapping[str, DiagnosticState | str],
     *,
     inside_validation_envelope: bool,
 ) -> bool:
-    """Hard preconditions for the future ``estimate_supported`` state.
+    """Return hard preconditions for a future ``estimate_supported`` state.
+
+    Estimator maturity is resolved from the immutable project registry by name.
+    Callers cannot create a fake ``REFERENCE_VALIDATED`` record at runtime to
+    bypass the project's versioned validation status.
 
     This intentionally does not inspect effect direction, confidence intervals,
-    business risk, or deployment policy.  It merely encodes three necessary
+    business risk, or deployment policy. It encodes only three necessary
     conditions that future evidence-state logic cannot bypass.
     """
+
+    try:
+        estimator = get_estimator_validation(estimator_name)
+    except DataValidationError:
+        return False
 
     return (
         estimator.validated_for_positive_evidence
