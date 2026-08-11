@@ -96,29 +96,29 @@ def test_find_spec_value_error_treated_as_missing(monkeypatch):
 
 
 class TestCapabilityMatrix:
-    """#215: the full optional-dependency capability matrix."""
+    """#215/#217: capability matrix lists working features, not dead extras."""
 
-    def test_matrix_covers_every_declared_extra(self):
+    def test_matrix_covers_supported_runtime_features_only(self):
         pyproject = tomllib.loads(
             (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         )
         declared = set(pyproject["project"]["optional-dependencies"])
-        # The matrix intentionally omits dev-only / docs / notebooks extras,
-        # but must cover every *runtime feature* extra.
-        feature_extras = {
+        supported_feature_extras = {
             "viz",
             "speed",
             "cli",
             "boosting",
-            "mlflow",
-            "wandb",
-            "aim",
         }
-        assert feature_extras <= declared, (
-            "matrix references extras not declared in pyproject.toml"
-        )
+        # Historical tracker extras may remain declared during a bounded
+        # deprecation window, but they must never be advertised as working
+        # capabilities while their adapters do not exist.
+        retired_placeholders = {"mlflow", "wandb", "aim"}
+
+        assert supported_feature_extras <= declared
         matrix = skdr_eval.get_capability_matrix()
-        assert {c.extra for c in matrix} == feature_extras
+        reported = {c.extra for c in matrix}
+        assert reported == supported_feature_extras
+        assert reported.isdisjoint(retired_placeholders)
 
     def test_matrix_entries_are_well_formed(self):
         for cap in skdr_eval.get_capability_matrix():
