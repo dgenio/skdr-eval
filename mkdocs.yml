@@ -1,9 +1,8 @@
 site_name: skdr-eval
 site_description: >-
-  Practitioner-focused offline policy evaluation for sklearn-compatible
-  contextual-bandit policies — time-aware Doubly Robust (DR) and Stabilized
-  DR (SNDR) estimators, calibrated propensities, trust diagnostics, and
-  stakeholder evaluation cards.
+  Evidence-quality offline policy evaluation for finite, discrete one-step
+  decisions — explicit validation boundaries, diagnostics, reproducible
+  artifacts, and a validation-pending DR/SNDR path.
 site_url: https://skdr-eval.readthedocs.io/
 repo_url: https://github.com/dgenio/skdr-eval
 repo_name: dgenio/skdr-eval
@@ -106,6 +105,9 @@ nav:
       - Architecture tour: architecture.md
       - Write your own estimator: extending/add-an-estimator.md
   - Project:
+      - Evidence-first v1 strategy: strategy/evidence-first-v1.md
+      - Design-partner validation: research/design-partner-guide.md
+      - External methodological review: research/external-methodological-review.md
       - Launch readiness checklist: LAUNCH_CHECKLIST.md
       - API stability & road to 1.0: api-stability.md
       - Citing & DOI: zenodo.md
