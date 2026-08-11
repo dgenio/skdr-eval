@@ -1,87 +1,150 @@
 # What skdr-eval claims (and what it does not)
 
-A receipts-first page. Every claim below links to something you can run — a
-command, an example script, a test, or a notebook — so you can check it
-yourself rather than take our word for it. The companion non-claims section is
-just as important: it states, explicitly, what offline evaluation cannot do.
+This page is the public claim boundary for `skdr-eval`. It is deliberately
+conservative: implementation validity, evidence quality, and an organization's
+decision to run an online experiment are separate concerns.
 
-## Estimator scope
+> **Current status:** the first DR/SNDR implementation path is
+> `validation_pending`. The July/August 2026 audit identified correctness and
+> inference work that must land before a strong validated-path claim is made.
+> Existing experimental APIs remain available, but breadth is not evidence of
+> validation.
 
-`skdr-eval` evaluates **one-shot contextual-bandit policies** from logged
-decisions. It ships a doubly-robust estimator family and a slate family.
+## The claim we are working toward
 
-| Claim | Estimators | Receipt |
-|---|---|---|
-| DR and Stabilized DR (SNDR) on sklearn-compatible policies | `DR`, `SNDR` | `examples/quickstart.py`; `tests/test_dr_sndr_smoke.py` |
-| MRDR / SWITCH-DR / DRos / MIPS via a composable strategy seam | `MRDR`, `SWITCH-DR`, `DRos`, `MIPS` | `build_strategy(...)`; `tests/test_estimators_extended.py`, `tests/test_mips_api.py` |
-| Slate / top-K off-policy evaluation | `slate_standard_ips`, `pseudo_inverse_ips`, `reward_interaction_ips`, `slate_cascade_dr` | `tests/test_slate_coverage.py` |
-| Pairwise / autoscaling evaluation | `evaluate_pairwise_models` | `examples/use_cases/04_call_routing.py` |
-| Estimators recover a known ground-truth value on synthetic DGPs | all | `tests/test_estimator_recovery_simulation.py`, `tests/sim_studies/` |
+The initial validated-v1 envelope is intentionally narrow:
 
-See [Choosing an estimator](docs/choosing-an-estimator.md) for which one to
-run and [methods](docs/methods.md) for the math.
+> `skdr-eval` estimates the value of an explicit, finite-discrete, one-step
+> target policy from logged contextual decisions with recorded behavior
+> propensities, and reports whether the available evidence supports that
+> estimate under a documented validation envelope.
 
-## Supported logged-data assumptions
+The validated-v1 work is tracked by #297 and its blockers.
 
-The estimates are valid under the standard OPE assumptions; they are stated,
-not hidden:
+## What validated-v1 is intended to require
 
-- **Unconfoundedness** — the logged action's propensity is explainable from
-  the recorded context.
-- **Overlap** — the candidate policy only takes actions the logging policy
-  also took with positive probability. When this fails, `support_health`
-  reports `high_risk`.
-- **Stable data-generating process** across the log window (time-aware splits
-  and moving-block bootstrap respect the temporal correlation).
-- **Useful nuisance models** — the propensity and outcome models are not
-  arbitrarily misspecified.
+- **One-shot contextual decisions.** Sequential / long-horizon RL is out of
+  scope.
+- **Finite, explicit actions.** The action vocabulary and per-row eligibility
+  must be represented explicitly when they vary.
+- **An explicit target policy.** The evaluated policy must provide an action
+  probability distribution; it is not inferred implicitly from arbitrary
+  outcome-model scores in the validated path (#279).
+- **Recorded behavior propensities.** The chosen-action probability logged at
+  decision time is required for the first validated path (#167). Estimated
+  propensities remain experimental until separately validated.
+- **A genuine evaluation population.** Every row contributing to a validated
+  estimate must have valid, non-leaky OOF nuisance predictions; statistical
+  defaults must not be invented to keep an evaluation running (#280).
+- **Correct multi-action DR semantics.** `q_hat(x,a)`, `q_obs`, and `q_pi` must
+  have explicit, action-specific meaning (#58).
+- **Only validated inference regimes.** Temporal leakage controls do not imply
+  that arbitrary adaptive logging or dependence has been solved. Confidence
+  intervals and dependence claims are limited to regimes validated by #62.
 
-Receipt: the assumption tags travel with every artifact
-(`DEFAULT_ASSUMPTION_TAGS`) and are printed on the card; see
-[estimands & assumptions](docs/concepts/estimands-and-assumptions.md).
+## Implementation maturity is not evidence quality
 
-## Trust diagnostics
+An estimator implementation can be validated while a particular evaluation is
+unsupported.
 
-The differentiator is that `skdr-eval` tells you when **not** to trust the
-estimate. Each diagnostic has a receipt.
+For example, a correct DR implementation can still receive weak or invalid
+inputs: poor overlap, invalid propensities, a target policy outside the logging
+support, unsupported dependence, missing diagnostics, or an ambiguous action
+mapping.
 
-| Diagnostic | What it catches | Receipt |
-|---|---|---|
-| `support_health` (`ok` / `caution` / `high_risk`) | poor overlap, low ESS, low match-rate | `docs/recipes/good-vs-bad-support.md`; `tests/test_diagnostics_trust.py` |
-| PSIS Pareto-k | heavy-tailed importance weights (variance may not exist) | `tests/test_diagnostics_trust.py` |
-| Effective sample size (ESS) and tail mass | a few rows dominating the estimate | `report` columns `ESS`, `tail_mass` |
-| Propensity calibration (ECE / Brier) | miscalibrated logging-policy model | `evaluate_propensity_diagnostics`; `tests/test_propensity_diagnostics.py` |
-| Clip-grid sensitivity | estimate that moves with the clip threshold | `summarize_sensitivity`; `tests/test_reporting_artifact.py` |
-| Deploy / don't-deploy verdict | turning all of the above into a decision | `EvaluationArtifact.recommendation(...)`; `tests/test_card_schema.py` |
+`skdr-eval` therefore separates:
 
-The CLI turns the verdict into a CI gate: `skdr-eval evaluate` exits with code
-`3` when any model's verdict is `do_not_deploy`.
+1. **implementation maturity** — whether an estimator/configuration has passed
+   the project's validation requirements; and
+2. **evidence status** — whether the concrete evaluation has enough support to
+   sustain the reported estimate under the declared validation envelope.
 
-## Reproducible examples
+This separation is tracked by #282 and #245.
 
-| Want to see... | Run |
-|---|---|
-| The 10-minute quickstart | `python examples/quickstart.py` |
-| Preflight on your own logs | `skdr-eval doctor your_logs.parquet --json` |
-| A good vs. bad support contrast | `python examples/use_cases/06_agent_routing_policy.py` |
-| Coming from Open Bandit Pipeline | `python examples/obp_interop.py` |
-| What a bad evaluation looks like | `make known-failures` |
-| Coverage of the bootstrap CI | `make coverage-sim` |
+## Evidence status, not deployment authorization
 
-## Non-claims (read these)
+The core library should describe evidence, not authorize deployment or an online
+experiment.
 
-- **Offline evaluation does not replace an online experiment.** A green
-  `skdr-eval` verdict is evidence that a candidate is *worth* an A/B test, not
-  proof it will win one. See the [rollout checklist](docs/rollout-checklist.md).
-- **No method can fix no-overlap logs.** If the candidate only takes actions
-  the logging policy never explored, there is no counterfactual signal in the
-  data; `skdr-eval` returns `support_health = high_risk` rather than a
-  confident number.
-- **Not for sequential / reinforcement-learning problems.** State transitions
-  and long horizons are out of scope — use SCOPE-RL or d3rlpy
-  (see [comparisons](docs/comparisons.md)).
-- **Logged propensities are reported, not consumed (yet).** `skdr-eval`
-  estimates calibrated propensities internally; first-class use of a logged
-  `pscore` is tracked in issue #167.
-- **Diagnostics are signals, not proofs.** They help you decide whether an
-  estimate is worth acting on; they do not certify it is correct.
+The target semantics are evidence-oriented states such as:
+
+- `estimate_supported`
+- `inconclusive`
+- `insufficient_evidence`
+- `unsupported`
+- `invalid_evaluation`
+
+Exact names are being finalized under #245.
+
+A positive evidence state means that the statistical/evidence contract passed
+under the declared validation envelope. It does **not** mean that deployment or
+an online experiment is safe, ethical, approved, reversible, sufficiently
+monitored, or commercially justified. Those decisions require information the
+core library does not possess.
+
+## Validation evidence required before strong claims
+
+No estimator/configuration becomes strongly validated from internal unit tests
+alone. The validation program requires multiple independent forms of evidence:
+
+1. formula and invariant tests;
+2. analytic known-ground-truth data-generating processes;
+3. randomized simulation stress tests;
+4. estimator-specific external/reference agreement where semantics genuinely
+   match (#281);
+5. empirical bias, RMSE, interval coverage, failure/abstention and
+   **false-reassurance** validation (#62);
+6. appropriate public logged-policy data where useful;
+7. retrospective offline-vs-online comparisons when available;
+8. independent human methodological review before an
+   `independently_validated` claim (#298).
+
+The public validation-lab work is tracked by #223.
+
+## Current non-claims
+
+- **No deployment recommendation.** Core statistical output is not a deployment
+  or experiment-approval decision.
+- **No guarantee from diagnostics.** ESS, overlap, Pareto-k, calibration and
+  sensitivity are evidence signals. Their thresholds must be empirically
+  validated; they are not proofs of correctness.
+- **No rescue for no-overlap logs.** If the target policy takes actions outside
+  logging support, counterfactual evidence is absent.
+- **No general sequential / RL claim.** State transitions and long horizons are
+  out of scope.
+- **No general adaptive-logging claim.** Time-aware splits and block bootstrap
+  do not by themselves validate inference under arbitrary adaptive behavior
+  policies.
+- **No validated estimated-propensity path yet.** The first validated envelope
+  requires logged propensities.
+- **No production healthcare-treatment claim.** Clinical/treatment examples, if
+  retained, are educational/experimental and must not be presented as a
+  validated production workflow.
+- **No validated general LLM/agent-routing claim yet.** Variable action sets,
+  changing model catalogues, multi-objective rewards and missing exploration can
+  violate the initial envelope. Agent/model-routing examples remain experimental
+  unless they satisfy the same validated contract.
+- **Offline evaluation does not replace online validation.** Even supported
+  offline evidence is not proof that a policy will win online.
+
+## Known pre-validation correctness work
+
+The audit identified material issues that affect historical result semantics,
+including the multi-action DR/SNDR outcome representation (#58) and rows without
+genuine OOF nuisance predictions (#280).
+
+When corrected releases are available, #300 requires explicit historical
+advisories describing affected configurations and which results should be rerun.
+The project will not minimize an estimand-affecting issue as a mere precision or
+bootstrap change.
+
+## Product principle
+
+The intended differentiator is not estimator count. It is making offline policy
+evidence difficult to misuse:
+
+> **Know when an offline policy estimate deserves to be believed — and get an
+> explicit refusal when the logs cannot support the question.**
+
+Until the validation gates and external review are complete, claims in README,
+PyPI metadata, examples and release notes should not exceed this page.
