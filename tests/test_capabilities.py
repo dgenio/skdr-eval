@@ -16,11 +16,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_documented_extras_are_declared_in_pyproject():
-    """#107: every 'pip install skdr-eval[<extra>]' in the README is a real extra.
-
-    Guards against doc/packaging drift such as the removed ``[choice]`` extra,
-    where the README advertised an install target that pip could not satisfy.
-    """
+    """#107: every 'pip install skdr-eval[<extra>]' in the README is a real extra."""
     readme = (_REPO_ROOT / "README.md").read_text(encoding="utf-8")
     pyproject = tomllib.loads(
         (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
@@ -43,7 +39,6 @@ def test_get_capabilities_schema():
     for key in ("viz", "speed"):
         assert key in caps
         assert isinstance(caps[key], bool)
-    # 'choice' is intentionally absent: scipy is a mandatory dep.
     assert "choice" not in caps
     assert "missing_extras" in caps
     assert isinstance(caps["missing_extras"], list)
@@ -96,29 +91,21 @@ def test_find_spec_value_error_treated_as_missing(monkeypatch):
 
 
 class TestCapabilityMatrix:
-    """#215: the full optional-dependency capability matrix."""
+    """The matrix lists implemented runtime features, not compatibility stubs."""
 
-    def test_matrix_covers_every_declared_extra(self):
+    def test_matrix_covers_implemented_feature_extras(self):
         pyproject = tomllib.loads(
             (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         )
         declared = set(pyproject["project"]["optional-dependencies"])
-        # The matrix intentionally omits dev-only / docs / notebooks extras,
-        # but must cover every *runtime feature* extra.
-        feature_extras = {
-            "viz",
-            "speed",
-            "cli",
-            "boosting",
-            "mlflow",
-            "wandb",
-            "aim",
-        }
-        assert feature_extras <= declared, (
-            "matrix references extras not declared in pyproject.toml"
-        )
+        implemented_feature_extras = {"viz", "speed", "cli", "boosting"}
+        assert implemented_feature_extras <= declared
         matrix = skdr_eval.get_capability_matrix()
-        assert {c.extra for c in matrix} == feature_extras
+        assert {c.extra for c in matrix} == implemented_feature_extras
+
+    def test_retired_tracker_stubs_are_not_advertised_as_capabilities(self):
+        extras = {c.extra for c in skdr_eval.get_capability_matrix()}
+        assert extras.isdisjoint({"mlflow", "wandb", "aim"})
 
     def test_matrix_entries_are_well_formed(self):
         for cap in skdr_eval.get_capability_matrix():
@@ -129,7 +116,6 @@ class TestCapabilityMatrix:
             assert cap.to_dict()["extra"] == cap.extra
 
     def test_installed_reflects_module_presence(self, monkeypatch):
-        # Simulate an environment where only matplotlib (viz) is importable.
         def only_matplotlib(name):
             class _Spec:
                 pass
@@ -139,7 +125,5 @@ class TestCapabilityMatrix:
         monkeypatch.setattr(cap_module.importlib.util, "find_spec", only_matplotlib)
         by_extra = {c.extra: c for c in cap_module.get_capability_matrix()}
         assert by_extra["viz"].installed is True
-        # boosting needs all three of xgboost/lightgbm/catboost → absent.
         assert by_extra["boosting"].installed is False
-        # speed needs pyarrow AND polars → absent.
         assert by_extra["speed"].installed is False
