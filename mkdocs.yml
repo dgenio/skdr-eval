@@ -107,6 +107,7 @@ nav:
       - Write your own estimator: extending/add-an-estimator.md
   - Project:
       - Evidence-first v1 strategy: strategy/evidence-first-v1.md
+      - Validation report template: validation-report-template.md
       - Design-partner validation: research/design-partner-guide.md
       - External methodological review: research/external-methodological-review.md
       - Launch readiness checklist: LAUNCH_CHECKLIST.md
