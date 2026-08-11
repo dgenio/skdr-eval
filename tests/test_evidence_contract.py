@@ -38,6 +38,11 @@ def test_registry_is_immutable() -> None:
 def test_unknown_estimator_record_fails_closed() -> None:
     with pytest.raises(DataValidationError, match="Unknown estimator"):
         get_estimator_validation("made-up")
+    assert not can_support_estimate(
+        "made-up",
+        {"overlap": "pass"},
+        inside_validation_envelope=True,
+    )
 
 
 def test_evidence_status_contains_no_deployment_authorization() -> None:
@@ -80,47 +85,46 @@ def test_malformed_diagnostic_state_does_not_pass() -> None:
     assert not required_diagnostics_support_evidence({"ess": "probably-fine"})
 
 
-def test_validation_pending_estimator_cannot_support_estimate() -> None:
-    assert not can_support_estimate(
-        get_estimator_validation("DR"),
-        {"overlap": "pass"},
-        inside_validation_envelope=True,
-    )
+def test_all_initial_registry_estimators_fail_positive_evidence_gate() -> None:
+    # No implementation is validated at the start of the evidence-first reset.
+    for name in ESTIMATOR_VALIDATION_REGISTRY:
+        assert not can_support_estimate(
+            name,
+            {"overlap": "pass", "ess": "pass"},
+            inside_validation_envelope=True,
+        )
 
 
-def test_validated_implementation_is_necessary_but_not_sufficient() -> None:
-    validated = EstimatorValidationRecord(
-        name="DR-test",
+def test_caller_created_validated_record_cannot_bypass_registry() -> None:
+    fake = EstimatorValidationRecord(
+        name="DR",
         maturity=EstimatorMaturity.REFERENCE_VALIDATED,
-        estimand="test estimand",
-        validation_report_id="validation-001",
+        estimand="fake runtime promotion",
+        validation_report_id="not-a-project-validation-report",
     )
+    assert fake.validated_for_positive_evidence is True
 
-    assert can_support_estimate(
-        validated,
+    # can_support_estimate accepts a canonical registry name, not an arbitrary
+    # record. Passing the record anyway at runtime must fail closed rather than
+    # treating caller-supplied maturity as authoritative.
+    assert not can_support_estimate(  # type: ignore[arg-type]
+        fake,
         {"overlap": "pass", "ess": "pass"},
         inside_validation_envelope=True,
     )
+
+
+def test_validation_envelope_and_diagnostics_remain_separate_gates() -> None:
+    # This remains false today because DR is validation_pending; the assertions
+    # still protect the other gates so a future registry promotion cannot make
+    # UNKNOWN diagnostics or out-of-envelope runs positive by accident.
     assert not can_support_estimate(
-        validated,
+        "DR",
         {"overlap": "unknown", "ess": "pass"},
         inside_validation_envelope=True,
     )
     assert not can_support_estimate(
-        validated,
+        "DR",
         {"overlap": "pass", "ess": "pass"},
         inside_validation_envelope=False,
-    )
-
-
-def test_deprecated_estimator_never_qualifies_for_positive_evidence() -> None:
-    deprecated = EstimatorValidationRecord(
-        name="old",
-        maturity=EstimatorMaturity.DEPRECATED,
-        estimand="old estimand",
-    )
-    assert not can_support_estimate(
-        deprecated,
-        {"overlap": "pass"},
-        inside_validation_envelope=True,
     )
