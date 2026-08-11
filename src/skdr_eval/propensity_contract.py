@@ -12,7 +12,7 @@ Estimated behavior propensities remain a separate, validation-pending workflow.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 
@@ -26,21 +26,6 @@ class LoggedActionPropensity:
     Construction itself is fail-closed: callers cannot bypass validation by
     instantiating this dataclass directly instead of using
     :func:`validate_logged_action_propensity`.
-
-    Parameters
-    ----------
-    values:
-        Probability assigned by the behavior/logging policy to the action that
-        was actually taken on each row. Shape ``(n_rows,)`` with values in
-        ``(0, 1]``.
-    source:
-        Provenance category. Only ``"logged"`` is accepted by this class. An
-        estimated propensity needs a separate contract and validation status.
-    field_name:
-        Optional column/input identifier such as ``"propensity"``. This is
-        metadata only; raw data are not stored here.
-    policy_id:
-        Optional safe identifier for the logging-policy version/configuration.
     """
 
     values: np.ndarray
@@ -92,7 +77,6 @@ class LoggedActionPropensity:
             if not policy_id:
                 raise DataValidationError("policy_id must be non-empty when supplied")
 
-        # Copy so caller mutation cannot alter an already-validated contract.
         stable = arr.copy()
         stable.setflags(write=False)
         object.__setattr__(self, "values", stable)
@@ -105,7 +89,7 @@ class LoggedActionPropensity:
 
 
 def validate_logged_action_propensity(
-    values: np.ndarray,
+    values: Any,
     *,
     n_rows: int | None = None,
     field_name: str | None = None,
@@ -123,8 +107,11 @@ def validate_logged_action_propensity(
             f"n_rows must be a non-negative integer or None; got {n_rows!r}"
         )
 
+    # Let the self-validating value object perform numeric coercion so malformed
+    # ragged/non-numeric inputs always surface as DataValidationError rather
+    # than leaking a raw numpy ValueError from this convenience wrapper.
     result = LoggedActionPropensity(
-        values=np.asarray(values),
+        values=values,
         field_name=field_name,
         policy_id=policy_id,
     )
@@ -137,18 +124,18 @@ def validate_logged_action_propensity(
 
 
 def observed_importance_ratio(
-    target_action_probability: np.ndarray,
+    target_action_probability: Any,
     behavior: LoggedActionPropensity,
 ) -> np.ndarray:
-    """Compute the unclipped observed-action ratio ``pi(A|x) / e(A|x)``.
+    """Compute the unclipped observed-action ratio ``pi(A|x) / e(A|x)``."""
 
-    This small helper makes the validated quantity explicit without requiring a
-    dense behavior-policy matrix. Target probabilities are still validated at
-    the policy boundary (#279); here we only enforce row alignment and finite
-    ``[0, 1]`` values defensively.
-    """
+    try:
+        target = np.asarray(target_action_probability, dtype=np.float64)
+    except (TypeError, ValueError) as exc:
+        raise DataValidationError(
+            "target observed-action probabilities must be numeric"
+        ) from exc
 
-    target = np.asarray(target_action_probability, dtype=np.float64)
     if target.shape != behavior.values.shape:
         raise DataValidationError(
             "target observed-action probabilities and logged behavior "
