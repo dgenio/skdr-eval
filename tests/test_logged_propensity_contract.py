@@ -71,6 +71,13 @@ def test_non_finite_values_fail_closed(bad: float) -> None:
         validate_logged_action_propensity(np.array([0.5, bad]))
 
 
+def test_malformed_or_non_numeric_propensity_is_data_validation_error() -> None:
+    with pytest.raises(DataValidationError, match="numeric"):
+        validate_logged_action_propensity([[0.5], [0.2, 0.8]])
+    with pytest.raises(DataValidationError, match="numeric"):
+        validate_logged_action_propensity([0.5, "not-a-number"])
+
+
 def test_dense_matrix_is_rejected_instead_of_reinterpreted() -> None:
     with pytest.raises(DataValidationError, match="one-dimensional"):
         validate_logged_action_propensity(np.array([[0.4, 0.6], [0.7, 0.3]]))
@@ -99,6 +106,12 @@ def test_importance_ratio_requires_row_alignment() -> None:
     behavior = validate_logged_action_propensity(np.array([0.5, 0.5]))
     with pytest.raises(DataValidationError, match="identical shape"):
         observed_importance_ratio(np.array([0.5]), behavior)
+
+
+def test_importance_ratio_normalizes_non_numeric_errors() -> None:
+    behavior = validate_logged_action_propensity(np.array([0.5, 0.5]))
+    with pytest.raises(DataValidationError, match="numeric"):
+        observed_importance_ratio(["bad", "input"], behavior)
 
 
 @pytest.mark.parametrize(
