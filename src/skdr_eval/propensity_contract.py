@@ -23,6 +23,10 @@ from .exceptions import DataValidationError
 class LoggedActionPropensity:
     """Validated logged probability of the observed action.
 
+    Construction itself is fail-closed: callers cannot bypass validation by
+    instantiating this dataclass directly instead of using
+    :func:`validate_logged_action_propensity`.
+
     Parameters
     ----------
     values:
@@ -30,8 +34,8 @@ class LoggedActionPropensity:
         was actually taken on each row. Shape ``(n_rows,)`` with values in
         ``(0, 1]``.
     source:
-        Provenance category. ``"logged"`` means captured at decision time and
-        is the only source eligible for the initial validated-v1 path.
+        Provenance category. Only ``"logged"`` is accepted by this class. An
+        estimated propensity needs a separate contract and validation status.
     field_name:
         Optional column/input identifier such as ``"propensity"``. This is
         metadata only; raw data are not stored here.
@@ -43,6 +47,57 @@ class LoggedActionPropensity:
     source: Literal["logged"] = "logged"
     field_name: str | None = None
     policy_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.source != "logged":
+            raise DataValidationError(
+                "LoggedActionPropensity.source must be exactly 'logged'; "
+                "estimated propensities require a separate contract"
+            )
+
+        try:
+            arr = np.asarray(self.values, dtype=np.float64)
+        except (TypeError, ValueError) as exc:
+            raise DataValidationError(
+                "logged action propensity must be numeric"
+            ) from exc
+
+        if arr.ndim != 1:
+            raise DataValidationError(
+                "logged action propensity must be a one-dimensional vector with "
+                f"one value per decision; got shape {arr.shape}"
+            )
+        if not np.all(np.isfinite(arr)):
+            bad = int(np.flatnonzero(~np.isfinite(arr))[0])
+            raise DataValidationError(
+                "logged action propensity must contain only finite values; "
+                f"first invalid row is {bad}"
+            )
+        invalid = np.flatnonzero((arr <= 0.0) | (arr > 1.0))
+        if invalid.size:
+            row = int(invalid[0])
+            raise DataValidationError(
+                "logged action propensity must lie in (0, 1] for every evaluated "
+                f"decision; row {row} has {float(arr[row])}"
+            )
+
+        field_name = self.field_name
+        policy_id = self.policy_id
+        if field_name is not None:
+            field_name = str(field_name).strip()
+            if not field_name:
+                raise DataValidationError("field_name must be non-empty when supplied")
+        if policy_id is not None:
+            policy_id = str(policy_id).strip()
+            if not policy_id:
+                raise DataValidationError("policy_id must be non-empty when supplied")
+
+        # Copy so caller mutation cannot alter an already-validated contract.
+        stable = arr.copy()
+        stable.setflags(write=False)
+        object.__setattr__(self, "values", stable)
+        object.__setattr__(self, "field_name", field_name)
+        object.__setattr__(self, "policy_id", policy_id)
 
     @property
     def n_rows(self) -> int:
@@ -61,29 +116,6 @@ def validate_logged_action_propensity(
     This function performs **no clipping, filling, smoothing, estimation, or
     renormalization**. Missing or invalid behavior probabilities are a data
     contract failure for the validated path.
-
-    Parameters
-    ----------
-    values:
-        One probability per evaluated decision: ``P_behavior(A_i | X_i)``.
-    n_rows:
-        Optional expected row count. When supplied, shape must be exactly
-        ``(n_rows,)``.
-    field_name:
-        Optional source column/input name for provenance.
-    policy_id:
-        Optional safe logging-policy version identifier.
-
-    Returns
-    -------
-    LoggedActionPropensity
-        Immutable validated propensity object.
-
-    Raises
-    ------
-    DataValidationError
-        If dimensionality, row count, finiteness, missingness, or probability
-        bounds violate the logged-propensity contract.
     """
 
     if n_rows is not None and (not isinstance(n_rows, int) or n_rows < 0):
@@ -91,45 +123,17 @@ def validate_logged_action_propensity(
             f"n_rows must be a non-negative integer or None; got {n_rows!r}"
         )
 
-    arr = np.asarray(values, dtype=np.float64)
-    if arr.ndim != 1:
-        raise DataValidationError(
-            "logged action propensity must be a one-dimensional vector with "
-            f"one value per decision; got shape {arr.shape}"
-        )
-    if n_rows is not None and arr.shape != (n_rows,):
-        raise DataValidationError(
-            f"logged action propensity must have shape ({n_rows},); got {arr.shape}"
-        )
-
-    if not np.all(np.isfinite(arr)):
-        bad = int(np.flatnonzero(~np.isfinite(arr))[0])
-        raise DataValidationError(
-            "logged action propensity must contain only finite values; "
-            f"first invalid row is {bad}"
-        )
-
-    invalid = np.flatnonzero((arr <= 0.0) | (arr > 1.0))
-    if invalid.size:
-        row = int(invalid[0])
-        raise DataValidationError(
-            "logged action propensity must lie in (0, 1] for every evaluated "
-            f"decision; row {row} has {float(arr[row])}"
-        )
-
-    if field_name is not None and not str(field_name).strip():
-        raise DataValidationError("field_name must be non-empty when supplied")
-    if policy_id is not None and not str(policy_id).strip():
-        raise DataValidationError("policy_id must be non-empty when supplied")
-
-    # Copy so caller mutation cannot change an already-validated contract.
-    stable = arr.copy()
-    stable.setflags(write=False)
-    return LoggedActionPropensity(
-        values=stable,
-        field_name=None if field_name is None else str(field_name),
-        policy_id=None if policy_id is None else str(policy_id),
+    result = LoggedActionPropensity(
+        values=np.asarray(values),
+        field_name=field_name,
+        policy_id=policy_id,
     )
+    if n_rows is not None and result.values.shape != (n_rows,):
+        raise DataValidationError(
+            f"logged action propensity must have shape ({n_rows},); "
+            f"got {result.values.shape}"
+        )
+    return result
 
 
 def observed_importance_ratio(
