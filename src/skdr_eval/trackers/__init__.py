@@ -2,22 +2,22 @@
 
 The :class:`Tracker` protocol defines the minimum surface
 (``log_metric`` / ``log_artifact`` / ``log_card`` / ``set_tag`` plus context
-management) that evaluators use to push results to disk or an external
-experiment tracker. The core ships:
+management) that evaluators use to push results to disk or another destination.
+The supported built-ins are intentionally small:
 
 - :class:`NullTracker` — no-op default; used when ``tracker=None``.
 - :class:`FileTracker` — writes JSONL metrics and artifact files to a run
   directory.
 
-External adapters (MLflow / W&B / Aim) live in this package as separate
-modules gated behind their own optional extras (``[mlflow]``, ``[wandb]``,
-``[aim]``). They currently raise :class:`NotImplementedError` on
-construction — the umbrella issue #73 tracks each adapter's full
-implementation as a follow-up PR.
+Historical MLflow / W&B / Aim modules were published as placeholders before
+working integrations existed. They are **not supported capabilities** and are
+being retired under issue #217. Their direct-import names remain only as bounded
+deprecation shims; new code should use the built-ins or implement this protocol
+locally rather than relying on those placeholders.
 
-This module has zero new mandatory dependencies. The ``FileTracker`` uses
-only the standard library and the existing ``pyyaml`` dep already shipped
-in core.
+This module has zero new mandatory dependencies. The ``FileTracker`` uses only
+the standard library and the existing ``pyyaml`` dependency already shipped in
+core.
 """
 
 from __future__ import annotations
@@ -38,12 +38,12 @@ logger = logging.getLogger("skdr_eval")
 
 @runtime_checkable
 class Tracker(Protocol):
-    """Minimum surface for experiment trackers used by ``evaluate_*_models``.
+    """Minimum surface for trackers used by ``evaluate_*_models``.
 
     Implementations must be safe to use as context managers. The
-    :class:`NullTracker` and :class:`FileTracker` ship in core; external
-    adapters (MLflow / W&B / Aim) live in sibling modules behind optional
-    extras.
+    :class:`NullTracker` and :class:`FileTracker` ship in core. Applications
+    that need another destination can implement this small protocol without
+    requiring a skdr-eval-maintained third-party adapter.
     """
 
     def log_metric(self, name: str, value: float, step: int | None = None) -> None: ...

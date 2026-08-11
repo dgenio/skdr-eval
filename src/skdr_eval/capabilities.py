@@ -1,14 +1,19 @@
 """Runtime capability detection for skdr-eval optional extras.
 
 Provides a side-effect-free way to discover which optional dependency
-groups (``[viz]``, ``[speed]``) are installed, so callers and CI smoke
-checks can short-circuit gracefully when a feature requires an extra
-that was not installed.
+groups are installed, so callers and CI smoke checks can short-circuit
+gracefully when a feature requires an extra that was not installed.
 
-The set of detected capabilities tracks the *truly* optional extras in
-``pyproject.toml``: ``viz`` (``matplotlib``) and ``speed`` (``pyarrow``
-+ ``polars``). ``scipy`` is a mandatory dependency, so condlogit
-propensity estimation is always available and is not listed here.
+Only **working, user-facing capabilities** are reported here. Historical
+MLflow / W&B / Aim extras were published before real tracker adapters existed;
+those placeholders are intentionally not advertised as capabilities. Their
+importable compatibility shims are deprecated separately under issue #217.
+
+The set of detected capabilities tracks the optional features that currently
+have working public implementations: ``viz`` (``matplotlib``), ``speed``
+(``pyarrow`` + ``polars``), ``cli`` and ``boosting``. ``scipy`` is a mandatory
+dependency, so conditional-logit propensity estimation is always available and
+is not listed here.
 """
 
 from __future__ import annotations
@@ -30,18 +35,18 @@ _EXTRA_BY_CAPABILITY = {
     "speed": "speed",
 }
 
-# Full capability matrix (#215): every optional ``[extra]`` declared in
-# ``pyproject.toml``, the modules that enable it, and the user-facing feature it
-# unlocks. ``scipy`` is a mandatory dependency (conditional-logit propensities
-# are always available), so it is intentionally absent here.
+# Full capability matrix (#215): every currently supported optional user-facing
+# feature, the modules that enable it, and the behavior it unlocks.
+#
+# Historical ``mlflow`` / ``wandb`` / ``aim`` package extras are deliberately
+# absent. They never had working adapters and are being retired under #217; a
+# package being importable must not make ``skdr-eval capabilities`` claim that
+# an integration exists.
 _EXTRA_MODULES: dict[str, tuple[str, ...]] = {
     "viz": ("matplotlib",),
     "speed": ("pyarrow", "polars"),
     "cli": ("typer", "joblib", "pyarrow"),
     "boosting": ("xgboost", "lightgbm", "catboost"),
-    "mlflow": ("mlflow",),
-    "wandb": ("wandb",),
-    "aim": ("aim",),
 }
 
 _EXTRA_FEATURES: dict[str, str] = {
@@ -49,9 +54,6 @@ _EXTRA_FEATURES: dict[str, str] = {
     "speed": "Accelerated parquet/feather I/O via pyarrow + polars.",
     "cli": "The 'skdr-eval' command-line interface.",
     "boosting": "XGBoost / LightGBM / CatBoost model adapters.",
-    "mlflow": "MLflow experiment-tracker integration.",
-    "wandb": "Weights & Biases experiment-tracker integration.",
-    "aim": "Aim experiment-tracker integration.",
 }
 
 
@@ -92,13 +94,16 @@ def _module_available(name: str) -> bool:
 
 
 def get_capability_matrix() -> list[Capability]:
-    """Return the full optional-dependency capability matrix (#215).
+    """Return the working optional-dependency capability matrix (#215).
 
-    Unlike :func:`get_capabilities` (which reports only the *truly optional*
-    feature toggles ``viz`` / ``speed``), this covers every pip extra declared
-    in ``pyproject.toml`` — including ``cli``, ``boosting`` and the experiment
-    trackers — so ``doctor`` and the ``skdr-eval capabilities`` command can show
-    users which features are available and how to unlock the rest.
+    Unlike :func:`get_capabilities` (which reports only the lightweight
+    ``viz`` / ``speed`` feature toggles), this also covers the working ``cli``
+    and ``boosting`` extras so ``doctor`` and ``skdr-eval capabilities`` can
+    show users which implemented features are available.
+
+    Deprecated placeholder tracker extras are intentionally excluded: the
+    capability command describes functionality that actually exists, not every
+    historical extra name still accepted during a deprecation window.
 
     Detection is import-light: it only probes :func:`importlib.util.find_spec`
     and never imports the heavy extras themselves.
@@ -106,7 +111,7 @@ def get_capability_matrix() -> list[Capability]:
     Returns
     -------
     list[Capability]
-        One :class:`Capability` per extra, ordered as declared in
+        One :class:`Capability` per supported extra, ordered as declared in
         :data:`_EXTRA_MODULES`.
     """
     matrix: list[Capability] = []
@@ -125,7 +130,7 @@ def get_capability_matrix() -> list[Capability]:
 
 
 def get_capabilities() -> dict[str, bool | list[str]]:
-    """Return the set of optional capabilities available in this environment.
+    """Return the lightweight optional capabilities available in this environment.
 
     The returned dict is suitable for preflight checks: a missing capability
     means the matching ``pip install 'skdr-eval[<extra>]'`` invocation will

@@ -117,7 +117,7 @@ class TestFileTracker:
         artifact = _build_artifact()
         card = artifact.card_schema("HGB", estimator="DR")
         tracker.log_card(card)
-        out = root / "cards" / "HGB_DR.card.yaml"
+        out = root / "cards" / f"{card.model_name}_{card.headline.estimator}.card.yaml"
         assert out.is_file()
         # Round-trip the YAML to ensure the card was written correctly.
         loaded = skdr_eval.EvaluationCard.from_yaml(out)
@@ -215,18 +215,24 @@ class TestEvaluatorTrackerWiring:
         assert (root / "metrics.jsonl").is_file()
 
 
-class TestTrackerStubs:
-    def test_mlflow_stub_raises_on_construct(self):
-        with pytest.raises(NotImplementedError, match=r"mlflow"):
-            MLflowTracker()
-
-    def test_wandb_stub_raises_on_construct(self):
-        with pytest.raises(NotImplementedError, match=r"wandb"):
-            WandbTracker()
-
-    def test_aim_stub_raises_on_construct(self):
-        with pytest.raises(NotImplementedError, match=r"aim"):
-            AimTracker()
+class TestDeprecatedTrackerPlaceholders:
+    @pytest.mark.parametrize(
+        ("tracker_cls", "package"),
+        [
+            (MLflowTracker, "mlflow"),
+            (WandbTracker, "wandb"),
+            (AimTracker, "aim"),
+        ],
+    )
+    def test_placeholder_is_explicitly_deprecated_and_unusable(
+        self, tracker_cls, package
+    ):
+        with pytest.warns(DeprecationWarning, match="deprecated compatibility"):
+            with pytest.raises(
+                NotImplementedError,
+                match=rf"does not provide a working {package} tracker integration",
+            ):
+                tracker_cls()
 
 
 class TestFileTrackerEdgeCases:
