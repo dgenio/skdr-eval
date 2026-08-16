@@ -130,6 +130,7 @@ def validate_action_distribution(
                 "eligible_actions must have the same shape as policy probabilities"
             )
         if elig.dtype != np.bool_:
+            # Accept clean 0/1 masks, but reject arbitrary truthy numeric values.
             if not np.all(np.isin(elig, [0, 1])):
                 raise DataValidationError(
                     "eligible_actions must be boolean or contain only 0/1 values"
@@ -142,6 +143,8 @@ def validate_action_distribution(
                 "target policy assigns non-zero probability to an ineligible action"
             )
 
+    # Avoid propagating harmless negative signed-zero / tiny round-off values
+    # without silently correcting genuinely invalid rows (caught above).
     result = probs.copy()
     result[np.abs(result) <= atol] = 0.0
     return result
@@ -149,7 +152,14 @@ def validate_action_distribution(
 
 @dataclass(frozen=True)
 class ExplicitPolicy:
-    """An explicit target policy backed by a fixed probability matrix."""
+    """An explicit target policy backed by a fixed probability matrix.
+
+    This class is primarily useful when candidate action probabilities have
+    already been computed by another model/service. It binds the probability
+    columns to an explicit action vocabulary so action reordering cannot be
+    silently accepted. The stored probability matrix is copied and marked
+    read-only so policy state cannot change after construction.
+    """
 
     probabilities: np.ndarray
     actions: tuple[str, ...]
@@ -197,7 +207,12 @@ def resolve_action_distribution(
     actions: list[str] | tuple[str, ...],
     eligible_actions: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Resolve a Policy object or explicit matrix through one validation seam."""
+    """Resolve a Policy object or explicit matrix through one validation seam.
+
+    Future native/reference evaluators should call this helper rather than
+    interpreting model scores independently. Passing a raw matrix is supported
+    as a convenience but receives the same validation as a ``Policy`` object.
+    """
     n_rows = _n_rows(contexts)
     if isinstance(policy, np.ndarray):
         return validate_action_distribution(
