@@ -24,6 +24,8 @@ import numpy as np
 from .exceptions import DataValidationError
 from .policy import validate_action_distribution
 
+_ACTION_VALUE_NDIM = 2
+
 
 @dataclass(frozen=True)
 class ActionValueTerms:
@@ -69,6 +71,11 @@ def compute_action_value_terms(
     This helper deliberately rejects one-dimensional outcome predictions. The
     corrected kernel must construct action-specific ``q_hat(x,a)`` explicitly
     rather than relying on numpy broadcasting.
+
+    Returned arrays are independent copies with NumPy's write flag disabled to
+    guard against accidental mutation. This is not a hard immutability or
+    security boundary: a caller holding an array can deliberately re-enable its
+    write flag.
     """
 
     action_tuple = tuple(actions)
@@ -80,7 +87,7 @@ def compute_action_value_terms(
     except (TypeError, ValueError) as exc:
         raise DataValidationError("q_by_action must be numeric") from exc
 
-    if q.ndim != 2:
+    if q.ndim != _ACTION_VALUE_NDIM:
         raise DataValidationError(
             "q_by_action must be a 2D (n_rows, n_actions) matrix; a 1-D q_hat "
             "cannot define q_pi for a multi-action validated evaluation"
@@ -135,7 +142,7 @@ def compute_action_value_terms(
             )
 
     q_obs = q[np.arange(n_rows), action_idx]
-    q_pi = np.sum(pi * q, axis=1)
+    q_pi = np.einsum("ij,ij->i", pi, q)
 
     q_stable = q.copy()
     q_obs_stable = q_obs.copy()
