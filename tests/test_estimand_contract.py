@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from skdr_eval.estimand import compute_action_value_terms
 from skdr_eval.exceptions import DataValidationError
+from skdr_eval.estimand import compute_action_value_terms
 
 
 ACTIONS = ("left", "right")
