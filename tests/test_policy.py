@@ -5,13 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from skdr_eval.exceptions import DataValidationError
 from skdr_eval.policy import (
     ExplicitPolicy,
     Policy,
     resolve_action_distribution,
     validate_action_distribution,
 )
+from skdr_eval.exceptions import DataValidationError
 
 
 ACTIONS = ("a", "b", "c")
