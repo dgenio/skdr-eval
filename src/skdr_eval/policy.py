@@ -18,6 +18,8 @@ import numpy as np
 
 from .exceptions import DataValidationError
 
+_POLICY_PROBABILITY_NDIM = 2
+
 
 @runtime_checkable
 class Policy(Protocol):
@@ -93,7 +95,7 @@ def validate_action_distribution(
     except (TypeError, ValueError) as exc:
         raise DataValidationError("policy probabilities must be numeric") from exc
 
-    if probs.ndim != 2:
+    if probs.ndim != _POLICY_PROBABILITY_NDIM:
         raise DataValidationError(
             "policy probabilities must be a 2D (n_rows, n_actions) matrix"
         )

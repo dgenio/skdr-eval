@@ -227,12 +227,14 @@ class TestDeprecatedTrackerPlaceholders:
     def test_placeholder_is_explicitly_deprecated_and_unusable(
         self, tracker_cls, package
     ):
-        with pytest.warns(DeprecationWarning, match="deprecated compatibility"):
-            with pytest.raises(
+        with (
+            pytest.warns(DeprecationWarning, match="deprecated compatibility"),
+            pytest.raises(
                 NotImplementedError,
                 match=rf"does not provide a working {package} tracker integration",
-            ):
-                tracker_cls()
+            ),
+        ):
+            tracker_cls()
 
 
 class TestFileTrackerEdgeCases:
