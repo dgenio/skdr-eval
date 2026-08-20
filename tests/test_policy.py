@@ -5,13 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from skdr_eval.exceptions import DataValidationError
 from skdr_eval.policy import (
     ExplicitPolicy,
     Policy,
     resolve_action_distribution,
     validate_action_distribution,
 )
+from skdr_eval.exceptions import DataValidationError
 
 
 ACTIONS = ("a", "b", "c")
@@ -31,8 +31,6 @@ def test_explicit_policy_probability_state_is_read_only():
     source = np.array([[0.2, 0.8]])
     policy = ExplicitPolicy(source, actions=("control", "candidate"))
 
-    # Construction copies the caller's array, so mutating the source cannot
-    # change the policy that was bound to this action vocabulary.
     source[0, 0] = 1.0
     np.testing.assert_allclose(policy.probabilities, [[0.2, 0.8]])
     assert policy.probabilities.flags.writeable is False
@@ -40,8 +38,6 @@ def test_explicit_policy_probability_state_is_read_only():
     with pytest.raises(ValueError):
         policy.probabilities[0, 0] = 1.0
 
-    # Resolved output is a fresh validated copy; callers may manipulate their
-    # local result without mutating the immutable policy state.
     resolved = policy.action_distribution(
         np.zeros((1, 1)), actions=("control", "candidate")
     )
