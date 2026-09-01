@@ -6,6 +6,6 @@
 #
 # Keep these in sync with the `dependencies` lower bounds in pyproject.toml.
 numpy==1.24.0
-pandas==2.0.0
+pandas==2.3.3
 scipy==1.10.0
 scikit-learn==1.2.0
